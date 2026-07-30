@@ -248,10 +248,10 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                   {msg.result.evidence_sources?.length > 0 && (
                     <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f0f0f0' }}>
                       <p style={{ fontSize: 11, color: '#888', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        Source Evidence
+                        Source Evidence ({msg.result.evidence_sources.length} chunks)
                       </p>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {msg.result.evidence_sources.slice(0, 4).map((ev, si) => {
+                        {msg.result.evidence_sources.map((ev, si) => {
                           const isExpanded = expandedEvidence === si;
                           const fullContent = ev.content || '';
                           return (
@@ -263,10 +263,17 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                                   padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: 8,
                                 }}
                               >
-                                <span style={{ fontSize: 12, color: '#334155', fontWeight: 600 }}>
-                                  [{ev.company || 'Company'}] {ev.table_name || 'Source chunk'}
-                                </span>
-                                <span style={{ fontSize: 11, color: '#6366f1' }}>{isExpanded ? 'Collapse' : 'View content'}</span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                  <span style={{ fontSize: 12, color: '#334155', fontWeight: 600 }}>
+                                    [{ev.company || 'Company'}] {ev.table_name || 'Source chunk'}
+                                  </span>
+                                  {ev.sub_question && (
+                                    <span style={{ fontSize: 10, color: '#6366f1', fontFamily: 'monospace' }}>
+                                      ↳ 檢索子問題: {ev.sub_question}
+                                    </span>
+                                  )}
+                                </div>
+                                <span style={{ fontSize: 11, color: '#6366f1', flexShrink: 0 }}>{isExpanded ? 'Collapse' : 'View content'}</span>
                               </button>
                               {isExpanded && (
                                 <div style={{ padding: '0 12px 12px', fontSize: 12, lineHeight: 1.65, color: '#475569', whiteSpace: 'pre-wrap' }}>
