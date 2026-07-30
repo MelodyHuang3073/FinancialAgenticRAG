@@ -35,7 +35,8 @@ class FinAgentRAGOrchestrator:
 
     def process_query(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
         trace_steps = []
-        evidence_buffer: List[Dict[str, Any]] = []
+        evidence_buffer: List[Dict[str, Any]] = []  # full evidence objects
+        evidence_meta: List[Dict[str, Any]] = []    # per-item sub_question metadata
         retrieved_ids = set()
 
         # ── Step 1: FinanceBench Classification ──
@@ -129,9 +130,11 @@ class FinAgentRAGOrchestrator:
                                 "relevance_score": hit.get("relevance_score", 0.0),
                                 "snippet": hit.get("content", "")[:120] + "...",
                                 "sub_question": step_query,
+                                "content": hit.get("content", ""),
                             }
                             iter_trace["retrieved_passages"].append(info)
                             step_hit_infos.append(info)
+                            evidence_meta.append(info)
 
                         # Record each retrieval step in the trace
                         metric = sub_q.get("target_metric", "")
@@ -160,14 +163,17 @@ class FinAgentRAGOrchestrator:
                             for hit in self._deduplicate_hits(hits):
                                 retrieved_ids.add(hit["id"])
                                 evidence_buffer.append(hit)
-                                iter_trace["retrieved_passages"].append({
+                                info = {
                                     "id": hit["id"],
                                     "table_name": hit.get("table_name", ""),
                                     "company": hit.get("company", ""),
                                     "period": hit.get("period", ""),
                                     "relevance_score": hit.get("relevance_score", 0.0),
                                     "snippet": hit.get("content", "")[:120] + "...",
-                                })
+                                    "content": hit.get("content", ""),
+                                }
+                                iter_trace["retrieved_passages"].append(info)
+                                evidence_meta.append(info)
 
                 else:
                     # ── Subsequent iterations: use refined query ──
@@ -180,14 +186,17 @@ class FinAgentRAGOrchestrator:
                     for hit in new_hits:
                         retrieved_ids.add(hit["id"])
                         evidence_buffer.append(hit)
-                        iter_trace["retrieved_passages"].append({
+                        info = {
                             "id": hit["id"],
                             "table_name": hit.get("table_name", ""),
                             "company": hit.get("company", ""),
                             "period": hit.get("period", ""),
                             "relevance_score": hit.get("relevance_score", 0.0),
                             "snippet": hit.get("content", "")[:120] + "...",
-                        })
+                            "content": hit.get("content", ""),
+                        }
+                        iter_trace["retrieved_passages"].append(info)
+                        evidence_meta.append(info)
 
                 # ── PoT Execution ──
                 context_window = evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:]
@@ -238,14 +247,17 @@ class FinAgentRAGOrchestrator:
             for hit in new_hits:
                 retrieved_ids.add(hit["id"])
                 evidence_buffer.append(hit)
-                iter_trace["retrieved_passages"].append({
+                info = {
                     "id": hit["id"],
                     "table_name": hit.get("table_name", ""),
                     "company": hit.get("company", ""),
                     "period": hit.get("period", ""),
                     "relevance_score": hit.get("relevance_score", 0.0),
-                    "snippet": hit.get("content", "")[:120] + "..."
-                })
+                    "snippet": hit.get("content", "")[:120] + "...",
+                    "content": hit.get("content", ""),
+                }
+                iter_trace["retrieved_passages"].append(info)
+                evidence_meta.append(info)
 
             pot_res = {
                 "code": "", "success": True, "result_value": None,
@@ -280,7 +292,19 @@ class FinAgentRAGOrchestrator:
             "verification": verification_res,
             "pot_code": pot_res.get("code") if pot_res else "",
             "sandbox_log": pot_res.get("output_log") if pot_res else "",
-            "evidence_sources": evidence_buffer[-5:],
+            # Return ALL evidence items (with sub_question tag) so the frontend
+            # can display every data point that contributed to the calculation
+            "evidence_sources": evidence_meta if evidence_meta else [
+                {
+                    "id": h.get("id", ""),
+                    "table_name": h.get("table_name", ""),
+                    "company": h.get("company", ""),
+                    "period": h.get("period", ""),
+                    "relevance_score": h.get("relevance_score", 0.0),
+                    "content": h.get("content", ""),
+                }
+                for h in evidence_buffer
+            ],
             "reasoning_steps": trace_steps,
             "execution_trace": trace_steps,
         }
