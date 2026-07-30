@@ -1,0 +1,77 @@
+[
+  {
+    "company": "台積電 (TSMC 2330)",
+    "period": "2023-2024 財務報告 (TWD Billion)",
+    "statements": [
+      {
+        "table_name": "綜合損益表 (Income Statement)",
+        "headers": ["項目 (Line Item)", "2023 年 (全年度)", "2024 年 (全年度)", "2024 Q3", "2024 Q4"],
+        "rows": [
+          ["營業收入 (Revenue)", "2,161.7", "2,894.3", "759.7", "860.2"],
+          ["營業成本 (Cost of Revenue)", "986.2", "1,241.6", "319.8", "352.7"],
+          ["營業毛利 (Gross Profit)", "1,175.5", "1,652.7", "439.9", "507.5"],
+          ["營業費用 (Operating Expenses)", "264.3", "341.2", "91.5", "102.4"],
+          ["其中: 研發費用 (R&D Expenses)", "182.1", "235.8", "62.4", "71.1"],
+          ["其中: 推銷與管理費用 (SG&A)", "82.2", "105.4", "29.1", "31.3"],
+          ["營業利益 (Operating Income)", "911.2", "1,311.5", "348.4", "405.1"],
+          ["稅前淨利 (Net Income Before Tax)", "978.5", "1,385.0", "367.2", "426.5"],
+          ["所得稅費用 (Income Tax)", "125.7", "182.5", "41.9", "54.8"],
+          ["本期淨利 (Net Income)", "852.8", "1,202.5", "325.3", "371.7"],
+          ["每股盈餘 (EPS in TWD)", "32.88", "46.36", "12.54", "14.33"]
+        ]
+      },
+      {
+        "table_name": "資產負債表 (Balance Sheet Highlights)",
+        "headers": ["項目 (Line Item)", "2023/12/31", "2024/12/31"],
+        "rows": [
+          ["現金及約當現金 (Cash & Equivalents)", "1,452.1", "1,892.4"],
+          ["總資產 (Total Assets)", "5,532.0", "6,410.8"],
+          ["流動負債 (Current Liabilities)", "1,085.3", "1,210.5"],
+          ["總負債 (Total Liabilities)", "2,102.4", "2,350.1"],
+          ["股東權益總額 (Total Equity)", "3,429.6", "4,060.7"]
+        ]
+      }
+    ],
+    "notes": [
+      {
+        "id": "tsmc_note_1",
+        "title": "經營討論與分析 (MD&A) - 2024 年毛利率分析",
+        "content": "台積電 2024 年全年營業毛利率達 57.1%，較 2023 年之 54.4% 提升 2.7 個百分點。提升主要得益於 3 奈米 (N3) 與 5 奈米 (N5) 先進製程產能利用率滿載，AI 晶片 (HPC) 強勁需求帶動產品組合優化，部分被 N3 製程初期量產的稀釋效應以及電費上漲成本所抵銷。"
+      },
+      {
+        "id": "tsmc_note_2",
+        "title": "研發與資本支出說明 (R&D & CapEx)",
+        "content": "2024 年研發費用達到新台幣 2,358 億元，較 2023 年成長 29.5%，佔營收比重約 8.15%。研發投入主要用於 2 奈米 (N2) GAA 技術開發、A16 製程以及 CoWoS / System-on-Wafer 擴產技術。全年資本支出 (CapEx) 約為新台幣 9,850 億元 (折合約 302 億美元)。"
+      }
+    ]
+  },
+  {
+    "company": "NVIDIA Corporation",
+    "period": "FY2024-FY2025 Financial Summary (USD Million)",
+    "statements": [
+      {
+        "table_name": "Consolidated Statements of Income",
+        "headers": ["Line Item", "FY2024", "FY2025"],
+        "rows": [
+          ["Total Revenue", "60,922", "125,984"],
+          ["Data Center Revenue", "47,525", "109,240"],
+          ["Gaming Revenue", "10,447", "11,850"],
+          ["Cost of Revenue", "16,427", "28,950"],
+          ["Gross Profit", "44,495", "97,034"],
+          ["Operating Expenses", "11,329", "16,420"],
+          ["Research & Development (R&D)", "8,675", "12,890"],
+          ["Operating Income", "33,166", "80,614"],
+          ["Net Income", "29,760", "72,880"],
+          ["Diluted EPS ($)", "1.19", "2.95"]
+        ]
+      }
+    ],
+    "notes": [
+      {
+        "id": "nvda_note_1",
+        "title": "Management Discussion - Data Center Growth",
+        "content": "NVIDIA FY2025 total revenue reached $125.98 Billion, a massive YoY increase of 106.8%. Driven primarily by the Data Center segment, which surged 129.8% YoY to $109.24 Billion, fueled by high demand for Hopper H100/H200 GPUs and Blackwell B200 architectures across cloud service providers and enterprise AI models."
+      }
+    ]
+  }
+]
