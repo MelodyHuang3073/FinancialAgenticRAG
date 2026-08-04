@@ -10,6 +10,8 @@ class FinancialVectorStoreManager:
         self.corpus: List[Dict[str, Any]] = []
         self.retriever: HybridFinancialRetriever = None
         self.uploaded_files: List[Dict[str, Any]] = []
+        # parent_id -> parent_content (≤1000 chars context)
+        self.parent_map: Dict[str, str] = {}
 
         if load_sample_data and sample_json_path and os.path.exists(sample_json_path):
             self.load_from_json(sample_json_path)
@@ -49,6 +51,11 @@ class FinancialVectorStoreManager:
         self.retriever = HybridFinancialRetriever(self.corpus)
 
     def add_parsed_passages(self, filename: str, company: str, passages: List[Dict[str, Any]]):
+        for p in passages:
+            pid = p.get("parent_id")
+            pc = p.get("parent_content")
+            if pid and pc and pid not in self.parent_map:
+                self.parent_map[pid] = pc
         self.corpus.extend(passages)
         self.uploaded_files.append({
             "filename": filename,
@@ -56,6 +63,10 @@ class FinancialVectorStoreManager:
             "passage_count": len(passages)
         })
         self.retriever = HybridFinancialRetriever(self.corpus)
+
+    def get_parent_content(self, parent_id: str) -> str:
+        """Return stored parent_content for a given parent_id, or empty string."""
+        return self.parent_map.get(parent_id, "")
 
     def add_custom_document(self, company: str, title: str, text: str):
         doc_id = f"custom_{len(self.corpus) + 1}"
