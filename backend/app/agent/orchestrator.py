@@ -199,7 +199,16 @@ class FinAgentRAGOrchestrator:
                         evidence_meta.append(info)
 
                 # ── PoT Execution ──
-                context_window = evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:]
+                # Enrich evidence with parent_content so the formula extractor
+                # has richer text (full page/section instead of just one chunk)
+                raw_window = evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:]
+                context_window = []
+                for ev in raw_window:
+                    ev_enriched = dict(ev)
+                    parent_id = ev.get("parent_id")
+                    if parent_id and not ev_enriched.get("parent_content"):
+                        ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
+                    context_window.append(ev_enriched)
                 pot_res = self.pot_reasoner.generate_and_execute(query, context_window)
                 iter_trace["pot_code"] = pot_res["code"]
                 iter_trace["sandbox_output"] = pot_res["output_log"]

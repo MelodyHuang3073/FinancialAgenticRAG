@@ -59,10 +59,20 @@ class FinancialFileParser:
         page_num: int,
         page_text: str,
     ) -> List[Dict[str, Any]]:
-        """Split a single page's text into chunks and build passage dicts."""
+        """Split a single page's text into chunks and build passage dicts.
+        Each chunk is a *child*; the full page text (≤1000 chars) is the *parent*.
+        """
         chunks = chunk_text(page_text, chunk_size=800, overlap=120, min_chunk_size=100)
         if not chunks:
             chunks = [page_text.strip()]
+
+        parent_id = f"parent_{company_name}_p{page_num}"
+        # parent_content: first 1000 chars of the page (enough context for PoT)
+        parent_content = (
+            f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
+            + page_text[:1000]
+        )
+
         passages = []
         for i, chunk in enumerate(chunks, 1):
             passages.append({
@@ -77,6 +87,10 @@ class FinancialFileParser:
                 ),
                 "type": "text_note",
                 "raw_data": {"paragraph": chunk, "page": page_num},
+                # Parent-child fields
+                "parent_id": parent_id,
+                "parent_content": parent_content,
+                "is_child": True,
             })
         return passages
 
@@ -240,25 +254,42 @@ class FinancialFileParser:
                 table_rows.append([str(cell).strip() for cell in row])
 
             if table_rows:
-                table_lines = [" | ".join(headers)]
+                # ── Build parent: full table as a single string (≤1000 chars) ──
+                full_table_lines = [" | ".join(headers)]
                 for row in table_rows:
                     row_cells = [row[i] if i < len(row) else "" for i in range(len(headers))]
-                    table_lines.append(" | ".join(row_cells))
+                    full_table_lines.append(" | ".join(row_cells))
 
-                linearized = (
+                parent_id = f"parent_{company_name}_csv_table"
+                raw_table_text = "\n".join(full_table_lines)
+                parent_content = (
                     f"Company: {company_name} | Report: {filename} | Table: CSV Financial Table\n"
-                    + "\n".join(table_lines)
+                    + raw_table_text[:1000]
                 )
 
-                passages.append({
-                    "id": f"csv_{company_name}_table",
-                    "company": company_name,
-                    "table_name": f"{filename} (CSV Financial Table)",
-                    "period": "Uploaded CSV",
-                    "content": linearized,
-                    "type": "table_row",
-                    "raw_data": {"headers": headers, "rows": table_rows}
-                })
+                # ── Build children: one passage per row (linearized) ──
+                for row_idx, row in enumerate(table_rows, 1):
+                    row_cells = [row[i] if i < len(row) else "" for i in range(len(headers))]
+                    row_str = " | ".join(
+                        f"{headers[i]}: {row_cells[i]}" for i in range(len(headers))
+                    )
+                    linearized = (
+                        f"Company: {company_name} | Report: {filename} "
+                        f"| Table: CSV Financial Table | Row {row_idx}: {row_str}"
+                    )
+                    passages.append({
+                        "id": f"csv_{company_name}_row{row_idx}",
+                        "company": company_name,
+                        "table_name": f"{filename} (CSV Financial Table)",
+                        "period": "Uploaded CSV",
+                        "content": linearized,
+                        "type": "table_row",
+                        "raw_data": {"headers": headers, "row": row_cells},
+                        # Parent-child fields
+                        "parent_id": parent_id,
+                        "parent_content": parent_content,
+                        "is_child": True,
+                    })
 
         return {
             "company": company_name,
@@ -277,6 +308,13 @@ class FinancialFileParser:
         if not chunks and text_str.strip():
             chunks = [text_str.strip()]
 
+        # parent: first 1000 chars of the full document
+        parent_id = f"parent_{company_name}_txt"
+        parent_content = (
+            f"Company: {company_name} | Document: {filename} | Content: "
+            + text_str[:1000]
+        )
+
         passages = []
         for idx, p in enumerate(chunks, 1):
             passages.append({
@@ -286,7 +324,11 @@ class FinancialFileParser:
                 "period": "Uploaded File",
                 "content": f"Company: {company_name} | Document: {filename} | Content: {p}",
                 "type": "text_note",
-                "raw_data": {"text": p}
+                "raw_data": {"text": p},
+                # Parent-child fields
+                "parent_id": parent_id,
+                "parent_content": parent_content,
+                "is_child": True,
             })
 
         return {

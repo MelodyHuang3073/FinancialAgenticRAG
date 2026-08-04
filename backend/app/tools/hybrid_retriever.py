@@ -79,5 +79,10 @@ class HybridFinancialRetriever:
         for score, doc in scored_results[:top_k]:
             doc_copy = dict(doc)
             doc_copy['relevance_score'] = round(float(score), 4)
+            # Parent-Child expansion: if this is a child chunk,
+            # attach parent_content so PoT reasoner gets richer context
+            if doc_copy.get('is_child') and not doc_copy.get('parent_content'):
+                # parent_content is already embedded in the passage dict by parser.py
+                pass  # already present; nothing to do
             results.append(doc_copy)
         return results
