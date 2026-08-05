@@ -371,22 +371,28 @@ def _extract_from_free_text(
                 pos = content_lower.find(trigger.lower())
                 if pos == -1:
                     continue
-                # Search for a number within 120 chars after the keyword
-                window = content[pos: pos + 120]
-                m = _NUM_PATTERN.search(window)
-                if not m:
-                    continue
-                raw = m.group(1)
-                val = _to_float(raw)
-                if val is None or 1900 <= val <= 2099 or abs(val) < 0.01:
+                # Search window for the first non-year number (skip FY2024-type year tokens)
+                window = content[pos: pos + 150]
+                val = None
+                for m in _NUM_PATTERN.finditer(window):
+                    raw = m.group(1)
+                    candidate = _to_float(raw)
+                    if candidate is None:
+                        continue
+                    if 1900 <= candidate <= 2099:  # skip years embedded in text
+                        continue
+                    if abs(candidate) < 0.01:      # skip near-zero noise
+                        continue
+                    val = candidate
+                    break
+                if val is None:
                     continue
                 # Try to find the nearest year in the same window
                 yr_m = _YEAR_NEAR.search(window)
                 year = yr_m.group(1) if yr_m else (query_years[-1] if query_years else "N/A")
                 # Prefer query year
-                if query_years and year not in query_years and yr_m:
-                    # look again for a query year in wider window
-                    wider = content[max(0, pos - 40): pos + 120]
+                if query_years and year not in query_years:
+                    wider = content[max(0, pos - 40): pos + 150]
                     for qy in query_years:
                         if qy in wider:
                             year = qy
@@ -764,22 +770,46 @@ class ProgramOfThoughtReasoner:
                 if not success_calc:
                     code_lines.append("result = 0.0")
             else:
-                # PATH 3: Raw-number fallback
-                used_extraction = "fallback"
-                raw_extracted = _extract_raw_numbers(evidence_list)
-                code_lines = [
-                    "# FinAgent-RAG PoT Sandbox",
-                    "# WARNING: No structured table data found. Using raw number fallback.",
-                    "# For accurate analysis, please upload a structured financial report (CSV/JSON).",
-                ]
-                for v in raw_extracted.values():
-                    code_lines.append(f"{v['code_key']} = {v['val']}")
-                if raw_extracted:
-                    first = list(raw_extracted.values())[0]
-                    code_lines.append(f"result = {first['code_key']}")
-                    code_lines.append(f"print(f'Raw value: {{result}}')")
-                else:
-                    code_lines.append("result = 0.0")
+                # PATH 2.5: free-text keyword extraction for PDF / MD&A narrative chunks
+                free_text_extracted = _extract_from_free_text(evidence_list, query_years)
+                if free_text_extracted:
+                    used_extraction = "free_text"
+                    for v in free_text_extracted.values():
+                        code_lines.append(
+                            f"{v['code_key']} = {v['val']}  # {v['item']} ({v['year']})"
+                        )
+                    code_lines.append("")
+                    code_lines.append("# Calculation (from narrative text)")
+                    success_calc = _build_calculation_code(
+                        code_lines, free_text_extracted, query, q_lower, preferred_year
+                    )
+                    if not success_calc:
+                        first_v = list(free_text_extracted.values())[0]
+                        _item_lbl = first_v["item"]
+                        _item_yr = first_v["year"]
+                        _item_key = first_v["code_key"]
+                        code_lines.append(f"result = {_item_key}")
+                        code_lines.append(
+                            "print(f'" + _item_lbl + " (" + _item_yr + "): {result}')")
+                    # PATH 3: raw-number fallback — LAST RESORT
+                    # Year-like numbers (1900-2099) are filtered in _extract_raw_numbers
+                    # to prevent returning years like 2017/2019 as financial results.
+                    used_extraction = "fallback"
+                    raw_extracted = _extract_raw_numbers(evidence_list)
+                    code_lines = [
+                        "# FinAgent-RAG PoT Sandbox",
+                        "# WARNING: Could not find structured financial data in evidence.",
+                        "# Please upload a structured financial report (CSV/JSON) for accurate results.",
+                    ]
+                    if raw_extracted:
+                        for v in raw_extracted.values():
+                            code_lines.append(f"{v['code_key']} = {v['val']}")
+                        first = list(raw_extracted.values())[0]
+                        code_lines.append(f"result = {first['code_key']}")
+                        code_lines.append(f"print(f'Value: {{result}}')")
+                    else:
+                        code_lines.append("result = 0.0")
+
 
         code_str = "\n".join(code_lines)
 
