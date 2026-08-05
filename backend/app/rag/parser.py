@@ -52,22 +52,163 @@ class FinancialFileParser:
             return False
         return sum(1 for c in text if c.isalnum()) >= min_alnum
 
+    # ──────────────────────────────────────────────────────────────────────
+    # PDF financial table detection & linearisation  (RC1 fix)
+    # ──────────────────────────────────────────────────────────────────────
+
+    # Regex: line that starts with a text label and has ≥2 space-separated
+    # numeric values (possibly parenthesised for negatives like (1,234))
+    _TABLE_ROW_RE = re.compile(
+        r'^(.{2,55}?)\s{2,}([\(\-]?\d[\d,\.]*(?:\))?)\s{2,}([\(\-]?\d[\d,\.]*(?:\))?)',
+        re.MULTILINE,
+    )
+    # Recognises year headers: FY2023, 2023, Dec 2023, December 31 2023, etc.
+    _YEAR_HEADER_RE = re.compile(r'(?:FY\s*|fiscal\s+)?(20\d{2}|19\d{2})', re.IGNORECASE)
+    # Known financial line-item keywords (triggers table detection)
+    _FINANCIAL_KEYWORDS = {
+        "revenue", "net sales", "net revenue", "total revenue",
+        "gross profit", "gross margin",
+        "operating income", "operating profit", "operating loss",
+        "net income", "net loss", "net earnings",
+        "cost of revenue", "cost of goods", "cost of sales",
+        "ebitda", "ebit",
+        "earnings per share", "eps", "diluted eps",
+        "total assets", "total liabilities", "shareholders equity", "stockholders equity",
+        "cash and cash equivalents", "long-term debt",
+        "capital expenditure", "capex", "free cash flow",
+        "depreciation", "amortization",
+        "research and development", "r&d",
+        # Chinese
+        "營業收入", "營收", "毛利", "毛利率", "營業利益", "本期淨利", "淨利",
+        "每股盈餘", "資本支出", "研發費用", "總資產", "股東權益",
+    }
+
+    @staticmethod
+    def _to_num(raw: str) -> str:
+        """Convert (1,234) → -1234; strip commas."""
+        s = raw.strip()
+        if s.startswith('(') and s.endswith(')'):
+            return '-' + s[1:-1].replace(',', '')
+        return s.replace(',', '')
+
+    def _is_financial_table_page(self, text: str) -> bool:
+        """Return True if the page looks like a financial statement table."""
+        text_lower = text.lower()
+        keyword_hits = sum(1 for kw in self._FINANCIAL_KEYWORDS if kw in text_lower)
+        if keyword_hits < 2:
+            return False
+        # Must have at least 3 rows that match the table row pattern
+        matches = self._TABLE_ROW_RE.findall(text)
+        return len(matches) >= 3
+
+    def _extract_year_headers(self, text: str) -> list:
+        """
+        Try to find year column headers from the first 400 chars of page text.
+        Returns list of year strings e.g. ['2023', '2022'] in order of appearance.
+        """
+        header_zone = text[:400]
+        years = []
+        for m in self._YEAR_HEADER_RE.finditer(header_zone):
+            yr = m.group(1)
+            if yr not in years:
+                years.append(yr)
+        return years if years else []
+
+    def _linearize_table_page(
+        self,
+        company_name: str,
+        filename: str,
+        page_num: int,
+        page_text: str,
+    ) -> list:
+        """
+        Parse a financial table page and return linearised passage dicts
+        in 'Line Item: X | 2023: Y | 2022: Z' format.
+        """
+        year_headers = self._extract_year_headers(page_text)
+        # Fallback header labels if no years detected
+        if not year_headers:
+            year_headers = ["Col1", "Col2"]
+
+        parent_id = f"parent_{company_name}_p{page_num}_tbl"
+        parent_content = (
+            f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
+            + page_text[:1000]
+        )
+
+        passages = []
+        table_name = f"{filename} (Page {page_num} – Financial Table)"
+
+        for row_idx, m in enumerate(self._TABLE_ROW_RE.finditer(page_text)):
+            line_item = m.group(1).strip()
+            val1 = self._to_num(m.group(2))
+            val2 = self._to_num(m.group(3))
+
+            # Skip header-like rows or rows with obviously wrong item names
+            if not line_item or line_item.replace(' ', '').isdigit():
+                continue
+            # Skip rows where "line item" is just a number (e.g. year itself)
+            if re.match(r'^[\d\s\(\)\-\.,]+$', line_item):
+                continue
+
+            # Build linearised content
+            h0 = year_headers[0] if len(year_headers) > 0 else "Col1"
+            h1 = year_headers[1] if len(year_headers) > 1 else "Col2"
+            linearized = (
+                f"Company: {company_name} | Report: {table_name} | "
+                f"Period: {'-'.join(year_headers)} | "
+                f"Line Item: {line_item} | "
+                f"{h0}: {val1} | {h1}: {val2}"
+            )
+
+            passages.append({
+                "id": f"pdf_tbl_{company_name}_p{page_num}r{row_idx}",
+                "company": company_name,
+                "table_name": table_name,
+                "period": '-'.join(year_headers) if year_headers else "N/A",
+                "page_number": page_num,
+                "content": linearized,
+                "type": "table_row",
+                "raw_data": {
+                    "line_item": line_item,
+                    year_headers[0] if year_headers else "col1": val1,
+                    (year_headers[1] if len(year_headers) > 1 else "col2"): val2,
+                },
+                "parent_id": parent_id,
+                "parent_content": parent_content,
+                "is_child": True,
+            })
+
+        return passages
+
     def _make_passages(
         self,
         company_name: str,
         filename: str,
         page_num: int,
         page_text: str,
-    ) -> List[Dict[str, Any]]:
-        """Split a single page's text into chunks and build passage dicts.
-        Each chunk is a *child*; the full page text (≤1000 chars) is the *parent*.
+    ) -> list:
         """
+        Entry point for a single page:
+        - If page looks like a financial table → linearize each row individually
+        - Otherwise → chunk as free text (original behaviour)
+        Each passage is a child; the full page text is the parent.
+        """
+        # ── RC1: detect & linearise financial tables ──────────────────────
+        if self._is_financial_table_page(page_text):
+            table_passages = self._linearize_table_page(
+                company_name, filename, page_num, page_text
+            )
+            if table_passages:
+                return table_passages
+            # If linearisation produced nothing useful, fall through to text path
+
+        # ── Original path: chunk free text ────────────────────────────────
         chunks = chunk_text(page_text, chunk_size=800, overlap=120, min_chunk_size=100)
         if not chunks:
             chunks = [page_text.strip()]
 
         parent_id = f"parent_{company_name}_p{page_num}"
-        # parent_content: first 1000 chars of the page (enough context for PoT)
         parent_content = (
             f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
             + page_text[:1000]
