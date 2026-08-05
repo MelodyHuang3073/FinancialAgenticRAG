@@ -91,7 +91,8 @@ class FinancialVectorStoreManager:
         self.retriever = HybridFinancialRetriever(self.corpus)
         return doc_id
 
-    def search(self, query: str, top_k: int = 5, exclude_ids: List[str] = None) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 5, exclude_ids: List[str] = None,
+               entity: str = None) -> List[Dict[str, Any]]:
         if not self.retriever:
             return []
-        return self.retriever.search(query, top_k=top_k, exclude_ids=exclude_ids)
+        return self.retriever.search(query, top_k=top_k, exclude_ids=exclude_ids, entity=entity)

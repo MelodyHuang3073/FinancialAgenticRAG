@@ -45,11 +45,11 @@ class FinAgentRAGOrchestrator:
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
 
-        # ── Entity injection: if classifier returned generic 'company',
-        #    try to infer the real company from uploaded files in the corpus ──
-        if classification["entity"] == "company":
-            inferred = self._infer_entity_from_corpus(query)
-            classification["entity"] = inferred
+        # ── Entity alignment: ALWAYS match classifier entity against actual corpus company names
+        # This fixes the "3M" vs "3M_2022_10K" mismatch (RC4)
+        classification["entity"] = self._match_entity_to_corpus(
+            classification["entity"], query
+        )
 
         trace_steps.append({
             "step_name": "FinanceBench Classification",
@@ -114,7 +114,8 @@ class FinAgentRAGOrchestrator:
                         step_query = sub_q["query"]
                         hits = self.vector_store.search(
                             step_query, top_k=self.RETRIEVAL_TOP_K,
-                            exclude_ids=list(retrieved_ids)
+                            exclude_ids=list(retrieved_ids),
+                            entity=classification.get("entity")
                         )
                         hits = self._deduplicate_hits(hits)
 
@@ -199,9 +200,13 @@ class FinAgentRAGOrchestrator:
                         evidence_meta.append(info)
 
                 # ── PoT Execution ──
-                # Enrich evidence with parent_content so the formula extractor
-                # has richer text (full page/section instead of just one chunk)
-                raw_window = evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:]
+                # Sort by relevance score so the BEST chunks reach PoT,
+                # not just the most recently retrieved ones (RC5 fix)
+                raw_window = sorted(
+                    evidence_buffer,
+                    key=lambda x: x.get("relevance_score", 0.0),
+                    reverse=True
+                )[:self.CONTEXT_CHUNK_LIMIT]
                 context_window = []
                 for ev in raw_window:
                     ev_enriched = dict(ev)
@@ -322,29 +327,66 @@ class FinAgentRAGOrchestrator:
     # Private Helpers
     # ═══════════════════════════════════════════════════════════════
 
-    def _infer_entity_from_corpus(self, query: str) -> str:
+    def _match_entity_to_corpus(self, classifier_entity: str, query: str) -> str:
         """
-        When the classifier can't identify the company (returns 'company'),
-        try to match uploaded file company names against the query text.
+        Always align the classifier's entity name to the actual company string
+        stored in the corpus (e.g. '3M' → '3M_2022_10K').
+        Also handles the case where the classifier returned generic 'company'.
         """
         import re as _re
         if not self.vector_store.uploaded_files:
-            return "company"
+            return classifier_entity  # no uploads yet — use classifier result as-is
 
         q_lower = query.lower()
+        # Normalise helper: strip year tokens, underscores, hyphens
+        def _normalise(s: str) -> str:
+            s = _re.sub(r'\b(20|19)\d{2}\b', '', s)   # strip years
+            s = _re.sub(r'[_\-]+', ' ', s)             # underscores → spaces
+            return s.lower().strip()
+
+        norm_classifier = _normalise(classifier_entity)
+        best_company = None
+        best_score = 0
 
         for uf in self.vector_store.uploaded_files:
-            company = uf.get("company", "")
-            if not company:
+            corpus_company = uf.get("company", "")
+            if not corpus_company:
                 continue
-            # Split on common separators and check if any meaningful part appears in query
-            parts = _re.split(r'[_\-\s]+', company.lower())
-            significant = [p for p in parts if len(p) >= 2 and not _re.match(r'^\d{4}$', p)]
-            if any(part in q_lower for part in significant):
-                return company
+            norm_corpus = _normalise(corpus_company)
 
-        # Default to the most recently uploaded file's company
+            score = 0
+            # Score 1: corpus company words appear in query
+            corpus_words = [w for w in norm_corpus.split() if len(w) >= 2]
+            query_hits = sum(1 for w in corpus_words if w in q_lower)
+            score += query_hits * 3
+
+            # Score 2: classifier entity words appear in corpus company name
+            if norm_classifier and norm_classifier != "company":
+                clf_words = [w for w in norm_classifier.split() if len(w) >= 2]
+                clf_hits = sum(1 for w in clf_words if w in norm_corpus)
+                score += clf_hits * 2
+
+                # Score 3: exact substring match (highest confidence)
+                if norm_classifier in norm_corpus or norm_corpus in norm_classifier:
+                    score += 5
+
+            if score > best_score:
+                best_score = score
+                best_company = corpus_company
+
+        if best_company and best_score > 0:
+            return best_company
+
+        # Fallback: if classifier returned a real entity name, keep it
+        if classifier_entity and classifier_entity != "company":
+            return classifier_entity
+
+        # Last resort: most recently uploaded file
         return self.vector_store.uploaded_files[-1].get("company", "company")
+
+    def _infer_entity_from_corpus(self, query: str) -> str:
+        """Legacy method — kept for backward compatibility. Delegates to _match_entity_to_corpus."""
+        return self._match_entity_to_corpus("company", query)
 
     def _deduplicate_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         seen = set()
