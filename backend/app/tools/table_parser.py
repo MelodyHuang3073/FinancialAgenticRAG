@@ -1,10 +1,25 @@
 from typing import List, Dict, Any
 
-def linearize_financial_table(company: str, year_context: str, table_title: str, headers: List[str], rows: List[List[Any]]) -> List[Dict[str, Any]]:
+def linearize_financial_table(
+    company: str,
+    year_context: str,
+    table_title: str,
+    headers: List[str],
+    rows: List[List[Any]],
+    statement_type: str = "unknown",
+) -> List[Dict[str, Any]]:
     """
     Linearizes financial tables using Header-Prepended Row strategy (FinAgent-RAG Stage 2).
     Example Output passage:
     "Company: TSMC | Statement: Income Statement | Year: 2024 | Line Item: Revenue | 2023: 2,161.7B | 2024: 2,894.3B | Unit: TWD"
+
+    Args:
+        company        : Company name
+        year_context   : Period / fiscal year string
+        table_title    : Table / report name
+        headers        : Column headers (first column is the line item label)
+        rows           : Data rows
+        statement_type : One of income_statement | balance_sheet | cash_flow | notes | unknown
     """
     passages = []
     
@@ -29,6 +44,7 @@ def linearize_financial_table(company: str, year_context: str, table_title: str,
             "line_item": line_item,
             "content": linearized_text,
             "type": "table_row",
+            "statement_type": statement_type,
             "raw_data": dict(zip(headers, row))
         })
         

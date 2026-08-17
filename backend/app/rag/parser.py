@@ -83,6 +83,116 @@ class FinancialFileParser:
         "每股盈餘", "資本支出", "研發費用", "總資產", "股東權益",
     }
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Step 3: 10-K Section Anchoring — header patterns → section labels
+    # ──────────────────────────────────────────────────────────────────────
+    # Each tuple: (regex_pattern, section_label)
+    # Ordered from most-specific to least-specific; first match wins.
+    _SECTION_PATTERNS: List[tuple] = [
+        # ── Income Statement ────────────────────────────────────────────
+        (re.compile(
+            r'consolidated\s+statements?\s+of\s+(?:operations|income|earnings|comprehensive)',
+            re.IGNORECASE), "income_statement"),
+        (re.compile(
+            r'statements?\s+of\s+(?:operations|income|earnings)',
+            re.IGNORECASE), "income_statement"),
+        # ── Balance Sheet ────────────────────────────────────────────────
+        (re.compile(
+            r'consolidated\s+balance\s+sheets?',
+            re.IGNORECASE), "balance_sheet"),
+        (re.compile(
+            r'balance\s+sheets?|financial\s+position',
+            re.IGNORECASE), "balance_sheet"),
+        # ── Cash Flow ────────────────────────────────────────────────────
+        (re.compile(
+            r'consolidated\s+statements?\s+of\s+cash\s+flows?',
+            re.IGNORECASE), "cash_flow"),
+        (re.compile(
+            r'statements?\s+of\s+cash\s+flows?|cash\s+flow\s+statements?',
+            re.IGNORECASE), "cash_flow"),
+        # ── Stockholders' Equity ─────────────────────────────────────────
+        (re.compile(
+            r'statements?\s+of\s+(?:stockholders|shareholders|changes\s+in).*equity',
+            re.IGNORECASE), "equity_statement"),
+        # ── MD&A ─────────────────────────────────────────────────────────
+        (re.compile(
+            r"item\s+7[^a-z].*management.{0,20}discussion|management.{0,20}discussion"
+            r".{0,40}analysis",
+            re.IGNORECASE), "general_mda"),
+        # ── Quantitative Market Risk ─────────────────────────────────────
+        (re.compile(
+            r'item\s+7a[^a-z].*quantitative.*market\s+risk',
+            re.IGNORECASE), "notes_market_risk"),
+        # ── Financial Statements & Notes header ──────────────────────────
+        (re.compile(
+            r'item\s+8[^a-z].*financial\s+statements',
+            re.IGNORECASE), "income_statement"),  # starts financial statements section
+        # ── Specific Notes ───────────────────────────────────────────────
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:litigation|legal\s+proceed|contingenc)',
+            re.IGNORECASE), "notes_litigation"),
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:income\s+tax|tax\s+provision)',
+            re.IGNORECASE), "notes_income_tax"),
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:long.term\s+debt|debt|borrowing)',
+            re.IGNORECASE), "notes_debt"),
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:segment|geographic)',
+            re.IGNORECASE), "notes_segments"),
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:pension|retirement|benefit)',
+            re.IGNORECASE), "notes_pension"),
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:lease|right.of.use)',
+            re.IGNORECASE), "notes_leases"),
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:acquisit|business\s+combination)',
+            re.IGNORECASE), "notes_acquisitions"),
+        (re.compile(
+            r'note\s+\d+[^\n]*(?:stock.based|share.based|equity\s+award)',
+            re.IGNORECASE), "notes_stock_comp"),
+        # Generic note catch-all
+        (re.compile(
+            r'notes?\s+to\s+(?:the\s+)?(?:consolidated\s+)?financial\s+statements?',
+            re.IGNORECASE), "notes_general"),
+        # ── Risk Factors ─────────────────────────────────────────────────
+        (re.compile(
+            r'item\s+1a[^a-z].*risk\s+factors?',
+            re.IGNORECASE), "risk_factors"),
+        # ── Business overview ────────────────────────────────────────────
+        (re.compile(
+            r'item\s+1[^a-z].*business|overview\s+of\s+(?:our\s+)?business',
+            re.IGNORECASE), "business_overview"),
+        # ── Selected Financial Data ──────────────────────────────────────
+        (re.compile(
+            r'selected\s+(?:financial|consolidated)\s+data',
+            re.IGNORECASE), "selected_data"),
+        # ── Cover page / general ─────────────────────────────────────────
+        (re.compile(
+            r'annual\s+report|form\s+10-?k|united\s+states.*securities',
+            re.IGNORECASE), "cover_page"),
+    ]
+
+    def _detect_section(self, page_text: str) -> str:
+        """
+        Scan the first 600 characters of a page for known 10-K section headers.
+        Returns the section label if a header is found, or empty string if not.
+        A non-empty result means this page STARTS a new section.
+        """
+        scan_zone = page_text[:600]  # header zone only
+        for pattern, label in self._SECTION_PATTERNS:
+            if pattern.search(scan_zone):
+                return label
+        return ""  # no new section header on this page
+
+    @staticmethod
+    def _inject_section(passages: list, section: str) -> list:
+        """Add 'section' key to all passage dicts in-place, return list."""
+        for p in passages:
+            p["section"] = section
+        return passages
+
     @staticmethod
     def _to_num(raw: str) -> str:
         """Convert (1,234) → -1234; strip commas."""
@@ -187,12 +297,14 @@ class FinancialFileParser:
         filename: str,
         page_num: int,
         page_text: str,
+        section: str = "unknown",
     ) -> list:
         """
         Entry point for a single page:
         - If page looks like a financial table → linearize each row individually
         - Otherwise → chunk as free text (original behaviour)
         Each passage is a child; the full page text is the parent.
+        All passages receive the 'section' metadata tag for Step-3 anchored retrieval.
         """
         # ── RC1: detect & linearise financial tables ──────────────────────
         if self._is_financial_table_page(page_text):
@@ -200,7 +312,7 @@ class FinancialFileParser:
                 company_name, filename, page_num, page_text
             )
             if table_passages:
-                return table_passages
+                return self._inject_section(table_passages, section)
             # If linearisation produced nothing useful, fall through to text path
 
         # ── Original path: chunk free text ────────────────────────────────
@@ -227,6 +339,7 @@ class FinancialFileParser:
                     f"| Page: {page_num} | Content: {chunk}"
                 ),
                 "type": "text_note",
+                "section": section,
                 "raw_data": {"paragraph": chunk, "page": page_num},
                 # Parent-child fields
                 "parent_id": parent_id,
@@ -255,6 +368,7 @@ class FinancialFileParser:
             import fitz
             doc = fitz.open(stream=content_bytes, filetype="pdf")
             passages = []
+            current_section = "cover_page"   # Step 3: section state machine
             for page_idx in range(len(doc)):
                 page = doc[page_idx]
                 page_num = page_idx + 1
@@ -282,7 +396,14 @@ class FinancialFileParser:
                         continue
 
                 if best_text:
-                    passages.extend(self._make_passages(company_name, filename, page_num, best_text))
+                    # Step 3: update section state if this page has a new header
+                    detected = self._detect_section(best_text)
+                    if detected:
+                        current_section = detected
+                    passages.extend(
+                        self._make_passages(company_name, filename, page_num,
+                                            best_text, section=current_section)
+                    )
 
             doc.close()
             if passages:
@@ -294,6 +415,7 @@ class FinancialFileParser:
         try:
             import pdfplumber
             passages = []
+            current_section = "cover_page"   # Step 3: section state machine
             with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
                 for page_idx, page in enumerate(pdf.pages):
                     page_num = page_idx + 1
@@ -315,7 +437,13 @@ class FinancialFileParser:
                             continue
 
                     if best_text:
-                        passages.extend(self._make_passages(company_name, filename, page_num, best_text))
+                        detected = self._detect_section(best_text)
+                        if detected:
+                            current_section = detected
+                        passages.extend(
+                            self._make_passages(company_name, filename, page_num,
+                                                best_text, section=current_section)
+                        )
 
             if passages:
                 return _ret(passages)

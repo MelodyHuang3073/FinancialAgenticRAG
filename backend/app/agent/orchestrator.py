@@ -1,10 +1,13 @@
 """
-FinAgent-RAG Orchestrator (重構版)
+FinAgent-RAG Orchestrator
 
-修復清單:
-- Bug #2: _build_search_queries 現在在後續迭代中正確使用 refined query
-- Bug #7: 回答精簡為 2-3 行核心結論 + 可展開細節
-- FinanceBench: 整合 question_classifier 取代舊 router + financial_knowledge
+核心流程：
+  1. FinanceBench 問題分類（question_classifier）
+  2. 多步拆解（decomposer）
+  3. Hybrid RAG 檢索（vector_store + hybrid_retriever）
+  4. PoT 推理（pot_reasoner + sandbox）
+  5. 三重自我驗證（verifier） + 迭代精練（refiner）
+  6. LLM 回答綜合（llm_client）
 """
 
 from typing import Dict, Any, List
@@ -16,7 +19,6 @@ from app.agent.pot_reasoner import ProgramOfThoughtReasoner
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import LLMAnswerGenerator
-from app.agent.external_retriever import ExternalFinanceRetriever
 
 
 class FinAgentRAGOrchestrator:
@@ -31,7 +33,6 @@ class FinAgentRAGOrchestrator:
         self.verifier = TriCheckSelfVerifier()
         self.refiner = QueryRefiner()
         self.llm_generator = LLMAnswerGenerator()
-        self.external_retriever = ExternalFinanceRetriever()
 
     def process_query(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
         trace_steps = []
@@ -45,11 +46,17 @@ class FinAgentRAGOrchestrator:
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
 
-        # ── Entity alignment: ALWAYS match classifier entity against actual corpus company names
-        # This fixes the "3M" vs "3M_2022_10K" mismatch (RC4)
+        # Entity alignment: match entity against actual corpus company names
         classification["entity"] = self._match_entity_to_corpus(
             classification["entity"], query
         )
+
+        # statement_type_hint: from question_classifier (income_statement / balance_sheet /
+        # cash_flow / notes).  Used for 1.5x boost in hybrid_retriever.
+        statement_type_hint = classification.get("statement_type_hint") or None
+        if statement_type_hint == "unknown":
+            statement_type_hint = None
+
 
         trace_steps.append({
             "step_name": "FinanceBench Classification",
@@ -115,7 +122,8 @@ class FinAgentRAGOrchestrator:
                         hits = self.vector_store.search(
                             step_query, top_k=self.RETRIEVAL_TOP_K,
                             exclude_ids=list(retrieved_ids),
-                            entity=classification.get("entity")
+                            entity=classification.get("entity"),
+                            statement_type_hint=statement_type_hint,  # Step 4
                         )
                         hits = self._deduplicate_hits(hits)
 
@@ -159,7 +167,9 @@ class FinAgentRAGOrchestrator:
                         for sq in classification["retrieval_queries"]:
                             hits = self.vector_store.search(
                                 sq, top_k=self.RETRIEVAL_TOP_K,
-                                exclude_ids=list(retrieved_ids)
+                                exclude_ids=list(retrieved_ids),
+                                entity=classification.get("entity"),
+                                statement_type_hint=statement_type_hint,  # Step 4
                             )
                             for hit in self._deduplicate_hits(hits):
                                 retrieved_ids.add(hit["id"])
@@ -181,7 +191,9 @@ class FinAgentRAGOrchestrator:
                     new_hits = self._deduplicate_hits(
                         self.vector_store.search(
                             current_query, top_k=self.RETRIEVAL_TOP_K,
-                            exclude_ids=list(retrieved_ids)
+                            exclude_ids=list(retrieved_ids),
+                            entity=classification.get("entity"),
+                            statement_type_hint=statement_type_hint,  # Step 4
                         )
                     )
                     for hit in new_hits:
@@ -255,7 +267,9 @@ class FinAgentRAGOrchestrator:
             for sq in search_queries:
                 new_hits.extend(self.vector_store.search(
                     sq, top_k=self.RETRIEVAL_TOP_K,
-                    exclude_ids=list(retrieved_ids)
+                    exclude_ids=list(retrieved_ids),
+                    entity=classification.get("entity"),
+                    statement_type_hint=statement_type_hint,  # Step 4
                 ))
             new_hits = self._deduplicate_hits(new_hits)
             for hit in new_hits:
