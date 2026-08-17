@@ -115,7 +115,22 @@ class HybridFinancialRetriever:
         top_k: int = 5,
         exclude_ids: Optional[List[str]] = None,
         entity: Optional[str] = None,
+        section: Optional[str] = None,
+        statement_type_hint: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """
+        Search the corpus with BM25 + overlap scoring.
+
+        Args:
+            query              : user query
+            top_k              : max results to return
+            exclude_ids        : passage IDs to skip (already retrieved)
+            entity             : company filter (soft, via _company_match_score)
+            section            : legacy Step-3 section label (0.05x penalty on mismatch)
+            statement_type_hint: Step-4 report type hint — income_statement | balance_sheet |
+                                 cash_flow | notes | unknown.  Matching docs get a 1.5x boost;
+                                 non-matching docs are unaffected (no penalty).
+        """
         exclude_ids = set(exclude_ids or [])
         query_tokens = self._tokenize(query)
         query_years = set(re.findall(r'(?:FY)?(20\d\d)', query))
@@ -157,9 +172,25 @@ class HybridFinancialRetriever:
                 if any(q in doc_period.lower() for q in query_quarters):
                     multiplier *= 1.3
 
+            # ── Step 3: section anchoring (soft filter / penalty) ─────────────
+            if section:
+                doc_section = doc.get("section", "")  # empty = untagged old passage
+                if doc_section and doc_section != section:
+                    # Wrong section: heavy penalty but not hard exclusion
+                    multiplier *= 0.05
+
+            # ── Step 4: statement_type_hint boost (soft preference) ──────────
+            # Use 'statement_type' field (set during ingestion by parser/table_parser).
+            # A matching document gets a 1.5x boost; non-matching docs are unchanged.
+            if statement_type_hint and statement_type_hint != "unknown":
+                doc_stmt_type = doc.get("statement_type", "") or doc.get("section", "")
+                if doc_stmt_type == statement_type_hint:
+                    multiplier *= 1.5
+
             final_score = (bm25 * 0.7 + overlap_count * 0.3) * multiplier
             if final_score > 0.01:
                 scored_results.append((final_score, doc))
+
 
         scored_results.sort(key=lambda x: x[0], reverse=True)
 
