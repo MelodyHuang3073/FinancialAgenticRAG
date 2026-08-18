@@ -22,7 +22,8 @@ from app.agent.llm_client import LLMAnswerGenerator
 
 
 class FinAgentRAGOrchestrator:
-    RETRIEVAL_TOP_K = 5
+    RETRIEVAL_TOP_K = 3          # chunks per sub-question (was 5)
+    RETRIEVAL_MAX_TOTAL = 15     # hard ceiling on total evidence buffer size
     CONTEXT_CHUNK_LIMIT = 8
 
     def __init__(self, vector_store: FinancialVectorStoreManager):
@@ -116,14 +117,45 @@ class FinAgentRAGOrchestrator:
                     retrieval_steps = [
                         sq for sq in sub_questions if sq["type"] == "retrieval"
                     ]
+                    decompose_src = sub_questions[-1].get("source", "rule") if sub_questions else "rule"
 
                     for sub_q in retrieval_steps:
+                        # ── Early-stop: skip if total evidence is already large enough ──
+                        if len(evidence_buffer) >= self.RETRIEVAL_MAX_TOTAL:
+                            trace_steps.append({
+                                "step_name": f"Step {sub_q['step']}: Early-Stop",
+                                "type": "step_retrieval",
+                                "detail": f"Evidence buffer full ({len(evidence_buffer)} chunks). Skipping remaining sub-queries.",
+                            })
+                            break
+
                         step_query = sub_q["query"]
+                        target_metric = sub_q.get("target_metric")
+                        target_year   = sub_q.get("target_year")
+
+                        # ── Check if this (metric, year) is already in the buffer ──
+                        def _already_has(metric: str, year: str) -> bool:
+                            if not metric or not year:
+                                return False
+                            for ev in evidence_buffer:
+                                c = ev.get("content", "").lower()
+                                if year in c and metric.replace("_", " ") in c:
+                                    return True
+                            return False
+
+                        if _already_has(target_metric, target_year):
+                            trace_steps.append({
+                                "step_name": f"Step {sub_q['step']}: {target_metric} ({target_year})",
+                                "type": "step_retrieval",
+                                "detail": f"Already retrieved. Skipping duplicate sub-query.",
+                            })
+                            continue
+
                         hits = self.vector_store.search(
                             step_query, top_k=self.RETRIEVAL_TOP_K,
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
-                            statement_type_hint=statement_type_hint,  # Step 4
+                            statement_type_hint=statement_type_hint,
                         )
                         hits = self._deduplicate_hits(hits)
 
@@ -136,6 +168,8 @@ class FinAgentRAGOrchestrator:
                                 "table_name": hit.get("table_name", ""),
                                 "company": hit.get("company", ""),
                                 "period": hit.get("period", ""),
+                                "section": hit.get("section", ""),
+                                "chunk_type": hit.get("type", ""),
                                 "relevance_score": hit.get("relevance_score", 0.0),
                                 "snippet": hit.get("content", "")[:120] + "...",
                                 "sub_question": step_query,
@@ -157,7 +191,7 @@ class FinAgentRAGOrchestrator:
                             "step_name": step_label,
                             "type": "step_retrieval",
                             "detail": (
-                                f"Query: '{step_query}' → "
+                                f"[{decompose_src}] Query: '{step_query}' → "
                                 f"{len(hits)} passage(s) retrieved"
                             ),
                         })
