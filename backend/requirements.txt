@@ -7,3 +7,7 @@ requests>=2.31.0
 python-multipart>=0.0.6
 openai>=1.0.0
 python-dotenv>=1.0.0
+pymupdf>=1.28.0
+pdfplumber>=0.11.0
+pypdf>=6.0.0
+pdfminer.six>=20260107
