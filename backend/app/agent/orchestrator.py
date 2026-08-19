@@ -35,6 +35,35 @@ class FinAgentRAGOrchestrator:
         self.refiner = QueryRefiner()
         self.llm_generator = LLMAnswerGenerator()
 
+    def _build_evidence_info(self, hit: Dict[str, Any], sub_question: str = None) -> Dict[str, Any]:
+        """
+        Build the evidence-source dict returned to the frontend for one
+        retrieved passage. Always includes parent_content (the full page
+        text, e.g. the complete Markdown table for a 'table_row' hit) so
+        the Source Evidence panel can render the whole table structure
+        instead of just the single linearised row that matched the query.
+        """
+        parent_id = hit.get("parent_id", "")
+        parent_content = hit.get("parent_content") or (
+            self.vector_store.get_parent_content(parent_id) if parent_id else ""
+        )
+        info = {
+            "id": hit.get("id", ""),
+            "table_name": hit.get("table_name", ""),
+            "company": hit.get("company", ""),
+            "period": hit.get("period", ""),
+            "section": hit.get("section", ""),
+            "chunk_type": hit.get("type", ""),
+            "relevance_score": hit.get("relevance_score", 0.0),
+            "snippet": hit.get("content", "")[:120] + "...",
+            "content": hit.get("content", ""),
+            "parent_id": parent_id,
+            "parent_content": parent_content,
+        }
+        if sub_question:
+            info["sub_question"] = sub_question
+        return info
+
     def process_query(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
         trace_steps = []
         evidence_buffer: List[Dict[str, Any]] = []  # full evidence objects
@@ -163,18 +192,7 @@ class FinAgentRAGOrchestrator:
                         for hit in hits:
                             retrieved_ids.add(hit["id"])
                             evidence_buffer.append(hit)
-                            info = {
-                                "id": hit["id"],
-                                "table_name": hit.get("table_name", ""),
-                                "company": hit.get("company", ""),
-                                "period": hit.get("period", ""),
-                                "section": hit.get("section", ""),
-                                "chunk_type": hit.get("type", ""),
-                                "relevance_score": hit.get("relevance_score", 0.0),
-                                "snippet": hit.get("content", "")[:120] + "...",
-                                "sub_question": step_query,
-                                "content": hit.get("content", ""),
-                            }
+                            info = self._build_evidence_info(hit, sub_question=step_query)
                             iter_trace["retrieved_passages"].append(info)
                             step_hit_infos.append(info)
                             evidence_meta.append(info)
@@ -208,15 +226,7 @@ class FinAgentRAGOrchestrator:
                             for hit in self._deduplicate_hits(hits):
                                 retrieved_ids.add(hit["id"])
                                 evidence_buffer.append(hit)
-                                info = {
-                                    "id": hit["id"],
-                                    "table_name": hit.get("table_name", ""),
-                                    "company": hit.get("company", ""),
-                                    "period": hit.get("period", ""),
-                                    "relevance_score": hit.get("relevance_score", 0.0),
-                                    "snippet": hit.get("content", "")[:120] + "...",
-                                    "content": hit.get("content", ""),
-                                }
+                                info = self._build_evidence_info(hit)
                                 iter_trace["retrieved_passages"].append(info)
                                 evidence_meta.append(info)
 
@@ -233,15 +243,7 @@ class FinAgentRAGOrchestrator:
                     for hit in new_hits:
                         retrieved_ids.add(hit["id"])
                         evidence_buffer.append(hit)
-                        info = {
-                            "id": hit["id"],
-                            "table_name": hit.get("table_name", ""),
-                            "company": hit.get("company", ""),
-                            "period": hit.get("period", ""),
-                            "relevance_score": hit.get("relevance_score", 0.0),
-                            "snippet": hit.get("content", "")[:120] + "...",
-                            "content": hit.get("content", ""),
-                        }
+                        info = self._build_evidence_info(hit)
                         iter_trace["retrieved_passages"].append(info)
                         evidence_meta.append(info)
 
@@ -309,15 +311,7 @@ class FinAgentRAGOrchestrator:
             for hit in new_hits:
                 retrieved_ids.add(hit["id"])
                 evidence_buffer.append(hit)
-                info = {
-                    "id": hit["id"],
-                    "table_name": hit.get("table_name", ""),
-                    "company": hit.get("company", ""),
-                    "period": hit.get("period", ""),
-                    "relevance_score": hit.get("relevance_score", 0.0),
-                    "snippet": hit.get("content", "")[:120] + "...",
-                    "content": hit.get("content", ""),
-                }
+                info = self._build_evidence_info(hit)
                 iter_trace["retrieved_passages"].append(info)
                 evidence_meta.append(info)
 
@@ -357,15 +351,7 @@ class FinAgentRAGOrchestrator:
             # Return ALL evidence items (with sub_question tag) so the frontend
             # can display every data point that contributed to the calculation
             "evidence_sources": evidence_meta if evidence_meta else [
-                {
-                    "id": h.get("id", ""),
-                    "table_name": h.get("table_name", ""),
-                    "company": h.get("company", ""),
-                    "period": h.get("period", ""),
-                    "relevance_score": h.get("relevance_score", 0.0),
-                    "content": h.get("content", ""),
-                }
-                for h in evidence_buffer
+                self._build_evidence_info(h) for h in evidence_buffer
             ],
             "reasoning_steps": trace_steps,
             "execution_trace": trace_steps,

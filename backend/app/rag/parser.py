@@ -4,7 +4,7 @@ import io
 import json
 import re
 import html
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 
 from app.rag.chunker import chunk_text
 from app.tools.table_parser import linearize_financial_table
@@ -201,6 +201,309 @@ class FinancialFileParser:
             return '-' + s[1:-1].replace(',', '')
         return s.replace(',', '')
 
+    # ──────────────────────────────────────────────────────────────────────
+    # pdfplumber table extraction → Markdown pipe tables
+    # ──────────────────────────────────────────────────────────────────────
+
+    _MD_SEPARATOR_RE = re.compile(r'^[\|\s\-:]+$')
+
+    @staticmethod
+    def _clean_table_cell(cell) -> str:
+        """Normalise a single pdfplumber table cell into a Markdown-safe string."""
+        if cell is None:
+            return ""
+        text = str(cell).replace("\r", " ").replace("\n", " ")
+        text = re.sub(r"\s+", " ", text).strip()
+        return text.replace("|", "\\|")
+
+    def _table_to_markdown(self, table: List[List[Any]]) -> str:
+        """
+        Convert a pdfplumber extract_table()/extract_tables() result
+        (row x col list of str/None) into a Markdown pipe table.
+        First row is treated as the header row. Returns "" if the table
+        has no usable header or fewer than 2 rows.
+        """
+        if not table:
+            return ""
+        rows = [[self._clean_table_cell(c) for c in row] for row in table if row is not None]
+        rows = [r for r in rows if any(c for c in r)]
+        if len(rows) < 2:
+            return ""
+
+        n_cols = max(len(r) for r in rows)
+        if n_cols == 0:
+            return ""
+        padded = [r + [""] * (n_cols - len(r)) for r in rows]
+
+        header, data_rows = padded[0], padded[1:]
+        if not any(c for c in header):
+            return ""
+
+        lines = ["| " + " | ".join(header) + " |"]
+        lines.append("|" + "|".join(["---"] * n_cols) + "|")
+        for row in data_rows:
+            lines.append("| " + " | ".join(row) + " |")
+        return "\n".join(lines)
+
+    # A "layout row" is a label followed by 2+ whitespace-only numeric-looking
+    # tokens — this is how pdfplumber's extract_text(layout=True) renders a
+    # table COLUMN whose boundary is only whitespace/background-shading,
+    # never a ruled line (the standard style for real 10-K statements, e.g.
+    # Activision Blizzard's cash-flow statement: no grid lines, just
+    # alternating row shading and right-aligned numbers).
+    #
+    # - Requires at least one letter/CJK char before the values, so a bare
+    #   year-header line like "2019   2018   2017" (no real label) is never
+    #   mistaken for a data row — it should stay a header candidate.
+    # - The label-to-first-value gap only needs 1+ space (long line-item
+    #   labels often butt right up against the first numeric column with
+    #   little room to spare), but at least TWO numeric tokens are required
+    #   (multi-space-separated) — real financial tables always show 2+
+    #   comparison periods side by side, and requiring 2+ avoids matching an
+    #   ordinary prose sentence that happens to trail off with one number.
+    _LAYOUT_ROW_RE = re.compile(
+        r'^(?=.*[A-Za-z一-鿿])(?P<label>\S.{0,80}?)\s+'
+        r'(?P<values>[\(\-\$]?\d[\d,\.]*\)?%?(?:\s{2,}[\(\-\$]?\d[\d,\.]*\)?%?)+)\s*$'
+    )
+
+    def _layout_text_to_markdown_and_prose(self, layout_text: str) -> Tuple[List[str], str]:
+        """
+        Fallback table reconstruction for pages where find_tables() (ruled
+        vector lines) found nothing. Many real 10-K filings render tables
+        using only whitespace column alignment and/or alternating row
+        background shading — no vector lines at all — which pdfplumber's
+        line-based table detector cannot see. extract_text(layout=True)
+        DOES preserve that column alignment as literal spacing even without
+        ruled lines, so we regex-match contiguous "label <gap> num <gap>
+        num..." lines with a consistent column count into Markdown tables.
+        Returns (markdown_tables, prose) where prose is layout_text with
+        the consumed table lines removed.
+        """
+        lines = layout_text.split('\n')
+
+        tables: List[str] = []
+        prose_lines: List[str] = []
+        current_rows: List[Tuple[str, List[str]]] = []
+        current_n_cols = [None]
+        # Most recent non-blank, non-row line — the best candidate for a
+        # column-header line (e.g. "2019   2018   2017") sitting directly
+        # above the block, used instead of scanning the whole page (which
+        # can be dominated by blank vertical padding above the table).
+        header_candidate = [""]
+
+        def _flush():
+            if len(current_rows) >= 2:
+                n_cols = current_n_cols[0]
+                years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
+                headers = ["Line Item"] + [
+                    years[i] if i < len(years) else f"Col{i + 1}"
+                    for i in range(n_cols)
+                ]
+                table = [headers] + [[label] + values for label, values in current_rows]
+                md = self._table_to_markdown(table)
+                if md:
+                    tables.append(md)
+            else:
+                # Not enough consistent rows to count as a table — keep as
+                # ordinary text instead of silently dropping it.
+                for label, values in current_rows:
+                    prose_lines.append((label + "  " + "  ".join(values)).strip())
+            current_rows.clear()
+            current_n_cols[0] = None
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                # A blank layout line is just vertical spacing (row gaps,
+                # subtotal breathing room) — it must NOT break an
+                # otherwise-contiguous table block into fragments.
+                continue
+            m = self._LAYOUT_ROW_RE.match(stripped)
+            if m:
+                label = m.group("label").strip()
+                values = re.split(r'\s{2,}', m.group("values").strip())
+                if current_n_cols[0] is not None and len(values) != current_n_cols[0]:
+                    _flush()
+                current_rows.append((label, values))
+                current_n_cols[0] = len(values)
+            else:
+                _flush()
+                prose_lines.append(stripped)
+                header_candidate[0] = stripped
+        _flush()
+
+        return tables, "\n".join(prose_lines)
+
+    def _extract_page_tables_and_prose(self, page) -> Tuple[List[str], str]:
+        """
+        Detect all tables on a pdfplumber page and convert each to a
+        Markdown pipe table. Returns (markdown_tables, prose) where prose
+        is the page text with the detected table regions excluded, so
+        table content isn't duplicated as garbled space-aligned text
+        alongside the clean Markdown version.
+
+        Two detection tiers are tried in order:
+        1. find_tables() — ruled vector-line tables (bbox-exclusion via
+           outside_bbox() gives clean prose).
+        2. _layout_text_to_markdown_and_prose() — whitespace/background-
+           shading-only tables (no ruled lines), reconstructed from
+           extract_text(layout=True). This is the common case for real
+           10-K financial statements.
+
+        TODO: tables that span two PDF pages are detected and linearised
+        independently per page (no cross-page stitching). Revisit if
+        multi-page financial tables need to be merged into one block.
+        """
+        try:
+            found_tables = page.find_tables()
+        except Exception:
+            found_tables = []
+
+        md_tables = []
+        filtered_page = page
+        for t in found_tables:
+            try:
+                md = self._table_to_markdown(t.extract())
+            except Exception:
+                md = ""
+            if md:
+                md_tables.append(md)
+            try:
+                filtered_page = filtered_page.outside_bbox(t.bbox)
+            except Exception:
+                pass
+
+        if md_tables:
+            try:
+                prose = filtered_page.extract_text() or ""
+            except Exception:
+                try:
+                    prose = page.extract_text() or ""
+                except Exception:
+                    prose = ""
+            return md_tables, prose
+
+        # ── Tier 2: no ruled-line tables — try whitespace/shading-only ──
+        try:
+            layout_text = page.extract_text(layout=True) or ""
+        except Exception:
+            layout_text = ""
+        layout_tables, layout_prose = self._layout_text_to_markdown_and_prose(layout_text)
+        if layout_tables:
+            return layout_tables, layout_prose
+
+        try:
+            prose = page.extract_text() or ""
+        except Exception:
+            prose = ""
+        return [], prose
+
+    @staticmethod
+    def _compose_page_text(prose: str, md_tables: List[str]) -> str:
+        """Merge non-table prose with converted Markdown tables, one blank line apart."""
+        if not md_tables:
+            return prose
+        parts = [prose.strip()] if prose and prose.strip() else []
+        parts.extend(md_tables)
+        return "\n\n".join(parts)
+
+    def _parse_markdown_table_block(self, block: str) -> Tuple[List[str], List[List[str]]]:
+        """Parse a Markdown pipe-table block (as produced by _table_to_markdown)
+        into (headers, data_rows), skipping the |---|---| separator line."""
+        rows = []
+        for line in block.split('\n'):
+            stripped = line.strip()
+            if not stripped or self._MD_SEPARATOR_RE.match(stripped):
+                continue
+            cells = [c.strip() for c in stripped.strip('|').split('|')]
+            rows.append(cells)
+        if not rows:
+            return [], []
+        return rows[0], rows[1:]
+
+    def _find_markdown_table_blocks(self, text: str) -> List[str]:
+        """Split text into prose/table blocks (reusing chunker's block
+        splitter so detection stays consistent with chunk_text()) and
+        return only the blocks recognised as Markdown pipe tables."""
+        from app.rag.chunker import _split_into_blocks, _is_table_line
+        blocks = _split_into_blocks(text)
+        return [
+            b for b in blocks
+            if _is_table_line(next((l for l in b.split('\n') if l.strip()), ""))
+        ]
+
+    def _linearize_markdown_tables(
+        self,
+        company_name: str,
+        filename: str,
+        page_num: int,
+        page_text: str,
+    ) -> Tuple[list, str]:
+        """
+        Find Markdown pipe-table blocks in page_text (produced by
+        _extract_page_tables_and_prose / _table_to_markdown) and convert
+        each data row into its own 'table_row' passage, using the table's
+        real column headers instead of the generic Col1/Col2 fallback.
+        Returns (table_passages, prose_only_text) where prose_only_text is
+        page_text with the table blocks removed, so callers can still chunk
+        the remaining prose separately.
+        """
+        table_blocks = self._find_markdown_table_blocks(page_text)
+        if not table_blocks:
+            return [], page_text
+
+        prose_only_text = page_text
+        passages = []
+        table_name = f"{filename} (Page {page_num} – Financial Table)"
+        parent_id = f"parent_{company_name}_p{page_num}_tbl"
+        parent_content = (
+            f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
+            + page_text[:1000]
+        )
+
+        row_idx = 0
+        for block in table_blocks:
+            headers, data_rows = self._parse_markdown_table_block(block)
+            if len(headers) < 2 or not data_rows:
+                continue
+            value_headers = headers[1:]
+
+            for row in data_rows:
+                if not row or not row[0].strip():
+                    continue
+                line_item = row[0].strip()
+                values = row[1:]
+                kv_parts = [
+                    f"{value_headers[i] if i < len(value_headers) else f'Col{i + 1}'}: {values[i]}"
+                    for i in range(len(values))
+                ]
+                row_idx += 1
+                raw_data = {"line_item": line_item}
+                for i, val in enumerate(values):
+                    key = value_headers[i] if i < len(value_headers) else f"col{i + 1}"
+                    raw_data[key] = val
+
+                passages.append({
+                    "id": f"pdf_tbl_{company_name}_p{page_num}r{row_idx}",
+                    "company": company_name,
+                    "table_name": table_name,
+                    "period": "-".join(value_headers) if value_headers else "N/A",
+                    "page_number": page_num,
+                    "content": (
+                        f"Company: {company_name} | Report: {table_name} | "
+                        f"Line Item: {line_item} | " + " | ".join(kv_parts)
+                    ),
+                    "type": "table_row",
+                    "raw_data": raw_data,
+                    "parent_id": parent_id,
+                    "parent_content": parent_content,
+                    "is_child": True,
+                })
+
+            prose_only_text = prose_only_text.replace(block, "", 1)
+
+        return passages, prose_only_text
+
     def _is_financial_table_page(self, text: str) -> bool:
         """Return True if the page looks like a financial statement table."""
         text_lower = text.lower()
@@ -291,39 +594,30 @@ class FinancialFileParser:
 
         return passages
 
-    def _make_passages(
+    def _chunk_text_to_passages(
         self,
         company_name: str,
         filename: str,
         page_num: int,
-        page_text: str,
-        section: str = "unknown",
+        text: str,
+        section: str,
+        parent_source_text: Optional[str] = None,
     ) -> list:
         """
-        Entry point for a single page:
-        - If page looks like a financial table → linearize each row individually
-        - Otherwise → chunk as free text (original behaviour)
-        Each passage is a child; the full page text is the parent.
-        All passages receive the 'section' metadata tag for Step-3 anchored retrieval.
+        Chunk free text into 'text_note' passages. `parent_source_text` lets
+        the parent record keep the full original page text (e.g. including a
+        table that was linearised separately) even when only the prose part
+        of the page is being chunked here.
         """
-        # ── RC1: detect & linearise financial tables ──────────────────────
-        if self._is_financial_table_page(page_text):
-            table_passages = self._linearize_table_page(
-                company_name, filename, page_num, page_text
-            )
-            if table_passages:
-                return self._inject_section(table_passages, section)
-            # If linearisation produced nothing useful, fall through to text path
-
-        # ── Original path: chunk free text ────────────────────────────────
-        chunks = chunk_text(page_text, chunk_size=800, overlap=120, min_chunk_size=100)
-        if not chunks:
-            chunks = [page_text.strip()]
+        source_text = parent_source_text if parent_source_text is not None else text
+        chunks = chunk_text(text, chunk_size=800, overlap=120, min_chunk_size=100)
+        if not chunks and text.strip():
+            chunks = [text.strip()]
 
         parent_id = f"parent_{company_name}_p{page_num}"
         parent_content = (
             f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
-            + page_text[:1000]
+            + source_text[:1000]
         )
 
         passages = []
@@ -348,6 +642,53 @@ class FinancialFileParser:
             })
         return passages
 
+    def _make_passages(
+        self,
+        company_name: str,
+        filename: str,
+        page_num: int,
+        page_text: str,
+        section: str = "unknown",
+    ) -> list:
+        """
+        Entry point for a single page:
+        - If the page contains Markdown pipe tables (from pdfplumber
+          extract_tables/find_tables) → linearise each row individually,
+          and chunk any remaining prose separately.
+        - Else if the page looks like a space-aligned financial table
+          (legacy RC1 heuristic — used when no Markdown tables were
+          detected, e.g. on the pypdf/pdfminer fallback engines that have
+          no table-detection API) → linearise it.
+        - Otherwise → chunk as free text (original behaviour).
+        Each passage is a child; the full page text is the parent.
+        All passages receive the 'section' metadata tag for Step-3 anchored retrieval.
+        """
+        # ── Markdown tables (pdfplumber-detected) ──────────────────────────
+        md_table_passages, prose_only_text = self._linearize_markdown_tables(
+            company_name, filename, page_num, page_text
+        )
+        if md_table_passages:
+            passages = self._inject_section(md_table_passages, section)
+            prose_only_text = prose_only_text.strip()
+            if prose_only_text and self._is_readable(prose_only_text):
+                passages += self._chunk_text_to_passages(
+                    company_name, filename, page_num, prose_only_text, section,
+                    parent_source_text=page_text,
+                )
+            return passages
+
+        # ── RC1: detect & linearise space-aligned financial tables ─────────
+        if self._is_financial_table_page(page_text):
+            table_passages = self._linearize_table_page(
+                company_name, filename, page_num, page_text
+            )
+            if table_passages:
+                return self._inject_section(table_passages, section)
+            # If linearisation produced nothing useful, fall through to text path
+
+        # ── Original path: chunk free text ────────────────────────────────
+        return self._chunk_text_to_passages(company_name, filename, page_num, page_text, section)
+
     def _parse_pdf(self, filename: str, content_bytes: bytes, company_name: str) -> Dict[str, Any]:
 
         def _ret(passages):
@@ -362,6 +703,32 @@ class FinancialFileParser:
                     "For optimal financial analysis, please upload a searchable PDF, CSV, or TXT file."
                 ),
             }
+
+        # ── Pre-pass: pdfplumber table detection ───────────────────────
+        # Runs regardless of which text-extraction engine below ends up
+        # succeeding, so table structure survives even on the fitz path
+        # (fitz has no table-detection API of its own).
+        # TODO: tables spanning two PDF pages are detected & linearised
+        # independently per page — no cross-page table stitching yet.
+        md_tables_by_page: Dict[int, List[str]] = {}
+        # For pages that DO have tables, also keep pdfplumber's bbox-excluded
+        # prose so the fitz engine below can swap it in and avoid duplicating
+        # the raw space-aligned table text alongside the clean Markdown table
+        # (fitz has no bounding-box awareness of pdfplumber's detected tables).
+        table_prose_by_page: Dict[int, str] = {}
+        try:
+            import pdfplumber as _pdfplumber_prepass
+            with _pdfplumber_prepass.open(io.BytesIO(content_bytes)) as _pdf:
+                for page_idx, page in enumerate(_pdf.pages):
+                    try:
+                        md_tables, filtered_prose = self._extract_page_tables_and_prose(page)
+                    except Exception:
+                        md_tables, filtered_prose = [], ""
+                    if md_tables:
+                        md_tables_by_page[page_idx] = md_tables
+                        table_prose_by_page[page_idx] = filtered_prose
+        except Exception as e:
+            print(f"[FinancialFileParser] pdfplumber table pre-pass failed for '{filename}': {e}")
 
         # ── Engine 1: PyMuPDF (fitz) ──────────────────────────────────
         try:
@@ -396,6 +763,24 @@ class FinancialFileParser:
                         continue
 
                 if best_text:
+                    # Merge in any Markdown tables pdfplumber detected on this
+                    # page. On pages that have tables, swap fitz's own prose
+                    # for pdfplumber's bbox-excluded prose (computed in the
+                    # pre-pass above) so the raw space-aligned table text
+                    # doesn't end up duplicated alongside the clean Markdown
+                    # table below — fitz itself has no bounding-box awareness
+                    # of pdfplumber's detected table regions.
+                    page_md_tables = md_tables_by_page.get(page_idx, [])
+                    if page_md_tables:
+                        filtered_prose = self._clean_text_content(
+                            table_prose_by_page.get(page_idx, "")
+                        )
+                        prose_for_page = (
+                            filtered_prose
+                            if self._is_readable(filtered_prose, min_alnum=1)
+                            else best_text
+                        )
+                        best_text = self._compose_page_text(prose_for_page, page_md_tables)
                     # Step 3: update section state if this page has a new header
                     detected = self._detect_section(best_text)
                     if detected:
@@ -421,20 +806,32 @@ class FinancialFileParser:
                     page_num = page_idx + 1
                     best_text = ""
 
-                    for extract_fn in (
-                        lambda p: p.extract_text() or "",
-                        lambda p: p.extract_text(layout=True) or "",
-                        lambda p: " ".join(
-                            w.get("text", "") for w in (p.extract_words() or [])
-                            if w.get("text", "").strip()
-                        ),
-                    ):
-                        try:
-                            cleaned = self._clean_text_content(extract_fn(page))
-                            if self._is_readable(cleaned) and len(cleaned) > len(best_text):
-                                best_text = cleaned
-                        except Exception:
-                            continue
+                    # Same engine detected the tables, so we can properly
+                    # exclude their bounding boxes from the prose extraction
+                    # (no duplicate garbled table text, unlike the fitz path).
+                    md_tables, filtered_prose = self._extract_page_tables_and_prose(page)
+
+                    if md_tables:
+                        prose_cleaned = self._clean_text_content(filtered_prose)
+                        if not self._is_readable(prose_cleaned, min_alnum=1):
+                            # bbox exclusion left nothing usable; fall back to raw text
+                            prose_cleaned = self._clean_text_content(page.extract_text() or "")
+                        best_text = self._compose_page_text(prose_cleaned, md_tables)
+                    else:
+                        for extract_fn in (
+                            lambda p: p.extract_text() or "",
+                            lambda p: p.extract_text(layout=True) or "",
+                            lambda p: " ".join(
+                                w.get("text", "") for w in (p.extract_words() or [])
+                                if w.get("text", "").strip()
+                            ),
+                        ):
+                            try:
+                                cleaned = self._clean_text_content(extract_fn(page))
+                                if self._is_readable(cleaned) and len(cleaned) > len(best_text):
+                                    best_text = cleaned
+                            except Exception:
+                                continue
 
                     if best_text:
                         detected = self._detect_section(best_text)
@@ -523,17 +920,14 @@ class FinancialFileParser:
                 table_rows.append([str(cell).strip() for cell in row])
 
             if table_rows:
-                # ── Build parent: full table as a single string (≤1000 chars) ──
-                full_table_lines = [" | ".join(headers)]
-                for row in table_rows:
-                    row_cells = [row[i] if i < len(row) else "" for i in range(len(headers))]
-                    full_table_lines.append(" | ".join(row_cells))
-
+                # ── Build parent: full table as a Markdown pipe table, so the
+                # frontend Source Evidence panel can render the complete
+                # table for any 'table_row' hit, not just the one matched row ──
+                full_table_md = self._table_to_markdown([headers] + table_rows)
                 parent_id = f"parent_{company_name}_csv_table"
-                raw_table_text = "\n".join(full_table_lines)
                 parent_content = (
-                    f"Company: {company_name} | Report: {filename} | Table: CSV Financial Table\n"
-                    + raw_table_text[:1000]
+                    f"Company: {company_name} | Report: {filename} | Table: CSV Financial Table\n\n"
+                    + full_table_md
                 )
 
                 # ── Build children: one passage per row (linearized) ──
