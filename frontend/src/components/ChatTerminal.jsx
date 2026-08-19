@@ -6,6 +6,34 @@ import {
   Paperclip, AlertCircle, CheckCircle
 } from 'lucide-react';
 
+/* ─── Extract the largest contiguous Markdown pipe-table block out of a
+   page of mixed prose + table text (mirrors chunker.py's table-block
+   detection, kept minimal since this is display-only). ─── */
+function extractMarkdownTableBlock(text) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  const isTableLine = (l) => {
+    const t = l.trim();
+    return t.startsWith('|') && t.includes('|');
+  };
+  const blocks = [];
+  let current = [];
+  for (const line of lines) {
+    if (isTableLine(line)) {
+      current.push(line);
+    } else if (current.length) {
+      blocks.push(current);
+      current = [];
+    }
+  }
+  if (current.length) blocks.push(current);
+  if (!blocks.length) return '';
+  // Prefer the block with the most rows — that's the actual data table,
+  // as opposed to a stray line that happens to contain a '|'.
+  const best = blocks.reduce((a, b) => (b.length > a.length ? b : a));
+  return best.join('\n');
+}
+
 /* ─── Markdown Table renderer ─── */
 function MarkdownTable({ text }) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -13,8 +41,9 @@ function MarkdownTable({ text }) {
   const tableLines = lines.filter(l => l.startsWith('|') || l.includes(' | '));
   if (tableLines.length < 2) return <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12, color: '#334155', margin: 0 }}>{text}</pre>;
 
-  // Parse header + separator + rows
-  const rows = lines.map(l => l.split('|').map(c => c.trim()).filter(c => c !== ''));
+  // Parse header + separator + rows (only from the actual table lines —
+  // stray prose lines without '|' must never become bogus single-cell rows)
+  const rows = tableLines.map(l => l.split('|').map(c => c.trim()).filter(c => c !== ''));
   const isSeparator = (row) => row.every(c => /^[-:]+$/.test(c));
   const headerRowIdx = rows.findIndex((r, i) => i + 1 < rows.length && isSeparator(rows[i + 1]));
 
@@ -309,8 +338,28 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {msg.result.evidence_sources.map((ev, si) => {
                           const isExpanded = expandedEvidence === si;
-                          const fullContent = ev.content || '';
-                          const isTable = fullContent.includes(' | ') && fullContent.split('\n').some(l => l.includes('|'));
+
+                          // A 'table_row' hit's own content is just the ONE
+                          // matched line item (e.g. "Line Item: Net sales |
+                          // FY2023: 14,694 | ..."). Show the full table it
+                          // came from — pulled from parent_content — instead,
+                          // so the panel displays the complete table
+                          // structure rather than a single isolated row.
+                          // If parent_content isn't a clean Markdown pipe
+                          // table (e.g. an older/legacy ingestion path), fall
+                          // back to showing parent_content as-is — still the
+                          // full table context, just not pretty-rendered —
+                          // rather than silently collapsing to one row.
+                          const fullTableBlock = ev.chunk_type === 'table_row'
+                            ? extractMarkdownTableBlock(ev.parent_content)
+                            : '';
+                          const fullContent = fullTableBlock
+                            || (ev.chunk_type === 'table_row' ? ev.parent_content : '')
+                            || ev.content || '';
+                          const isTable = fullContent.includes('|') && fullContent.split('\n').some(l => l.includes('|'));
+                          const matchedLineItem = ev.chunk_type === 'table_row'
+                            ? (ev.content || '').match(/Line Item:\s*([^|]+)/)?.[1]?.trim()
+                            : null;
 
                           // Section colour coding
                           const sectionColors = {
@@ -388,6 +437,11 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                               </button>
                               {isExpanded && (
                                 <div style={{ padding: '0 12px 14px' }}>
+                                  {fullTableBlock && matchedLineItem && (
+                                    <p style={{ fontSize: 11, color: '#854d0e', marginBottom: 6 }}>
+                                      Matched row: <strong>{matchedLineItem}</strong> (full table shown below)
+                                    </p>
+                                  )}
                                   {isTable
                                     ? <MarkdownTable text={fullContent} />
                                     : <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#475569', margin: 0, fontFamily: 'monospace' }}>{fullContent || 'No chunk content available'}</pre>
