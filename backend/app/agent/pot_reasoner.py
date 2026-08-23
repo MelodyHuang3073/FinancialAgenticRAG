@@ -25,6 +25,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from app.tools.sandbox import execute_pot_code
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
 from app.agent.company_line_item_overrides import get_overrides_for_company  # Step 3/4
+from app.tools.table_parser import is_markdown_separator_row
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical item taxonomy  (order matters — first match wins)
@@ -149,6 +150,87 @@ def _extract_query_years(query: str) -> List[str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Extraction: standard Markdown table (header row + |---|---| separator + data rows)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_from_markdown_table_block(content: str, ev_company: str = "") -> Dict[str, Dict]:
+    """
+    Parse a standard Markdown pipe table embedded in `content`:
+        | Line Item | 2023 | 2024 |
+        |---|---|---|
+        | Revenue | 2,161.7 | 2,894.3 |
+        | Net Income | 567.8 | 601.2 |
+
+    The line immediately above the '|---|---|' separator row is the header
+    row (first column = line-item label, remaining columns = period/year
+    labels); every line below the separator, up to the first blank/non-pipe
+    line, is a data row.
+
+    Returns entries in the EXACT same shape as _extract_from_linearized_table()
+    ({code_key: {item, canonical, year, val, code_key}}), so downstream
+    _find_same_item_pair()/_build_calculation_code() need no changes at all —
+    they just see more entries in the same dict shape.
+    """
+    extracted: Dict[str, Dict] = {}
+    lines = content.split("\n")
+
+    sep_idx = next(
+        (i for i, l in enumerate(lines) if i > 0 and is_markdown_separator_row(l)),
+        None,
+    )
+    if sep_idx is None:
+        return extracted
+
+    header_cells = [c.strip() for c in lines[sep_idx - 1].strip().strip("|").split("|")]
+    if len(header_cells) < 2:
+        return extracted
+    period_headers = header_cells[1:]
+
+    for line in lines[sep_idx + 1:]:
+        stripped = line.strip()
+        if not stripped or "|" not in stripped:
+            break  # table block ended
+
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        line_item_name = cells[0]
+        if not line_item_name:
+            continue
+
+        canonical = _get_canonical(line_item_name, company_name=ev_company)
+        sanitized = _sanitize(line_item_name)
+
+        for i, val_str in enumerate(cells[1:]):
+            if i >= len(period_headers):
+                break
+            ym = re.search(r"(20\d{2}|FY\d{4})", period_headers[i])
+            if not ym:
+                continue
+            year = _normalize_year(ym.group(1))
+            val = _to_float(val_str)
+            if val is None:
+                continue
+
+            base_key = f"val_{year}_{sanitized}"
+            key = base_key
+            idx = 1
+            while key in extracted and abs(extracted[key]["val"] - val) > 0.001:
+                key = f"{base_key}_{idx}"
+                idx += 1
+            if key not in extracted:
+                extracted[key] = {
+                    "item": line_item_name,
+                    "canonical": canonical,
+                    "year": year,
+                    "val": val,
+                    "code_key": key,
+                }
+
+    return extracted
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Extraction: linearized-table (pipe-delimited)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -156,6 +238,11 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
     """
     Works on pipe-delimited linearized table rows:
       ... | Line Item: 營業收入 (Revenue) | 2023 年 (全年度): 2,161.7 | 2024 年: 2,894.3
+    AND on standard Markdown tables (header + |---|---| separator + data
+    rows) — see _extract_from_markdown_table_block() above, dispatched to
+    per evidence item whenever a separator row is detected. Both formats
+    can appear across the same evidence_list; entries from either path are
+    merged into the same returned dict using the same key-collision rule.
     Returns:
       {code_key: {item, canonical, year, val, code_key}}
     """
@@ -178,6 +265,20 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
             m_co = _re.search(r"Company:\s*([^|]+)", content)
             ev_company = m_co.group(1).strip() if m_co else ""
 
+        # ── Standard Markdown table (header + |---|---| separator) ──────────
+        if any(is_markdown_separator_row(l) for l in content.split("\n")):
+            for entry in _extract_from_markdown_table_block(content, ev_company).values():
+                base_key = entry["code_key"]
+                key = base_key
+                idx = 1
+                while key in extracted and abs(extracted[key]["val"] - entry["val"]) > 0.001:
+                    key = f"{base_key}_{idx}"
+                    idx += 1
+                if key not in extracted:
+                    extracted[key] = dict(entry, code_key=key)
+            continue  # this evidence item is fully handled by the Markdown parser
+
+        # ── Legacy single-line "Line Item: X | Year: Val" format ────────────
         fields = [f.strip() for f in content.split("|")]
         line_item_name: Optional[str] = None
         for f in fields:
