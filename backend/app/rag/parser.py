@@ -368,53 +368,247 @@ class FinancialFileParser:
 
         return tables, "\n".join(prose_lines)
 
-    #: Below this many extracted characters, a page with images on it is
-    #: treated as scanned/image-based rather than text-native.
-    _SCANNED_PAGE_CHAR_THRESHOLD = 20
+    # ──────────────────────────────────────────────────────────────────────
+    # Word-coordinate table reconstruction (Tier 2)
+    # ──────────────────────────────────────────────────────────────────────
+    # Some real 10-K PDFs defeat BOTH ruled-line detection (no vector lines)
+    # AND the layout=True text-flow regex above (each table cell — label,
+    # each year's value, even a standalone '$' glyph — ends up on its OWN
+    # line when serialised to plain text, so there is no shared "line" left
+    # for a same-line regex to match, even with layout preserved). Working
+    # directly from each word's (x0, top) bounding-box position sidesteps
+    # the engine's own line-grouping heuristic entirely.
 
-    def _extract_page_tables_and_prose(self, page) -> Tuple[List[str], str]:
+    #: Row-clustering tolerance: words whose vertical position is within
+    #: this many points of the current row's running-average top are
+    #: considered part of the same row. Compared against the row's average
+    #: (not just the previous word) so the tolerance can't let a row's
+    #: effective y-position drift across many words.
+    _WORD_ROW_Y_TOLERANCE = 2.0
+
+    #: Column-clustering gap: a gap larger than this between two
+    #: consecutive (sorted) word x0 positions, across every word on the
+    #: page, marks a new column boundary.
+    _WORD_COL_X_GAP = 30.0
+
+    #: Minimum consecutive data rows for a run to count as a real table.
+    _WORD_TABLE_MIN_ROWS = 2
+
+    @staticmethod
+    def _fitz_words_to_common(fitz_words) -> List[Dict[str, Any]]:
+        """Convert PyMuPDF page.get_text("words") output — tuples of
+        (x0, y0, x1, y1, text, block_no, line_no, word_no) — into the
+        unified word format {"x0","top","x1","bottom","text"} shared with
+        _pdfplumber_words_to_common(). PyMuPDF's coordinate origin is
+        top-left with y increasing downward — the same convention as
+        pdfplumber's top/bottom — so no axis flip is needed."""
+        return [
+            {"x0": w[0], "top": w[1], "x1": w[2], "bottom": w[3], "text": w[4]}
+            for w in fitz_words if w[4].strip()
+        ]
+
+    @staticmethod
+    def _pdfplumber_words_to_common(pdfplumber_words) -> List[Dict[str, Any]]:
+        """Convert pdfplumber page.extract_words() output into the unified
+        word format shared with _fitz_words_to_common()."""
+        return [
+            {"x0": w["x0"], "top": w["top"], "x1": w["x1"], "bottom": w["bottom"], "text": w["text"]}
+            for w in pdfplumber_words if w.get("text", "").strip()
+        ]
+
+    def _cluster_words_into_rows(self, words: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+        """Group words into rows by vertical position (see
+        _WORD_ROW_Y_TOLERANCE), then sort each row left-to-right by x0."""
+        if not words:
+            return []
+        words_sorted = sorted(words, key=lambda w: w["top"])
+        rows: List[List[Dict[str, Any]]] = []
+        current_row: List[Dict[str, Any]] = []
+        current_top_sum = 0.0
+        for w in words_sorted:
+            if current_row:
+                row_mean_top = current_top_sum / len(current_row)
+                if abs(w["top"] - row_mean_top) > self._WORD_ROW_Y_TOLERANCE:
+                    rows.append(current_row)
+                    current_row = []
+                    current_top_sum = 0.0
+            current_row.append(w)
+            current_top_sum += w["top"]
+        if current_row:
+            rows.append(current_row)
+        for row in rows:
+            row.sort(key=lambda w: w["x0"])
+        return rows
+
+    #: A candidate column boundary must be "voted for" by words from at
+    #: least this many DIFFERENT rows to count as a real column — filters
+    #: out the single stray boundary a long multi-word label can create
+    #: (e.g. a continuation word of "Amortization of purchased intangibles"
+    #: landing in what looks like a numeric column's gap; only ONE row
+    #: has a word there, versus every data row sharing the real value
+    #: column's start position). The very first (leftmost) boundary is
+    #: always kept regardless, since it's the label column and every row
+    #: has something starting near the left margin.
+    _WORD_COL_MIN_ROW_SUPPORT = 2
+
+    def _cluster_column_boundaries(self, rows: List[List[Dict[str, Any]]]) -> List[float]:
+        """Stable column start x-positions across the WHOLE page: sort
+        every word's x0, mark a candidate column boundary wherever the gap
+        to the previous x0 exceeds _WORD_COL_X_GAP, then drop any candidate
+        that isn't shared by at least _WORD_COL_MIN_ROW_SUPPORT distinct
+        rows (see the constant's docstring above for why)."""
+        all_words = [w for row in rows for w in row]
+        xs = sorted(w["x0"] for w in all_words)
+        if not xs:
+            return []
+        raw_boundaries = [xs[0]]
+        for prev, cur in zip(xs, xs[1:]):
+            if cur - prev > self._WORD_COL_X_GAP:
+                raw_boundaries.append(cur)
+
+        def _raw_col_idx(x0: float) -> int:
+            idx = 0
+            for i, b in enumerate(raw_boundaries):
+                if x0 >= b - 0.5:
+                    idx = i
+                else:
+                    break
+            return idx
+
+        support: List[set] = [set() for _ in raw_boundaries]
+        for row_idx, row in enumerate(rows):
+            for w in row:
+                support[_raw_col_idx(w["x0"])].add(row_idx)
+
+        return [
+            b for i, (b, s) in enumerate(zip(raw_boundaries, support))
+            if i == 0 or len(s) >= self._WORD_COL_MIN_ROW_SUPPORT
+        ]
+
+    @staticmethod
+    def _assign_column_index(x0: float, boundaries: List[float]) -> int:
+        """Index of the rightmost boundary <= x0 (a small epsilon guards
+        against a word landing exactly on a boundary being pushed into the
+        next column by float rounding)."""
+        idx = 0
+        for i, b in enumerate(boundaries):
+            if x0 >= b - 0.5:
+                idx = i
+            else:
+                break
+        return idx
+
+    def _reconstruct_table_from_word_positions(self, words: List[Dict[str, Any]]) -> Tuple[List[str], str]:
         """
-        Detect all tables on a pdfplumber page and convert each to a
-        Markdown pipe table. Returns (markdown_tables, prose) where prose
-        is the page text with the detected table regions excluded, so
-        table content isn't duplicated as garbled space-aligned text
-        alongside the clean Markdown version.
+        Reconstruct table rows purely from word bounding-box coordinates,
+        ignoring however the source engine grouped words into "lines" in
+        its own text stream (see the Tier 2 module comment above).
 
-        Three detection tiers are tried in order:
-        0. Scanned-page guard — if extract_text() returns almost nothing
-           AND the page actually has embedded images, this is very likely
-           a scanned/image-based page rather than a text-native one. Table
-           extraction is skipped entirely (a warning is logged) rather than
-           attempting OCR — this project's input is 10-K EDGAR filings,
-           which are text-native, so OCR would be unnecessary complexity
-           for a case that isn't expected to occur in practice; this guard
-           exists purely so a scanned page fails safely/visibly instead of
-           silently producing garbage from near-empty text.
-        1. find_tables() — ruled vector-line tables (bbox-exclusion via
-           outside_bbox() gives clean prose).
-        2. _layout_text_to_markdown_and_prose() — whitespace/background-
-           shading-only tables (no ruled lines), reconstructed from
-           extract_text(layout=True). This is the common case for real
-           10-K financial statements.
+        Row/column clustering as described by _cluster_words_into_rows() /
+        _cluster_column_boundaries(); each word is then assigned to its
+        (row, column) cell, same-cell words are joined with a space, and
+        each reconstructed row is classified as either:
+          - a DATA row: first column is non-numeric text AND at least half
+            of the remaining non-empty columns look numeric (reusing
+            _LAYOUT_VALUE_RE's number/'—'-placeholder pattern), or
+          - a TEXT-ONLY row: kept as prose (a section-header label like
+            "Operating expenses", a year-header candidate, or genuine
+            narrative text) rather than discarded — mirrors
+            _layout_text_to_markdown_and_prose()'s header_candidate
+            persistence (a section subheading between the year row and the
+            first data row must not clobber a good year-header candidate).
 
-        TODO: tables that span two PDF pages are detected and linearised
-        independently per page (no cross-page stitching). Revisit if
-        multi-page financial tables need to be merged into one block.
+        Returns (markdown_tables, prose) where prose is every text-only
+        row's reconstructed text, in original top-to-bottom order.
         """
-        try:
-            probe_text = page.extract_text() or ""
-        except Exception:
-            probe_text = ""
-        try:
-            has_images = bool(page.images)
-        except Exception:
-            has_images = False
-        if len(probe_text.strip()) < self._SCANNED_PAGE_CHAR_THRESHOLD and has_images:
-            page_num = getattr(page, "page_number", "?")
-            print(f"[FinancialFileParser] page {page_num} appears to be "
-                  f"scanned/image-based, table extraction skipped")
-            return [], probe_text
+        rows = self._cluster_words_into_rows(words)
+        if not rows:
+            return [], ""
+        boundaries = self._cluster_column_boundaries(rows)
+        if not boundaries:
+            return [], ""
 
+        tables: List[str] = []
+        prose_lines: List[str] = []
+        current_rows: List[Tuple[str, List[str]]] = []
+        current_n_cols = [None]
+        header_candidate = [""]
+
+        def _flush():
+            if len(current_rows) >= self._WORD_TABLE_MIN_ROWS:
+                n_cols = current_n_cols[0]
+                years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
+                headers = ["Line Item"] + [
+                    years[i] if i < len(years) else f"Col{i + 1}"
+                    for i in range(n_cols)
+                ]
+                table = [headers] + [[label] + values for label, values in current_rows]
+                md = self._table_to_markdown(table)
+                if md:
+                    tables.append(md)
+            else:
+                for label, values in current_rows:
+                    prose_lines.append((label + "  " + "  ".join(values)).strip())
+            current_rows.clear()
+            current_n_cols[0] = None
+
+        for row_words in rows:
+            n_cols = len(boundaries)
+            cells: List[List[str]] = [[] for _ in range(n_cols)]
+            for w in row_words:
+                col = self._assign_column_index(w["x0"], boundaries)
+                cells[col].append(w["text"])
+            cell_texts = [" ".join(parts).strip() for parts in cells]
+
+            first_col = cell_texts[0]
+            rest_cols = [c for c in cell_texts[1:] if c]
+            has_label = bool(first_col) and not self._LAYOUT_VALUE_RE.fullmatch(first_col)
+            numeric_rest = [c for c in rest_cols if self._LAYOUT_VALUE_RE.fullmatch(c)]
+
+            is_data_row = (
+                has_label
+                and len(rest_cols) >= 2
+                and len(numeric_rest) >= max(1, len(rest_cols) // 2)
+            )
+
+            if is_data_row:
+                # Drop empty cells (matching rest_cols above) — a column
+                # bucket that's genuinely unused by every data row (e.g.
+                # one created by a single stray word from the page title,
+                # surviving the row-support filter at exactly the minimum
+                # vote count) must not show up as a spurious blank leading
+                # value in every row.
+                values = [
+                    self._normalize_layout_value(c) if self._LAYOUT_VALUE_RE.fullmatch(c) else c
+                    for c in cell_texts[1:] if c
+                ]
+                if current_n_cols[0] is not None and len(values) != current_n_cols[0]:
+                    _flush()
+                current_rows.append((first_col, values))
+                current_n_cols[0] = len(values)
+            else:
+                _flush()
+                line_text = " ".join(c for c in cell_texts if c).strip()
+                if line_text:
+                    prose_lines.append(line_text)
+                    if self._extract_year_headers(line_text) or not header_candidate[0]:
+                        header_candidate[0] = line_text
+        _flush()
+
+        return tables, "\n".join(prose_lines)
+
+    def _ruled_line_tables_and_prose(self, page) -> Tuple[List[str], str]:
+        """
+        Tier 1: ruled vector-line tables via pdfplumber's find_tables(),
+        with the detected table regions excluded from the prose via
+        outside_bbox() so table content isn't duplicated as garbled
+        space-aligned text alongside the clean Markdown version. Returns
+        ([], "") when no ruled-line tables were found on this page.
+
+        Factored out from _extract_page_tables_and_prose() so the
+        _parse_pdf() pre-pass (which needs ONLY this tier, ahead of the
+        fitz-native Tier 2 below) doesn't have to duplicate this logic.
+        """
         try:
             found_tables = page.find_tables()
         except Exception:
@@ -434,17 +628,83 @@ class FinancialFileParser:
             except Exception:
                 pass
 
-        if md_tables:
+        if not md_tables:
+            return [], ""
+        try:
+            prose = filtered_page.extract_text() or ""
+        except Exception:
             try:
-                prose = filtered_page.extract_text() or ""
+                prose = page.extract_text() or ""
             except Exception:
-                try:
-                    prose = page.extract_text() or ""
-                except Exception:
-                    prose = ""
+                prose = ""
+        return md_tables, prose
+
+    #: Below this many extracted characters, a page with images on it is
+    #: treated as scanned/image-based rather than text-native.
+    _SCANNED_PAGE_CHAR_THRESHOLD = 20
+
+    def _extract_page_tables_and_prose(self, page) -> Tuple[List[str], str]:
+        """
+        Detect all tables on a pdfplumber page and convert each to a
+        Markdown pipe table. Returns (markdown_tables, prose) where prose
+        is the page text with the detected table regions excluded, so
+        table content isn't duplicated as garbled space-aligned text
+        alongside the clean Markdown version.
+
+        Four detection tiers are tried in order:
+        0. Scanned-page guard — if extract_text() returns almost nothing
+           AND the page actually has embedded images, this is very likely
+           a scanned/image-based page rather than a text-native one. Table
+           extraction is skipped entirely (a warning is logged) rather than
+           attempting OCR — this project's input is 10-K EDGAR filings,
+           which are text-native, so OCR would be unnecessary complexity
+           for a case that isn't expected to occur in practice; this guard
+           exists purely so a scanned page fails safely/visibly instead of
+           silently producing garbage from near-empty text.
+        1. _ruled_line_tables_and_prose() — ruled vector-line tables.
+        2. _reconstruct_table_from_word_positions() — word-coordinate
+           reconstruction (pdfplumber-native, via extract_words()). Fixes
+           real 10-Ks where each table cell ends up on its own line even
+           with layout=True, so Tier 3's same-line regex has nothing to
+           match.
+        3. _layout_text_to_markdown_and_prose() — whitespace/background-
+           shading-only tables reconstructed from extract_text(layout=True)
+           text-flow regex. Common case for real 10-K financial statements
+           whose cells DO share a line once layout is preserved.
+
+        TODO: tables that span two PDF pages are detected and linearised
+        independently per page (no cross-page stitching). Revisit if
+        multi-page financial tables need to be merged into one block.
+        """
+        try:
+            probe_text = page.extract_text() or ""
+        except Exception:
+            probe_text = ""
+        try:
+            has_images = bool(page.images)
+        except Exception:
+            has_images = False
+        if len(probe_text.strip()) < self._SCANNED_PAGE_CHAR_THRESHOLD and has_images:
+            page_num = getattr(page, "page_number", "?")
+            print(f"[FinancialFileParser] page {page_num} appears to be "
+                  f"scanned/image-based, table extraction skipped")
+            return [], probe_text
+
+        # ── Tier 1: ruled-line tables ──
+        md_tables, prose = self._ruled_line_tables_and_prose(page)
+        if md_tables:
             return md_tables, prose
 
-        # ── Tier 2: no ruled-line tables — try whitespace/shading-only ──
+        # ── Tier 2: word-coordinate reconstruction (pdfplumber-native) ──
+        try:
+            common_words = self._pdfplumber_words_to_common(page.extract_words() or [])
+            word_tables, word_prose = self._reconstruct_table_from_word_positions(common_words)
+        except Exception:
+            word_tables, word_prose = [], ""
+        if word_tables:
+            return word_tables, word_prose
+
+        # ── Tier 3: layout-text regex fallback ──
         try:
             layout_text = page.extract_text(layout=True) or ""
         except Exception:
@@ -765,29 +1025,43 @@ class FinancialFileParser:
                 ),
             }
 
-        # ── Pre-pass: pdfplumber table detection ───────────────────────
+        # ── Pre-pass: pdfplumber ruled-line table detection (Tier 1 only) ──
         # Runs regardless of which text-extraction engine below ends up
-        # succeeding, so table structure survives even on the fitz path
-        # (fitz has no table-detection API of its own).
+        # succeeding, since ruled-line detection has no fitz equivalent —
+        # both engines rely on pdfplumber's find_tables() for this tier.
+        # Tiers 2 (word-coordinate) and 3 (layout regex) are deliberately
+        # NOT computed here: Tier 2 needs to run against whichever engine's
+        # OWN page object ends up handling the page (fitz's page.get_text
+        # ("words") vs pdfplumber's page.extract_words() can see different
+        # word/coordinate data for the same PDF), so it's tried per-engine
+        # below instead of being pre-computed once. Tier 3 only needs the
+        # raw extract_text(layout=True) string, which IS cheap to
+        # pre-compute once here for the fitz path to reuse.
         # TODO: tables spanning two PDF pages are detected & linearised
         # independently per page — no cross-page table stitching yet.
-        md_tables_by_page: Dict[int, List[str]] = {}
-        # For pages that DO have tables, also keep pdfplumber's bbox-excluded
-        # prose so the fitz engine below can swap it in and avoid duplicating
-        # the raw space-aligned table text alongside the clean Markdown table
-        # (fitz has no bounding-box awareness of pdfplumber's detected tables).
-        table_prose_by_page: Dict[int, str] = {}
+        ruled_tables_by_page: Dict[int, List[str]] = {}
+        # For pages that DO have ruled tables, also keep pdfplumber's
+        # bbox-excluded prose so the fitz engine below can swap it in and
+        # avoid duplicating the raw space-aligned table text alongside the
+        # clean Markdown table (fitz has no bounding-box awareness of
+        # pdfplumber's detected table regions).
+        ruled_prose_by_page: Dict[int, str] = {}
+        layout_text_by_page: Dict[int, str] = {}
         try:
             import pdfplumber as _pdfplumber_prepass
             with _pdfplumber_prepass.open(io.BytesIO(content_bytes)) as _pdf:
                 for page_idx, page in enumerate(_pdf.pages):
                     try:
-                        md_tables, filtered_prose = self._extract_page_tables_and_prose(page)
+                        md_tables, prose = self._ruled_line_tables_and_prose(page)
                     except Exception:
-                        md_tables, filtered_prose = [], ""
+                        md_tables, prose = [], ""
                     if md_tables:
-                        md_tables_by_page[page_idx] = md_tables
-                        table_prose_by_page[page_idx] = filtered_prose
+                        ruled_tables_by_page[page_idx] = md_tables
+                        ruled_prose_by_page[page_idx] = prose
+                    try:
+                        layout_text_by_page[page_idx] = page.extract_text(layout=True) or ""
+                    except Exception:
+                        layout_text_by_page[page_idx] = ""
         except Exception as e:
             print(f"[FinancialFileParser] pdfplumber table pre-pass failed for '{filename}': {e}")
 
@@ -824,17 +1098,17 @@ class FinancialFileParser:
                         continue
 
                 if best_text:
-                    # Merge in any Markdown tables pdfplumber detected on this
-                    # page. On pages that have tables, swap fitz's own prose
-                    # for pdfplumber's bbox-excluded prose (computed in the
+                    # ── Tier 1: ruled-line tables (from the pre-pass) ──
+                    # On pages that have them, swap fitz's own prose for
+                    # pdfplumber's bbox-excluded prose (computed in the
                     # pre-pass above) so the raw space-aligned table text
                     # doesn't end up duplicated alongside the clean Markdown
                     # table below — fitz itself has no bounding-box awareness
                     # of pdfplumber's detected table regions.
-                    page_md_tables = md_tables_by_page.get(page_idx, [])
+                    page_md_tables = ruled_tables_by_page.get(page_idx, [])
                     if page_md_tables:
                         filtered_prose = self._clean_text_content(
-                            table_prose_by_page.get(page_idx, "")
+                            ruled_prose_by_page.get(page_idx, "")
                         )
                         prose_for_page = (
                             filtered_prose
@@ -842,6 +1116,30 @@ class FinancialFileParser:
                             else best_text
                         )
                         best_text = self._compose_page_text(prose_for_page, page_md_tables)
+                    else:
+                        # ── Tier 2: fitz-native word-coordinate reconstruction ──
+                        try:
+                            common_words = self._fitz_words_to_common(page.get_text("words"))
+                            word_tables, word_prose = self._reconstruct_table_from_word_positions(common_words)
+                        except Exception:
+                            word_tables, word_prose = [], ""
+                        if word_tables:
+                            prose_for_page = self._clean_text_content(word_prose)
+                            if not self._is_readable(prose_for_page, min_alnum=1):
+                                prose_for_page = best_text
+                            best_text = self._compose_page_text(prose_for_page, word_tables)
+                        else:
+                            # ── Tier 3: layout-text regex fallback (pre-computed) ──
+                            layout_text = layout_text_by_page.get(page_idx, "")
+                            layout_tables, layout_prose = (
+                                self._layout_text_to_markdown_and_prose(layout_text)
+                                if layout_text else ([], "")
+                            )
+                            if layout_tables:
+                                prose_for_page = self._clean_text_content(layout_prose)
+                                if not self._is_readable(prose_for_page, min_alnum=1):
+                                    prose_for_page = best_text
+                                best_text = self._compose_page_text(prose_for_page, layout_tables)
                     # Step 3: update section state if this page has a new header
                     detected = self._detect_section(best_text)
                     if detected:
