@@ -7,7 +7,7 @@ import html
 from typing import List, Dict, Any, Tuple, Optional
 
 from app.rag.chunker import chunk_text
-from app.tools.table_parser import linearize_financial_table
+from app.tools.table_parser import linearize_financial_table, to_markdown_table
 
 
 class FinancialFileParser:
@@ -207,43 +207,46 @@ class FinancialFileParser:
 
     _MD_SEPARATOR_RE = re.compile(r'^[\|\s\-:]+$')
 
-    @staticmethod
-    def _clean_table_cell(cell) -> str:
-        """Normalise a single pdfplumber table cell into a Markdown-safe string."""
-        if cell is None:
-            return ""
-        text = str(cell).replace("\r", " ").replace("\n", " ")
-        text = re.sub(r"\s+", " ", text).strip()
-        return text.replace("|", "\\|")
-
     def _table_to_markdown(self, table: List[List[Any]]) -> str:
         """
         Convert a pdfplumber extract_table()/extract_tables() result
-        (row x col list of str/None) into a Markdown pipe table.
-        First row is treated as the header row. Returns "" if the table
-        has no usable header or fewer than 2 rows.
+        (row x col list of str/None) into a Markdown pipe table. First row
+        is treated as the header row.
+
+        This is a thin, pdfplumber-specific wrapper: raw pdfplumber tables
+        sometimes include a spurious fully-blank leading row (e.g. from a
+        table's border/padding), which would wrongly become the "header"
+        if row 0 were used as-is — so blank rows are dropped from the WHOLE
+        table first, and row 0 of what's left becomes the header. The
+        actual Markdown formatting is delegated to the shared
+        to_markdown_table() (app.tools.table_parser), which is also used
+        by linearize_financial_table() for sample/CSV table data — one
+        canonical formatter, not two divergent implementations.
         """
         if not table:
             return ""
-        rows = [[self._clean_table_cell(c) for c in row] for row in table if row is not None]
-        rows = [r for r in rows if any(c for c in r)]
-        if len(rows) < 2:
+        non_empty = [
+            row for row in table
+            if row is not None and any(c and str(c).strip() for c in row)
+        ]
+        if len(non_empty) < 2:
             return ""
+        headers, rows = non_empty[0], non_empty[1:]
+        return to_markdown_table(headers, rows)
 
-        n_cols = max(len(r) for r in rows)
-        if n_cols == 0:
-            return ""
-        padded = [r + [""] * (n_cols - len(r)) for r in rows]
-
-        header, data_rows = padded[0], padded[1:]
-        if not any(c for c in header):
-            return ""
-
-        lines = ["| " + " | ".join(header) + " |"]
-        lines.append("|" + "|".join(["---"] * n_cols) + "|")
-        for row in data_rows:
-            lines.append("| " + " | ".join(row) + " |")
-        return "\n".join(lines)
+    # A single table VALUE cell, as it appears in real 10-K statements:
+    # - "1,503" / "(352)" / "-352" / "15%" — an ordinary number.
+    # - "$ 1,503" / "$1,503" — many filings render the '$' as its own glyph,
+    #   which pdfplumber then extracts as a separate text run with its own
+    #   (sometimes wide) gap before the digits — the '\s{0,3}' absorbs that
+    #   so "$  1,503" is captured as ONE value, not split into two.
+    # - "—" / "–" / "-" alone — the standard placeholder for a zero/blank
+    #   cell in a financial statement (e.g. "Non-cash operating lease cost
+    #   64  —  —"). Without this alternative, ANY row containing a blank
+    #   period fails to match at all, since the digit-based branch requires
+    #   a literal digit.
+    _VALUE_TOKEN = r'(?:\$\s{0,3})?[\(\-]?\d[\d,\.]*\)?%?|[—–-]'
+    _LAYOUT_VALUE_RE = re.compile(_VALUE_TOKEN)
 
     # A "layout row" is a label followed by 2+ whitespace-only numeric-looking
     # tokens — this is how pdfplumber's extract_text(layout=True) renders a
@@ -255,16 +258,32 @@ class FinancialFileParser:
     # - Requires at least one letter/CJK char before the values, so a bare
     #   year-header line like "2019   2018   2017" (no real label) is never
     #   mistaken for a data row — it should stay a header candidate.
-    # - The label-to-first-value gap only needs 1+ space (long line-item
-    #   labels often butt right up against the first numeric column with
-    #   little room to spare), but at least TWO numeric tokens are required
-    #   (multi-space-separated) — real financial tables always show 2+
-    #   comparison periods side by side, and requiring 2+ avoids matching an
-    #   ordinary prose sentence that happens to trail off with one number.
+    # - The label-to-first-value gap, AND the gap between subsequent value
+    #   tokens, only need 1+ space. A 2+-space requirement between values
+    #   looks safer on paper, but real-world layout=True output frequently
+    #   collapses adjacent numeric columns down to a single space when the
+    #   source PDF wasn't built with a wide, rule-aligned column grid (e.g.
+    #   a proportional-font page where columns are only whitespace-padded
+    #   in the source text, not laid out on a true fixed grid) — with a 2+
+    #   requirement, EVERY row on such a page fails to match and the whole
+    #   table silently falls back to unconverted plain text. At least TWO
+    #   value tokens are still required — real financial tables always show
+    #   2+ comparison periods side by side — which is what actually keeps
+    #   this from matching an ordinary prose sentence that trails off with
+    #   one number; an isolated single-row false match (e.g. a "Month DD,
+    #   YYYY" date landing on two token-shaped fragments) is harmless on its
+    #   own since _flush() below additionally requires 3+ CONSECUTIVE
+    #   matching rows before anything is treated as a real table.
     _LAYOUT_ROW_RE = re.compile(
         r'^(?=.*[A-Za-z一-鿿])(?P<label>\S.{0,80}?)\s+'
-        r'(?P<values>[\(\-\$]?\d[\d,\.]*\)?%?(?:\s{2,}[\(\-\$]?\d[\d,\.]*\)?%?)+)\s*$'
+        r'(?P<values>(?:' + _VALUE_TOKEN + r')(?:\s+(?:' + _VALUE_TOKEN + r'))+)\s*$'
     )
+
+    @staticmethod
+    def _normalize_layout_value(token: str) -> str:
+        """Collapse the gap pdfplumber can leave between a standalone '$'
+        glyph and its digits ("$  1,503" -> "$1,503")."""
+        return re.sub(r'^\$\s+', '$', token.strip())
 
     def _layout_text_to_markdown_and_prose(self, layout_text: str) -> Tuple[List[str], str]:
         """
@@ -292,7 +311,7 @@ class FinancialFileParser:
         header_candidate = [""]
 
         def _flush():
-            if len(current_rows) >= 2:
+            if len(current_rows) >= 3:
                 n_cols = current_n_cols[0]
                 years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
                 headers = ["Line Item"] + [
@@ -321,7 +340,14 @@ class FinancialFileParser:
             m = self._LAYOUT_ROW_RE.match(stripped)
             if m:
                 label = m.group("label").strip()
-                values = re.split(r'\s{2,}', m.group("values").strip())
+                # findall (not a whitespace split) because a '$' and its
+                # digits can legitimately be separated by the SAME width of
+                # space as separates two different columns — the token
+                # pattern itself is what decides where one value ends.
+                values = [
+                    self._normalize_layout_value(v)
+                    for v in self._LAYOUT_VALUE_RE.findall(m.group("values"))
+                ]
                 if current_n_cols[0] is not None and len(values) != current_n_cols[0]:
                     _flush()
                 current_rows.append((label, values))
@@ -329,10 +355,22 @@ class FinancialFileParser:
             else:
                 _flush()
                 prose_lines.append(stripped)
-                header_candidate[0] = stripped
+                # Only overwrite the header candidate when the new line
+                # itself looks like a year header, or none has been found
+                # yet — a section subheading with no years (e.g. "Revenue:",
+                # sitting between the year row and the first data row, which
+                # is how almost every real income statement is laid out)
+                # must not clobber a good candidate found earlier on the
+                # same page.
+                if self._extract_year_headers(stripped) or not header_candidate[0]:
+                    header_candidate[0] = stripped
         _flush()
 
         return tables, "\n".join(prose_lines)
+
+    #: Below this many extracted characters, a page with images on it is
+    #: treated as scanned/image-based rather than text-native.
+    _SCANNED_PAGE_CHAR_THRESHOLD = 20
 
     def _extract_page_tables_and_prose(self, page) -> Tuple[List[str], str]:
         """
@@ -342,7 +380,16 @@ class FinancialFileParser:
         table content isn't duplicated as garbled space-aligned text
         alongside the clean Markdown version.
 
-        Two detection tiers are tried in order:
+        Three detection tiers are tried in order:
+        0. Scanned-page guard — if extract_text() returns almost nothing
+           AND the page actually has embedded images, this is very likely
+           a scanned/image-based page rather than a text-native one. Table
+           extraction is skipped entirely (a warning is logged) rather than
+           attempting OCR — this project's input is 10-K EDGAR filings,
+           which are text-native, so OCR would be unnecessary complexity
+           for a case that isn't expected to occur in practice; this guard
+           exists purely so a scanned page fails safely/visibly instead of
+           silently producing garbage from near-empty text.
         1. find_tables() — ruled vector-line tables (bbox-exclusion via
            outside_bbox() gives clean prose).
         2. _layout_text_to_markdown_and_prose() — whitespace/background-
@@ -354,6 +401,20 @@ class FinancialFileParser:
         independently per page (no cross-page stitching). Revisit if
         multi-page financial tables need to be merged into one block.
         """
+        try:
+            probe_text = page.extract_text() or ""
+        except Exception:
+            probe_text = ""
+        try:
+            has_images = bool(page.images)
+        except Exception:
+            has_images = False
+        if len(probe_text.strip()) < self._SCANNED_PAGE_CHAR_THRESHOLD and has_images:
+            page_num = getattr(page, "page_number", "?")
+            print(f"[FinancialFileParser] page {page_num} appears to be "
+                  f"scanned/image-based, table extraction skipped")
+            return [], probe_text
+
         try:
             found_tables = page.find_tables()
         except Exception:

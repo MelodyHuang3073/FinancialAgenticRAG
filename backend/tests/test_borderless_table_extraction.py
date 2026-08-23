@@ -173,3 +173,89 @@ def test_no_false_positive_table_on_pure_prose():
     result = parser._parse_pdf("prose.pdf", _build_pure_prose_pdf_bytes(), "TESTCO")
     types = {p["type"] for p in result["passages"]}
     assert types == {"text_note"}, f"expected only text_note passages, got {types}"
+
+
+def _build_dollar_dash_pdf_bytes() -> bytes:
+    """Build a borderless table where '$' is drawn as its own glyph right
+    before each number (pdfplumber then extracts it as a separate text run
+    with its own gap — "$  1,503", not "$1,503") and blank periods use the
+    standard '—' placeholder. This is the exact real-world pattern that a
+    naive digit-only value regex rejects outright."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    y = height - 60
+    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(width / 2, y, "ACTIVISION BLIZZARD, INC. AND SUBSIDIARIES")
+    y -= 12
+    c.drawCentredString(width / 2, y, "CONSOLIDATED STATEMENTS OF CASH FLOWS")
+    y -= 20
+
+    col_dollar_x = [460, 540, 610]
+    col_num_x = [500, 570, 640]
+    c.setFont("Helvetica-Bold", 8)
+    for ci, yr in enumerate(["2019", "2018", "2017"]):
+        c.drawRightString(col_num_x[ci], y, yr)
+    y -= 14
+
+    c.setFont("Helvetica", 8)
+    row_h = 13
+
+    def draw_row(label, vals, y):
+        c.drawString(72, y - 10, label)
+        for ci, v in enumerate(vals):
+            if v.startswith("$"):
+                c.drawString(col_dollar_x[ci], y - 10, "$")
+                c.drawRightString(col_num_x[ci], y - 10, v[1:])
+            else:
+                c.drawRightString(col_num_x[ci], y - 10, v)
+
+    rows = [
+        ("Net income", ["$1,503", "$1,848", "$273"]),
+        ("Non-cash operating lease cost", ["64", "—", "—"]),
+        ("Depreciation and amortization", ["328", "509", "888"]),
+    ]
+    for label, vals in rows:
+        draw_row(label, vals, y)
+        y -= row_h
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def test_dollar_glyph_and_em_dash_placeholder_rows_detected():
+    """Regression test: rows using a standalone '$' glyph before the number
+    and '—' as a zero/blank placeholder must still be recognised — both are
+    extremely common in real 10-K statements and previously caused the
+    ENTIRE page's table detection to silently fail (falling all the way
+    back to plain, unconverted extract_text())."""
+    parser = FinancialFileParser()
+    with pdfplumber.open(io.BytesIO(_build_dollar_dash_pdf_bytes())) as pdf:
+        md_tables, prose = parser._extract_page_tables_and_prose(pdf.pages[0])
+
+    assert md_tables, "failed to detect table with '$' glyph / '—' placeholder rows"
+    joined = "\n".join(md_tables)
+    assert "Net income" in joined
+    assert "$1,503" in joined and "$1,848" in joined and "$273" in joined
+    assert "Non-cash operating lease cost" in joined
+    assert "—" in joined, "em-dash placeholder value must be preserved, not dropped"
+    assert "Depreciation and amortization" in joined
+    assert "328" in joined
+
+    for md in md_tables:
+        for line in md.split("\n"):
+            assert _is_table_line(line)
+
+
+def test_em_dash_punctuation_in_prose_not_misdetected_as_table_row():
+    """An em-dash used as ordinary sentence punctuation (not a table
+    placeholder) must never trigger a false-positive table row."""
+    parser = FinancialFileParser()
+    prose_lines = [
+        "The Company — despite ongoing macroeconomic headwinds — reported growth.",
+        "Revenue increased significantly — driven largely by strong demand — this year.",
+    ]
+    for line in prose_lines:
+        assert not parser._LAYOUT_ROW_RE.match(line.strip()), f"false positive on: {line!r}"
