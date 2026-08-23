@@ -34,6 +34,56 @@ function extractMarkdownTableBlock(text) {
   return best.join('\n');
 }
 
+/* ─── Re-pad a Markdown pipe-table block so every '|' lines up vertically
+   in a monospace view — i.e. the "properly aligned raw Markdown" form you'd
+   get from a formatter, as opposed to the loosely-spaced text the backend
+   emits. Numeric-looking columns are right-aligned (label columns stay
+   left-aligned), matching how financial statements are normally read. ─── */
+function formatAlignedMarkdownTable(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return text;
+
+  const splitRow = (l) => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  const rows = lines.map(splitRow);
+  const isSeparator = (row) => row.every(c => /^:?-+:?$/.test(c));
+  // '—'/'–'/'-' alone is the standard financial-statement placeholder for
+  // a zero/blank period — treat it as numeric so it doesn't break right-
+  // alignment for an otherwise all-numeric column.
+  const isNumericCell = (c) => c === '' || /^[—–-]$/.test(c) || /^[(\-$]?[\d,]+(\.\d+)?\)?%?$/.test(c);
+
+  const nCols = Math.max(...rows.map(r => r.length));
+  const norm = rows.map(r => {
+    const padded = [...r];
+    while (padded.length < nCols) padded.push('');
+    return padded;
+  });
+
+  const widths = new Array(nCols).fill(3);
+  const numericCol = new Array(nCols).fill(true);
+  norm.forEach((row) => {
+    if (isSeparator(row)) return;
+    row.forEach((cell, ci) => {
+      widths[ci] = Math.max(widths[ci], cell.length);
+      if (cell !== '' && !isNumericCell(cell)) numericCol[ci] = false;
+    });
+  });
+
+  const padCell = (cell, ci) => {
+    const w = widths[ci];
+    const gap = ' '.repeat(Math.max(0, w - cell.length));
+    return numericCol[ci] && ci > 0 ? gap + cell : cell + gap;
+  };
+
+  return norm
+    .map((row) => {
+      if (isSeparator(row)) {
+        return '| ' + widths.map((w, ci) => (numericCol[ci] && ci > 0 ? '-'.repeat(Math.max(1, w - 1)) + ':' : '-'.repeat(w))).join(' | ') + ' |';
+      }
+      return '| ' + row.map((c, ci) => padCell(c, ci)).join(' | ') + ' |';
+    })
+    .join('\n');
+}
+
 /* ─── Markdown Table renderer ─── */
 function MarkdownTable({ text }) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -271,6 +321,7 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
   const [showReasoning, setShowReasoning] = useState(true);
   const [showTraceDetails, setShowTraceDetails] = useState(false);
   const [expandedEvidence, setExpandedEvidence] = useState(null);
+  const [evidenceViewMode, setEvidenceViewMode] = useState({}); // { [index]: 'table' | 'markdown' }
   const { summaryText, detailText } = splitAnswerText(msg.result.final_answer);
 
   return (
@@ -345,18 +396,30 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                           // came from — pulled from parent_content — instead,
                           // so the panel displays the complete table
                           // structure rather than a single isolated row.
-                          // If parent_content isn't a clean Markdown pipe
-                          // table (e.g. an older/legacy ingestion path), fall
-                          // back to showing parent_content as-is — still the
-                          // full table context, just not pretty-rendered —
-                          // rather than silently collapsing to one row.
-                          const fullTableBlock = ev.chunk_type === 'table_row'
-                            ? extractMarkdownTableBlock(ev.parent_content)
-                            : '';
+                          //
+                          // isTable is ONLY true when extractMarkdownTableBlock
+                          // found a genuine multi-row pipe block. Every
+                          // passage's content/parent_content ALSO starts with
+                          // a "Company: X | Document: Y | Page: Z |" metadata
+                          // prefix that itself contains '|' characters as a
+                          // plain field separator — a naive "does this text
+                          // contain any '|'" check would misfire on that
+                          // prefix and render a bogus one-column "table" out
+                          // of ordinary prose whenever real table detection
+                          // found nothing. If parent_content isn't a clean
+                          // Markdown table (e.g. an older ingestion path, or a
+                          // page whose table structure couldn't be recovered),
+                          // fall back to showing it as plain preformatted
+                          // text — still the full context, just not
+                          // rendered as a fabricated table.
+                          const tableCandidate = ev.chunk_type === 'table_row'
+                            ? (ev.parent_content || ev.content || '')
+                            : (ev.content || '');
+                          const fullTableBlock = extractMarkdownTableBlock(tableCandidate);
+                          const isTable = !!fullTableBlock;
                           const fullContent = fullTableBlock
-                            || (ev.chunk_type === 'table_row' ? ev.parent_content : '')
-                            || ev.content || '';
-                          const isTable = fullContent.includes('|') && fullContent.split('\n').some(l => l.includes('|'));
+                            || (ev.chunk_type === 'table_row' ? (ev.parent_content || ev.content) : ev.content)
+                            || '';
                           const matchedLineItem = ev.chunk_type === 'table_row'
                             ? (ev.content || '').match(/Line Item:\s*([^|]+)/)?.[1]?.trim()
                             : null;
@@ -442,8 +505,29 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                                       Matched row: <strong>{matchedLineItem}</strong> (full table shown below)
                                     </p>
                                   )}
+                                  {isTable && (
+                                    <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                                      {['markdown', 'table'].map((mode) => (
+                                        <button
+                                          key={mode}
+                                          onClick={() => setEvidenceViewMode((prev) => ({ ...prev, [si]: mode }))}
+                                          style={{
+                                            fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+                                            padding: '2px 9px', borderRadius: 999,
+                                            border: `1px solid ${(evidenceViewMode[si] || 'markdown') === mode ? '#6366f1' : '#e2e8f0'}`,
+                                            background: (evidenceViewMode[si] || 'markdown') === mode ? '#eef2ff' : '#fff',
+                                            color: (evidenceViewMode[si] || 'markdown') === mode ? '#4338ca' : '#94a3b8',
+                                          }}
+                                        >
+                                          {mode === 'table' ? '表格 Table' : '對齊 Markdown'}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
                                   {isTable
-                                    ? <MarkdownTable text={fullContent} />
+                                    ? ((evidenceViewMode[si] || 'markdown') === 'markdown'
+                                        ? <pre style={{ whiteSpace: 'pre', overflowX: 'auto', fontSize: 12, lineHeight: 1.6, color: '#334155', margin: 0, fontFamily: 'monospace', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: 10 }}>{formatAlignedMarkdownTable(fullContent)}</pre>
+                                        : <MarkdownTable text={fullContent} />)
                                     : <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#475569', margin: 0, fontFamily: 'monospace' }}>{fullContent || 'No chunk content available'}</pre>
                                   }
                                 </div>
