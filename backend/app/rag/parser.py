@@ -578,13 +578,26 @@ class FinancialFileParser:
         distinct rows are dropped as noise. Returns (sorted anchor x1
         positions, tolerance used) — the caller reuses the tolerance to
         assign individual words to their nearest anchor.
+
+        Only rows with 2+ numeric-looking tokens contribute candidates —
+        a row with exactly ONE numeric-looking token is far more likely a
+        footnote reference marker ("(1)", "(2)") sitting near the left
+        margin next to explanatory prose than a real table value; a
+        genuine data row always carries 2+ values across year/period
+        columns. Without this, two such markers at the same x1 (a real
+        example: two footnote definitions "(1) Excludes ..." / "(2)
+        Includes ..." stacked at a page's bottom) form their own
+        spurious low-x1 "value column" anchor, close enough to a short
+        label word's own x1 (e.g. "Net" in "Net income") to misclassify
+        that label word as a value instead — scrambling label word order
+        in the final row.
         """
-        numeric_entries = [
-            (row_idx, w["x1"])
-            for row_idx, row in enumerate(rows)
-            for w in row
-            if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())
-        ]
+        numeric_entries = []
+        for row_idx, row in enumerate(rows):
+            row_numeric = [w for w in row if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())]
+            if len(row_numeric) < 2:
+                continue
+            numeric_entries.extend((row_idx, w["x1"]) for w in row_numeric)
         if not numeric_entries:
             return [], self._WORD_COL_MIN_TOLERANCE
 
@@ -808,12 +821,31 @@ class FinancialFileParser:
         values in order — immune to whichever row happened to get the
         '$' cell. A real placeholder value like '—' (em dash) is kept,
         since it's a meaningful zero/blank for that period, not noise.
+        Also re-merges a negative number's closing parenthesis back onto
+        its digits when pdfplumber's cell-splitting has put them in two
+        adjacent cells ('(116' + ')' -> '(116)') — otherwise that single
+        value eats two column slots instead of one, throwing off every
+        later column's index-based year match on that row.
         """
         if not row:
             return row
         label = row[0]
         rest = [c for c in row[1:] if c and c.strip() not in ("", "$")]
-        return [label] + rest
+        merged: list = []
+        i = 0
+        while i < len(rest):
+            cell = rest[i].strip()
+            if (
+                i + 1 < len(rest)
+                and re.match(r'^\(\s*[\d,.]+$', cell)
+                and rest[i + 1].strip() == ')'
+            ):
+                merged.append(cell + ')')
+                i += 2
+            else:
+                merged.append(rest[i])
+                i += 1
+        return [label] + merged
 
     def _inject_missing_year_header(self, rows: list, page, table_top: float) -> list:
         """
@@ -861,17 +893,82 @@ class FinancialFileParser:
         ]
         return [synthesized, rows[0]] + rows[1:]
 
+    #: Maximum vertical gap (points) between one table's bottom edge and
+    #: the next table's top edge for them to be merged into one table —
+    #: see _merge_adjacent_tables(). Small enough that it won't bridge a
+    #: real gap between two genuinely different tables/sections on the
+    #: same page, but generous enough to absorb ordinary row spacing.
+    _TABLE_MERGE_MAX_GAP = 15.0
+
+    #: Maximum horizontal bbox-edge difference (points) for two tables to
+    #: be considered "the same columns" when merging — see
+    #: _merge_adjacent_tables().
+    _TABLE_MERGE_MAX_X_DRIFT = 5.0
+
+    def _merge_adjacent_tables(self, found_tables: list) -> List[list]:
+        """
+        pdfplumber's find_tables() sometimes fragments ONE cohesive
+        financial statement into many separate single/few-row "tables" —
+        some real 10-Ks draw a thin ruled line between EVERY row, not
+        just around the table as a whole, so each rule boundary gets
+        detected as its own table region. Left alone, that means a whole
+        "Consolidated Statement of Cash Flows" ends up as 20+ disconnected
+        one-row fragments instead of one coherent chunk — bad for both
+        the Source Evidence panel (which can only show one tiny fragment
+        at a time) and retrieval (a search for one line item never
+        surfaces the surrounding statement it belongs to).
+
+        Groups tables that are vertically adjacent (the next one starts
+        at or just below where the previous one ends — no real content
+        gap) AND share the same horizontal extent (same left/right edges,
+        i.e. genuinely the same columns) into one combined table. Returns
+        a list of groups, each group a list of pdfplumber Table objects
+        in top-to-bottom order — a page with no fragmentation just gets
+        back the same tables as singleton groups.
+        """
+        if not found_tables:
+            return []
+        ordered = sorted(found_tables, key=lambda t: t.bbox[1])
+        groups: List[list] = [[ordered[0]]]
+        for t in ordered[1:]:
+            prev = groups[-1][-1]
+            vertical_gap = t.bbox[1] - prev.bbox[3]
+            same_columns = (
+                abs(t.bbox[0] - prev.bbox[0]) < self._TABLE_MERGE_MAX_X_DRIFT
+                and abs(t.bbox[2] - prev.bbox[2]) < self._TABLE_MERGE_MAX_X_DRIFT
+            )
+            if same_columns and vertical_gap < self._TABLE_MERGE_MAX_GAP:
+                groups[-1].append(t)
+            else:
+                groups.append([t])
+        return groups
+
     def _ruled_line_tables_and_prose(self, page) -> Tuple[List[str], str]:
         """
         Tier 1: ruled vector-line tables via pdfplumber's find_tables(),
         with the detected table regions excluded from the prose via
         outside_bbox() so table content isn't duplicated as garbled
-        space-aligned text alongside the clean Markdown version. Returns
-        ([], "") when no ruled-line tables were found on this page.
+        space-aligned text alongside the clean Markdown version.
+
+        A ruled-line table somewhere on the page does NOT mean every
+        table row on that page has ruled lines around it — real 10-Ks
+        commonly have a leading row or two (e.g. "Net income" at the top
+        of a cash-flow statement) with no rule at all before the first
+        one appears. Those rows carry real numeric data but would
+        otherwise be lost to plain, un-tabulated prose: once THIS
+        function returns any table, the caller never falls through to
+        Tier 2/3, since as far as it knows Tier 1 already succeeded on
+        this page. So after excluding every ruled-line table's own
+        region, this ALSO tries Tier 2 (word-coordinate reconstruction,
+        which needs no ruled lines at all) on whatever words are left,
+        and folds in anything it finds — Tier 1 and Tier 2 combine
+        instead of being mutually exclusive. Returns ([], "") only when
+        NEITHER tier found anything on this page.
 
         Factored out from _extract_page_tables_and_prose() so the
-        _parse_pdf() pre-pass (which needs ONLY this tier, ahead of the
-        fitz-native Tier 2 below) doesn't have to duplicate this logic.
+        _parse_pdf() pre-pass (which needs ONLY this combined tier, ahead
+        of the fitz-native word-coordinate pass below) doesn't have to
+        duplicate this logic.
         """
         try:
             found_tables = page.find_tables()
@@ -880,19 +977,33 @@ class FinancialFileParser:
 
         md_tables = []
         filtered_page = page
-        for t in found_tables:
+        for group in self._merge_adjacent_tables(found_tables):
             try:
-                rows = [self._compact_row_cells(r) for r in t.extract()]
-                rows = self._inject_missing_year_header(rows, page, t.bbox[1])
+                rows: list = []
+                for t in group:
+                    rows.extend(self._compact_row_cells(r) for r in t.extract())
+                rows = self._inject_missing_year_header(rows, page, group[0].bbox[1])
                 md = self._table_to_markdown(rows)
             except Exception:
                 md = ""
             if md:
                 md_tables.append(md)
-            try:
-                filtered_page = filtered_page.outside_bbox(t.bbox)
-            except Exception:
-                pass
+            for t in group:
+                try:
+                    filtered_page = filtered_page.outside_bbox(t.bbox)
+                except Exception:
+                    pass
+
+        # ── Recover rows with no ruled lines at all, via Tier 2 ──────────
+        try:
+            leftover_words = self._pdfplumber_words_to_common(filtered_page.extract_words() or [])
+            recovered_tables, recovered_prose = self._reconstruct_table_from_word_positions(leftover_words)
+        except Exception:
+            recovered_tables, recovered_prose = [], None
+
+        if recovered_tables:
+            md_tables.extend(recovered_tables)
+            return md_tables, recovered_prose
 
         if not md_tables:
             return [], ""
@@ -1043,9 +1154,17 @@ class FinancialFileParser:
         passages = []
         table_name = f"{filename} (Page {page_num} – Financial Table)"
         parent_id = f"parent_{company_name}_p{page_num}_tbl"
+        # The full CLEAN Markdown table(s) — not a raw page_text[:1000]
+        # slice, which can cut off before ever reaching the table (real
+        # pages usually lead with boilerplate/title text) or capture it
+        # only partially. Both the frontend's Source Evidence panel and
+        # pot_reasoner's row-scoped formula extraction rely on
+        # parent_content actually containing a genuine '|---|' table
+        # block to render/parse it as a table instead of falling back to
+        # plain text.
         parent_content = (
             f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
-            + page_text[:1000]
+            + "\n\n".join(table_blocks)
         )
 
         row_idx = 0
