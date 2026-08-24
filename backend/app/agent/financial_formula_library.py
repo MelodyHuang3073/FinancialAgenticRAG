@@ -58,6 +58,21 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "result_label": "Cash Ratio",
         "unit": "x",
     },
+    "operating_cash_flow_ratio": {
+        "keywords_zh": ["營業現金流量比率", "營業活動現金比率"],
+        "keywords_en": ["operating cash flow ratio", "cash flow from operations ratio",
+                         "ocf ratio", "cash from operations ratio"],
+        "formula_expr": "cash_from_operations / current_liabilities",
+        "required_vars": {
+            "cash_from_operations": ["cash from operations", "net cash provided by operating activities",
+                                      "cash provided by operating activities",
+                                      "net cash from operating activities", "operating cash flow",
+                                      "營業活動之現金流量", "營業活動現金流量"],
+            "current_liabilities":  ["流動負債", "current liabilities", "total current liabilities"],
+        },
+        "result_label": "Operating Cash Flow Ratio",
+        "unit": "x",
+    },
 
     # ── Profitability Ratios ──────────────────────────────────────────────────
     "gross_margin": {
@@ -176,6 +191,37 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
     },
 
     # ── Efficiency Ratios ─────────────────────────────────────────────────────
+    # fixed_asset_turnover MUST be checked before asset_turnover: detect_formula()
+    # matches on the FIRST keyword hit in dict order, and "fixed asset turnover"
+    # contains "asset turnover" as a substring, so if asset_turnover's entry
+    # came first every fixed_asset_turnover question would misfire as a plain
+    # asset_turnover match instead.
+    "fixed_asset_turnover": {
+        # NOT the same required_vars as asset_turnover below: this divides by
+        # average net PP&E, not total assets — a company can look
+        # completely different on the two ratios (e.g. asset-light
+        # software vs. capital-intensive manufacturing), so the two
+        # denominators must never share an alias list.
+        "keywords_zh": ["固定資產週轉率", "不動產廠房及設備週轉率"],
+        "keywords_en": ["fixed asset turnover", "fixed-asset turnover", "net ppe turnover",
+                         "ppe turnover", "property plant and equipment turnover"],
+        "formula_expr": "revenue / ((ppe_old + ppe_new) / 2)",
+        "required_vars": {
+            "revenue":  ["營業收入", "revenue", "net revenue", "net sales", "total revenue", "sales"],
+            # Same alias list for both — distinguished purely by which
+            # year column matches, same convention as revenue_yoy's
+            # revenue_new/revenue_old below.
+            "ppe_old": ["property, plant and equipment, net", "property and equipment, net",
+                        "net property, plant and equipment", "property, plant and equipment",
+                        "property and equipment", "不動產、廠房及設備"],
+            "ppe_new": ["property, plant and equipment, net", "property and equipment, net",
+                        "net property, plant and equipment", "property, plant and equipment",
+                        "property and equipment", "不動產、廠房及設備"],
+        },
+        "result_label": "Fixed Asset Turnover",
+        "unit": "x",
+        "multi_year": True,
+    },
     "asset_turnover": {
         "keywords_zh": ["資產週轉率", "總資產週轉率"],
         "keywords_en": ["asset turnover", "total asset turnover"],
@@ -272,6 +318,30 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "unit": "%",
         "multi_year": True,
     },
+
+    # ── Multi-Year Average Ratios ────────────────────────────────────────────
+    "capex_to_revenue": {
+        # "period_average" (unlike "multi_year") isn't a pick-one-of-two-years
+        # ratio — it's the average of capex/revenue computed separately for
+        # EVERY year the query asks about (e.g. "FY2017-FY2019 3 year
+        # average"), which needs the full per-year series, not just an
+        # old/new pair. See _extract_formula_guided()/_gen_formula_code() in
+        # pot_reasoner.py for how this flag changes extraction/codegen.
+        "keywords_zh": ["資本支出佔營收比", "資本支出占營收比", "資本支出營收比"],
+        "keywords_en": ["capex to revenue", "capex as a percentage of revenue",
+                         "capex % of revenue", "capital expenditures to revenue",
+                         "capex as a % of revenue"],
+        "formula_expr": "capex / revenue",  # evaluated once per year, then averaged
+        "required_vars": {
+            "capex":   ["capital expenditures", "capital expenditure", "purchases of property",
+                        "purchases of property and equipment", "purchases of property, plant and equipment",
+                        "資本支出"],
+            "revenue": ["營業收入", "revenue", "net revenue", "net sales", "total revenue", "sales"],
+        },
+        "result_label": "CapEx to Revenue (period average)",
+        "unit": "%",
+        "period_average": True,
+    },
 }
 
 
@@ -307,12 +377,3 @@ def detect_formula(query: str) -> Optional[Dict[str, Any]]:
 def get_variable_aliases(formula_entry: Dict[str, Any]) -> Dict[str, List[str]]:
     """Return the required_vars dict: placeholder → alias list."""
     return formula_entry.get("required_vars", {})
-
-
-def list_all_formula_keywords() -> List[str]:
-    """Return a flat list of all trigger keywords (for router/classifier use)."""
-    kws = []
-    for entry in FORMULA_LIBRARY.values():
-        kws.extend(entry.get("keywords_zh", []))
-        kws.extend(entry.get("keywords_en", []))
-    return kws

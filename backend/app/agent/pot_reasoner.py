@@ -146,7 +146,30 @@ def _normalize_year(y: str) -> str:
 
 
 def _extract_query_years(query: str) -> List[str]:
-    return [_normalize_year(y) for y in re.findall(r"(?:FY)?(20\d{2})", query)]
+    """Every distinct fiscal year mentioned in the query, in first-seen
+    order. A dash/'to'-joined range ("FY2017-FY2019", "2017 to 2019") is
+    expanded to every year in between (inclusive) — a plain year-token
+    scan would otherwise return only the two range endpoints, which is
+    wrong for an "N-year average" question that needs every year in the
+    range (e.g. period_average formulas — see financial_formula_library)."""
+    years: List[str] = []
+    seen: set = set()
+    for m in re.finditer(
+        r"(?:FY)?(20\d{2})\s*(?:[-–—]|to)\s*(?:FY)?(20\d{2})", query, re.IGNORECASE
+    ):
+        start, end = int(m.group(1)), int(m.group(2))
+        if 0 < end - start <= 10:
+            for y in range(start, end + 1):
+                ys = str(y)
+                if ys not in seen:
+                    years.append(ys)
+                    seen.add(ys)
+    for y in re.findall(r"(?:FY)?(20\d{2})", query):
+        ny = _normalize_year(y)
+        if ny not in seen:
+            years.append(ny)
+            seen.add(ny)
+    return years
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -331,32 +354,69 @@ def _extract_formula_guided(
     evidence_list: List[Dict[str, Any]],
     formula_entry: Dict[str, Any],
     query_years: List[str],
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, float], Dict[str, List[Tuple[float, str]]]]:
     """
     For each required variable in formula_entry, search evidence for a chunk whose
-    Line Item matches a known alias.  Returns {placeholder -> float}.
+    Line Item matches a known alias. Returns (final, resolved):
+      - final:    {placeholder -> best single float} — what every existing
+                  caller expects (codegen for non-period_average formulas,
+                  the extracted-variables summary shown to the user).
+      - resolved: {placeholder -> [(value, year), ...]} — every match found,
+                  needed by period_average formulas, which average a ratio
+                  across EVERY year the query asks about rather than
+                  picking one old/new pair (see _gen_formula_code()).
 
-    Bug 1 root-cause fix: when evidence is narrative text (not pipe-delimited),
-    the pipe-field parser finds nothing and resolved stays empty.  We now fall back
-    to _extract_from_free_text to fill any still-empty placeholders.
+    Extraction priority per evidence chunk — Priority 1 is the actual fix
+    for the operating_income/revenue mix-up bug: the previous version
+    treated "does this alias substring appear ANYWHERE in the whole
+    chunk" as sufficient to accept a match, then scanned the ENTIRE
+    chunk's pipe-delimited fields for the first "year: value" pattern —
+    so on a real income-statement table (revenue and operating income
+    both present in the same evidence chunk, as they always are), an
+    "operating income" alias hit would happily resolve to Net sales'
+    value if that row's field got scanned first. Matching alias against
+    each ROW's own label — not the whole chunk — makes that structurally
+    impossible: a value can only be attributed to the row it actually
+    came from.
+      1. Standard Markdown table (the format real PDF tables are stored
+         in) — matched ROW BY ROW via _extract_from_markdown_table_block().
+      2. Legacy single-line "Line Item: X | Year: Val" format (kept for
+         backward compatibility with content still in that shape).
+      3. Free-text keyword-proximity fallback (_extract_from_free_text),
+         for genuinely unstructured narrative evidence only.
     """
     var_aliases = get_variable_aliases(formula_entry)
     is_multi_year = formula_entry.get("multi_year", False)
+    is_period_average = formula_entry.get("period_average", False)
     resolved: Dict[str, List[Tuple[float, str]]] = {k: [] for k in var_aliases}
 
     for placeholder, aliases in var_aliases.items():
+        aliases_lower = [a.lower() for a in aliases]
         for ev in evidence_list:
             content = ev.get("parent_content") or ev.get("content", "")
             if not content:
                 continue
-            content_lower = content.lower()
+            ev_company = ev.get("company", "")
 
-            # Check if any alias appears in this evidence chunk
-            alias_hit = any(a.lower() in content_lower for a in aliases)
+            # ── Priority 1: standard Markdown table, matched per ROW ──────
+            if any(is_markdown_separator_row(l) for l in content.split("\n")):
+                for row in _extract_from_markdown_table_block(content, ev_company).values():
+                    label_lower = row["item"].lower()
+                    if not any(a in label_lower for a in aliases_lower):
+                        continue
+                    pair = (row["val"], row["year"])
+                    if pair not in resolved[placeholder]:
+                        resolved[placeholder].append(pair)
+                if resolved[placeholder] and not (is_multi_year or is_period_average):
+                    break  # first chunk match wins for simple (single-year) formulas
+                continue  # this chunk is fully handled by the table parser
+
+            content_lower = content.lower()
+            alias_hit = any(a in content_lower for a in aliases_lower)
             if not alias_hit:
                 continue
 
-            # Parse pipe-delimited fields for year: value pairs
+            # ── Priority 2: legacy single-line colon format ───────────────
             fields = [f.strip() for f in content.split("|")]
             year_col_re = re.compile(
                 r"(.*?(?:20\d{2}|FY\d{4})[^:]*?)\s*:\s*([\d,]+\.?\d*)", re.IGNORECASE
@@ -371,20 +431,26 @@ def _extract_formula_guided(
                 year = _normalize_year(ym.group(1))
                 val = _to_float(m_f.group(2))
                 if val is not None and val != 0:
-                    resolved[placeholder].append((val, year))
+                    pair = (val, year)
+                    if pair not in resolved[placeholder]:
+                        resolved[placeholder].append(pair)
 
-            if resolved[placeholder]:
-                break  # first chunk match wins
+            if resolved[placeholder] and not (is_multi_year or is_period_average):
+                break  # first chunk match wins for simple (single-year) formulas
 
-    # ── Free-text fallback: fill any placeholders still empty or single-year ──
+    # ── Free-text fallback: fill any placeholders still incomplete ──────────
     # Triggers when:
     #   (a) a placeholder has no matches at all, OR
     #   (b) formula is multi_year but a placeholder only has ONE distinct year
-    #       (the pipe parser grabbed '2022: 34,229' but missed '2021: 35,355')
+    #       (the pipe parser grabbed '2022: 34,229' but missed '2021: 35,355'), OR
+    #   (c) formula is period_average but not every query year is covered yet
     def _needs_ft_fallback(ph: str, matches_list: List[Tuple[float, str]]) -> bool:
         if not matches_list:
             return True
-        if is_multi_year and len(set(y for _, y in matches_list)) < 2:
+        distinct_years = {y for _, y in matches_list}
+        if is_period_average and query_years:
+            return not set(query_years).issubset(distinct_years)
+        if is_multi_year and len(distinct_years) < 2:
             return True
         return False
 
@@ -423,7 +489,13 @@ def _extract_formula_guided(
     for placeholder, matches in resolved.items():
         if not matches:
             continue
-        if is_multi_year:
+        if is_period_average:
+            # No single "best" value — the real per-year computation is
+            # done by _gen_formula_code() from `resolved` directly. This
+            # mean is only for the truthiness gate and the variable
+            # summary shown to the user.
+            final[placeholder] = sum(v for v, _ in matches) / len(matches)
+        elif is_multi_year:
             # _new / _old suffix: pick based on query years
             base = placeholder.replace("_new", "").replace("_old", "")
             sorted_years = sorted(set(y for _, y in matches))
@@ -448,7 +520,7 @@ def _extract_formula_guided(
                     break
             final[placeholder] = best if best is not None else matches[0][0]
 
-    return final
+    return final, resolved
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -684,18 +756,92 @@ def _extract_from_free_text(
 # Code generation helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _gen_period_average_code(
+    fk: str,
+    label: str,
+    unit: str,
+    expr: str,
+    resolved_series: Dict[str, List[Tuple[float, str]]],
+) -> List[str]:
+    """
+    Build code that computes `expr` separately for EVERY year common to
+    all placeholders, then averages those per-year results — e.g. for
+    capex_to_revenue's "capex / revenue" over FY2017-FY2019, this emits
+    the equivalent of:
+        capex_by_year = {"2017": ..., "2018": ..., "2019": ...}
+        revenue_by_year = {"2017": ..., "2018": ..., "2019": ...}
+        _years = sorted(set(capex_by_year) & set(revenue_by_year) & ...)
+        _ratios = [capex_by_year[y] / revenue_by_year[y] for y in _years]
+        result = round(sum(_ratios) / len(_ratios) * 100, 2)
+    Generic over placeholder count/names (whatever `expr` references), so
+    this isn't specific to capex_to_revenue — any future "N-year average
+    ratio" formula reuses it by setting period_average=True.
+    """
+    if not resolved_series or not expr:
+        return []
+    for series in resolved_series.values():
+        if not series:
+            return []
+
+    lines: List[str] = []
+    by_year_names = []
+    for ph, series in resolved_series.items():
+        by_year = {y: v for v, y in series}  # last value per year wins on duplicates
+        by_year_name = f"{ph}_by_year"
+        lines.append(f"{by_year_name} = {by_year!r}")
+        by_year_names.append(by_year_name)
+
+    # list(), not sorted(list()) — the sandbox's builtin whitelist doesn't
+    # include sorted(), and order doesn't matter here since the years are
+    # only ever averaged, never displayed positionally. Likewise no
+    # explicit "raise ValueError(...)" guard for an empty intersection —
+    # ValueError isn't in the whitelist either; an empty _years naturally
+    # leaves _ratios empty and sum(_ratios)/len(_ratios) raises
+    # ZeroDivisionError (a real, silent Python operator behaviour, not a
+    # name lookup), which the caller's repair loop already handles.
+    intersection_expr = " & ".join(f"set({n})" for n in by_year_names)
+    lines.append(f"_years = list({intersection_expr})")
+    lines.append("_ratios = []")
+    lines.append("for _y in _years:")
+    for ph in resolved_series:
+        lines.append(f"    {ph} = {ph}_by_year[_y]")
+    lines.append(f"    _ratios.append({expr})")
+    lines.append(f"# Formula: {fk}")
+    if unit == "%":
+        lines.append("result = round(sum(_ratios) / len(_ratios) * 100, 2)")
+        lines.append(f"print(f'{label} ({{len(_years)}}-yr avg): {{result}}%')")
+    else:
+        lines.append("result = round(sum(_ratios) / len(_ratios), 4)")
+        lines.append(f"print(f'{label} ({{len(_years)}}-yr avg): {{result}}')")
+    return lines
+
+
 def _gen_formula_code(
     formula_entry: Dict[str, Any],
     resolved: Dict[str, float],
     extracted_table: Dict[str, Dict],
+    resolved_series: Optional[Dict[str, List[Tuple[float, str]]]] = None,
 ) -> List[str]:
-    """Generate Python code lines using the formula template."""
+    """Generate Python code lines using the formula template.
+
+    period_average formulas (e.g. "3-year average of capex as a % of
+    revenue") can't be expressed as a single evaluation of formula_expr
+    over one picked value per placeholder — they need the ratio computed
+    separately for EVERY year in range, then averaged. `resolved_series`
+    (the full {placeholder -> [(value, year), ...]} from
+    _extract_formula_guided) carries what that needs; `resolved` (one
+    value per placeholder) is enough for every other formula shape.
+    """
     lines = []
     fk = formula_entry.get("formula_key", "custom")
     label = formula_entry.get("result_label", "Result")
     unit = formula_entry.get("unit", "")
     expr = formula_entry.get("formula_expr", "")
     is_multi_year = formula_entry.get("multi_year", False)
+    is_period_average = formula_entry.get("period_average", False)
+
+    if is_period_average:
+        return _gen_period_average_code(fk, label, unit, expr, resolved_series or {})
 
     if not resolved:
         return []
@@ -1037,8 +1183,9 @@ class ProgramOfThoughtReasoner:
 
         # ── Step 3: Formula-guided extraction ─────────────────────────────────
         resolved_formula: Dict[str, float] = {}
+        resolved_formula_series: Dict[str, List[Tuple[float, str]]] = {}
         if formula_entry:
-            resolved_formula = _extract_formula_guided(
+            resolved_formula, resolved_formula_series = _extract_formula_guided(
                 evidence_list, formula_entry, query_years
             )
 
@@ -1054,7 +1201,9 @@ class ProgramOfThoughtReasoner:
             # PATH 1: Formula library
             fk = formula_entry.get("formula_key", "")
             code_lines.append(f"# Formula: {fk} — {formula_entry.get('result_label', '')}")
-            formula_code = _gen_formula_code(formula_entry, resolved_formula, extracted_table)
+            formula_code = _gen_formula_code(
+                formula_entry, resolved_formula, extracted_table, resolved_formula_series
+            )
             if formula_code:
                 code_lines.extend(formula_code)
             else:
