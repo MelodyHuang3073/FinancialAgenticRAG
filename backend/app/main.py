@@ -43,10 +43,6 @@ def health_check():
 def get_sample_prompts():
     return []
 
-@app.get("/api/sample-data")
-def get_sample_data():
-    return []
-
 @app.get("/api/uploaded-files")
 def get_uploaded_files():
     return vector_store.uploaded_files

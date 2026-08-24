@@ -144,6 +144,87 @@ def test_full_pipeline_produces_correct_markdown_table():
     assert "| Cost of sales | 19,232 | 18,795 | 16,605 |" in parent_content
 
 
+TIGHT_ROWS = [
+    ("Net sales", ["34,229", "35,355", "32,184"]),
+    ("Cost of sales", ["19,232", "18,795", "16,605"]),
+    ("Selling, general and administrative expenses", ["9,049", "8,543", "7,995"]),
+    ("Research, development and related expenses", ["1,977", "1,878", "1,878"]),
+    ("Goodwill impairment expense", ["—", "435", "—"]),
+    ("Operating income", ["6,632", "8,317", "5,383"]),
+]
+
+
+def _build_tight_spacing_income_statement_pdf() -> bytes:
+    """Real 10-Ks routinely space value columns far tighter than this
+    module's other fixtures (e.g. 3M's actual FY2022 page 48 uses ~26.4pt
+    between adjacent year columns — see the real x0/x1 measurements this
+    module's adaptive-threshold algorithm was built from). This fixture
+    uses a comparably tight 27pt column gap, plus line items whose values
+    have genuinely different digit counts within the same column
+    ("34,229" vs "9,049" vs "—"), which is exactly what makes x0 drift
+    while x1 stays put — the scenario a fixed, larger hardcoded gap
+    threshold (the old _WORD_COL_X_GAP = 30.0) would misdetect as having
+    zero columns at all."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    y = height - 50
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(width / 2, y, "TIGHTCO CORPORATION AND SUBSIDIARIES")
+    y -= 11
+    c.drawCentredString(width / 2, y, "Consolidated Statement of Income")
+    y -= 20
+
+    col_x = [430, 457, 484]  # 27pt gaps, tighter than every other fixture here
+    c.setFont("Helvetica-Bold", 7)
+    for ci, yr in enumerate(["2022", "2021", "2020"]):
+        c.drawRightString(col_x[ci], y, yr)
+    y -= 13
+
+    row_h = 12
+    label_x = 72
+    c.setFont("Helvetica", 7)
+    for label, vals in TIGHT_ROWS:
+        c.drawString(label_x, y - 9, label)
+        for ci, val in enumerate(vals):
+            c.drawRightString(col_x[ci], y - 9, val)
+        y -= row_h
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def test_tight_column_spacing_still_detected_as_table():
+    """Stress test for the adaptive column-gap threshold: a 27pt real
+    column gap must still be found even though it's tighter than the old
+    hardcoded 30pt constant, and even with an em-dash placeholder value
+    and rows of differing digit counts within the same column."""
+    parser = FinancialFileParser()
+    with pdfplumber.open(io.BytesIO(_build_tight_spacing_income_statement_pdf())) as pdf:
+        common = parser._pdfplumber_words_to_common(pdf.pages[0].extract_words())
+        tables, _ = parser._reconstruct_table_from_word_positions(common)
+
+    assert len(tables) == 1, "failed to detect the table at tight (27pt) real-world column spacing"
+    joined = tables[0]
+    for label, vals in TIGHT_ROWS:
+        assert label in joined, f"missing line item: {label}"
+        for v in vals:
+            assert v in joined, f"missing value {v!r} for {label!r}"
+
+    sga_line = next(
+        line for line in joined.split("\n") if line.strip().startswith("| Selling")
+    )
+    cells = [c.strip() for c in sga_line.strip().strip("|").split("|")]
+    assert cells == [
+        "Selling, general and administrative expenses", "9,049", "8,543", "7,995",
+    ], f"SG&A row values wrong or out of order: {cells}"
+
+    for line in joined.split("\n"):
+        assert _is_table_line(line)
+
+
 def test_pure_prose_page_not_misdetected_as_table():
     parser = FinancialFileParser()
     with pdfplumber.open(io.BytesIO(_build_prose_only_pdf())) as pdf:

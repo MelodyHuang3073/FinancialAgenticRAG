@@ -4,6 +4,7 @@ import io
 import json
 import re
 import html
+from collections import Counter
 from typing import List, Dict, Any, Tuple, Optional
 
 from app.rag.chunker import chunk_text
@@ -386,13 +387,37 @@ class FinancialFileParser:
     #: effective y-position drift across many words.
     _WORD_ROW_Y_TOLERANCE = 2.0
 
-    #: Column-clustering gap: a gap larger than this between two
-    #: consecutive (sorted) word x0 positions, across every word on the
-    #: page, marks a new column boundary.
-    _WORD_COL_X_GAP = 30.0
+    #: '$' + immediately-following numeric token merge gap — measured as
+    #: the actual whitespace between them (number's x0 minus '$'s x1), not
+    #: x0-to-x0 (which would bake the '$' glyph's own width into the
+    #: gap and unfairly penalize wider numbers, e.g. 5-digit vs 3-digit,
+    #: even though the visual spacing is identical). A standalone '$'
+    #: glyph must not survive into column clustering as its own word —
+    #: its x1 sits well to the left of the actual value's right edge, and
+    #: would either pull a value-column anchor off target or form a
+    #: spurious anchor of its own.
+    _WORD_DOLLAR_MERGE_GAP = 20.0
+
+    #: Floor for the adaptive value-column tolerance (see
+    #: _adaptive_x1_gap_threshold()), and the tolerance used as a fallback
+    #: when a page doesn't have enough numeric tokens to find a clear
+    #: same-column-vs-different-column split.
+    _WORD_COL_MIN_TOLERANCE = 3.0
 
     #: Minimum consecutive data rows for a run to count as a real table.
     _WORD_TABLE_MIN_ROWS = 2
+
+    #: Minimum fraction of numeric-token-bearing rows that must share the
+    #: SAME anchor "shape" (which value-column anchors their numbers
+    #: landed on) for the page's anchors to be trusted at all. Real
+    #: right-aligned columns keep the same x1 for the whole table, so
+    #: almost every data row shares one dominant shape; a page with no
+    #: genuine column alignment (e.g. hand space-padded proportional-font
+    #: text) scatters rows across many different shapes instead — below
+    #: this fraction, Tier 2 abstains (returns no tables) so Tier 3's
+    #: layout-text regex gets a chance instead of a fabricated table
+    #: stitched from unrelated columns.
+    _WORD_COL_MIN_SHAPE_CONFIDENCE = 0.5
 
     @staticmethod
     def _fitz_words_to_common(fitz_words) -> List[Dict[str, Any]]:
@@ -440,63 +465,211 @@ class FinancialFileParser:
             row.sort(key=lambda w: w["x0"])
         return rows
 
-    #: A candidate column boundary must be "voted for" by words from at
-    #: least this many DIFFERENT rows to count as a real column — filters
-    #: out the single stray boundary a long multi-word label can create
-    #: (e.g. a continuation word of "Amortization of purchased intangibles"
-    #: landing in what looks like a numeric column's gap; only ONE row
-    #: has a word there, versus every data row sharing the real value
-    #: column's start position). The very first (leftmost) boundary is
-    #: always kept regardless, since it's the label column and every row
-    #: has something starting near the left margin.
+    #: A candidate value-column anchor must be "voted for" by numeric
+    #: tokens from at least this many DIFFERENT rows to count as a real
+    #: column — filters out a one-off numeric-looking token (e.g. a page
+    #: number, or a lone year in a caption) that would otherwise form its
+    #: own phantom single-row column.
     _WORD_COL_MIN_ROW_SUPPORT = 2
 
-    def _cluster_column_boundaries(self, rows: List[List[Dict[str, Any]]]) -> List[float]:
-        """Stable column start x-positions across the WHOLE page: sort
-        every word's x0, mark a candidate column boundary wherever the gap
-        to the previous x0 exceeds _WORD_COL_X_GAP, then drop any candidate
-        that isn't shared by at least _WORD_COL_MIN_ROW_SUPPORT distinct
-        rows (see the constant's docstring above for why)."""
-        all_words = [w for row in rows for w in row]
-        xs = sorted(w["x0"] for w in all_words)
-        if not xs:
-            return []
-        raw_boundaries = [xs[0]]
-        for prev, cur in zip(xs, xs[1:]):
-            if cur - prev > self._WORD_COL_X_GAP:
-                raw_boundaries.append(cur)
+    def _merge_dollar_sign_tokens(self, row_words: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge a standalone '$' word with the numeric word immediately
+        to its right into one value token, when they're close enough
+        (whitespace gap < _WORD_DOLLAR_MERGE_GAP) to clearly be the same
+        currency value split into two words by the PDF's own text runs.
+        Must run before column clustering — see _WORD_DOLLAR_MERGE_GAP."""
+        merged: List[Dict[str, Any]] = []
+        i = 0
+        n = len(row_words)
+        while i < n:
+            w = row_words[i]
+            if w["text"] == "$" and i + 1 < n:
+                nxt = row_words[i + 1]
+                if (
+                    nxt["x0"] - w["x1"] < self._WORD_DOLLAR_MERGE_GAP
+                    and self._LAYOUT_VALUE_RE.fullmatch(nxt["text"].strip())
+                ):
+                    merged.append({
+                        "x0": w["x0"],
+                        "top": min(w["top"], nxt["top"]),
+                        "x1": nxt["x1"],
+                        "bottom": max(w["bottom"], nxt["bottom"]),
+                        "text": "$" + nxt["text"],
+                    })
+                    i += 2
+                    continue
+            merged.append(w)
+            i += 1
+        return merged
 
-        def _raw_col_idx(x0: float) -> int:
-            idx = 0
-            for i, b in enumerate(raw_boundaries):
-                if x0 >= b - 0.5:
-                    idx = i
-                else:
-                    break
-            return idx
+    def _adaptive_x1_gap_threshold(self, x1_values: List[float]) -> float:
+        """
+        Derive a column-separation tolerance directly from this page's own
+        numeric-token right-edge (x1) positions, instead of a hardcoded
+        gap in points. Right-aligned numbers in the SAME column line up
+        almost exactly at their right edge across different rows
+        (sub-point variance in practice, since x0 drifts with digit count
+        but x1 doesn't); numbers in DIFFERENT columns are much farther
+        apart — the real column-to-column spacing, which varies a lot by
+        company/font/layout and can be smaller than any fixed hardcoded
+        threshold (e.g. 26.4pt on a real 3M filing, which a fixed 30pt gap
+        misses entirely).
 
-        support: List[set] = [set() for _ in raw_boundaries]
-        for row_idx, row in enumerate(rows):
-            for w in row:
-                support[_raw_col_idx(w["x0"])].add(row_idx)
+        So the gaps between sorted x1 values (kept WITH duplicates — two
+        tokens sharing (near-)identical x1 contribute a genuine ~0 gap,
+        which is itself evidence of how tight "same column" alignment
+        really is on this page) are bimodal: many tiny "same-column"
+        gaps, a few large "different-column" gaps. This finds the
+        boundary between the two groups by sorting the POSITIVE gap
+        sizes and locating the pair of consecutive gap sizes with the
+        largest RATIO jump between them — a simple, robust
+        one-dimensional two-cluster split that works even with very few
+        samples. The threshold is set halfway between that pair.
 
-        return [
-            b for i, (b, s) in enumerate(zip(raw_boundaries, support))
-            if i == 0 or len(s) >= self._WORD_COL_MIN_ROW_SUPPORT
+        When no clear ratio jump exists among the positive gaps (too few
+        samples, or every positive gap is roughly the same size), the
+        exact/near-zero gaps we already observed settle it: if any
+        exist, they're direct proof within-column jitter is ~0 on this
+        page, so every positive gap must be a real between-column gap —
+        stay at the floor tolerance rather than inflating past it (which
+        would wrongly merge those columns together). Only when there are
+        NO zero gaps at all (e.g. exactly two numeric tokens on the
+        whole page) do we fall back to half the smallest positive gap.
+        """
+        xs = sorted(x1_values)
+        if len(xs) < 2:
+            return self._WORD_COL_MIN_TOLERANCE
+        gaps = [b - a for a, b in zip(xs, xs[1:])]
+        positive_gaps = sorted(g for g in gaps if g > 0.01)
+        has_zero_gaps = len(positive_gaps) < len(gaps)
+
+        if not positive_gaps:
+            return self._WORD_COL_MIN_TOLERANCE
+        if len(positive_gaps) == 1:
+            if has_zero_gaps:
+                return self._WORD_COL_MIN_TOLERANCE
+            return max(self._WORD_COL_MIN_TOLERANCE, positive_gaps[0] * 0.5)
+
+        best_ratio = 1.0
+        best_idx = None
+        for i in range(len(positive_gaps) - 1):
+            ratio = positive_gaps[i + 1] / positive_gaps[i]
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_idx = i
+
+        if best_idx is not None and best_ratio >= 2.0:
+            return max(
+                self._WORD_COL_MIN_TOLERANCE,
+                (positive_gaps[best_idx] + positive_gaps[best_idx + 1]) / 2,
+            )
+        if has_zero_gaps:
+            return self._WORD_COL_MIN_TOLERANCE
+        return max(self._WORD_COL_MIN_TOLERANCE, positive_gaps[0] * 0.5)
+
+    def _cluster_value_column_anchors(
+        self, rows: List[List[Dict[str, Any]]]
+    ) -> Tuple[List[float], float]:
+        """
+        Find the page's value-column anchors: cluster the right edges
+        (x1) of every numeric-looking token across ALL rows, using the
+        adaptive tolerance from _adaptive_x1_gap_threshold(). Anchors
+        supported by tokens from fewer than _WORD_COL_MIN_ROW_SUPPORT
+        distinct rows are dropped as noise. Returns (sorted anchor x1
+        positions, tolerance used) — the caller reuses the tolerance to
+        assign individual words to their nearest anchor.
+        """
+        numeric_entries = [
+            (row_idx, w["x1"])
+            for row_idx, row in enumerate(rows)
+            for w in row
+            if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())
         ]
+        if not numeric_entries:
+            return [], self._WORD_COL_MIN_TOLERANCE
+
+        tolerance = self._adaptive_x1_gap_threshold([x1 for _, x1 in numeric_entries])
+        numeric_entries.sort(key=lambda e: e[1])
+
+        # Each cluster's total span is capped at `tolerance`, measured
+        # from its leftmost (first-added) member — NOT from the previous
+        # member. A step-to-step-only check lets a "staircase" of
+        # unrelated x1 values (each just barely within `tolerance` of the
+        # last) chain into one cluster spanning several multiples of the
+        # tolerance, which is exactly what happens on a page with no real
+        # column alignment (e.g. hand space-padded proportional-font
+        # text): individually-plausible small gaps accumulate into a
+        # single bogus "column" stitched together from unrelated values.
+        clusters: List[List[Tuple[int, float]]] = [[numeric_entries[0]]]
+        for entry in numeric_entries[1:]:
+            if entry[1] - clusters[-1][0][1] <= tolerance:
+                clusters[-1].append(entry)
+            else:
+                clusters.append([entry])
+
+        anchors = [
+            sum(x1 for _, x1 in c) / len(c)
+            for c in clusters
+            if len({row_idx for row_idx, _ in c}) >= self._WORD_COL_MIN_ROW_SUPPORT
+        ]
+        return anchors, tolerance
+
+    def _dominant_anchor_shape_fraction(
+        self, rows: List[List[Dict[str, Any]]], anchors: List[float], tolerance: float
+    ) -> float:
+        """
+        Of every row with 2+ numeric-looking tokens, what fraction share
+        the single most common "shape" (the sorted set of anchor indices
+        those numbers matched)? Computed from numeric tokens ONLY — label
+        words are excluded, since a label word coincidentally landing
+        near an anchor by chance is noise, not evidence of real column
+        structure. See _WORD_COL_MIN_SHAPE_CONFIDENCE for how this is
+        used.
+        """
+        shapes = []
+        for row in rows:
+            numeric_words = [w for w in row if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())]
+            if len(numeric_words) < 2:
+                continue
+            matches = [self._assign_to_value_anchor(w["x1"], anchors, tolerance) for w in numeric_words]
+            shapes.append(tuple(sorted(i for i in matches if i is not None)))
+        if not shapes:
+            return 0.0
+        most_common_count = Counter(shapes).most_common(1)[0][1]
+        return most_common_count / len(shapes)
 
     @staticmethod
-    def _assign_column_index(x0: float, boundaries: List[float]) -> int:
-        """Index of the rightmost boundary <= x0 (a small epsilon guards
-        against a word landing exactly on a boundary being pushed into the
-        next column by float rounding)."""
-        idx = 0
-        for i, b in enumerate(boundaries):
-            if x0 >= b - 0.5:
-                idx = i
-            else:
-                break
-        return idx
+    def _assign_to_value_anchor(x1: float, anchors: List[float], tolerance: float) -> Optional[int]:
+        """Index of the value-column anchor closest to this word's x1, or
+        None if it's farther than `tolerance` from every anchor — such a
+        word belongs to the label column, not a value column."""
+        best_idx = None
+        best_dist = None
+        for i, a in enumerate(anchors):
+            dist = abs(x1 - a)
+            if dist <= tolerance and (best_dist is None or dist < best_dist):
+                best_idx = i
+                best_dist = dist
+        return best_idx
+
+    def _cell_looks_numeric(self, cell_text: str) -> bool:
+        """A cell counts as numeric if it fullmatches one value token
+        outright, or — when column clustering wasn't precise enough and
+        multiple numbers ended up glued into the same cell — if splitting
+        on whitespace shows more than half of the individual tokens
+        (ignoring bare '$' signs) look numeric. Defends is_data_row
+        classification against imperfect clustering instead of silently
+        discarding the whole row as prose."""
+        cell_text = cell_text.strip()
+        if not cell_text:
+            return False
+        if self._LAYOUT_VALUE_RE.fullmatch(cell_text):
+            return True
+        tokens = [t for t in cell_text.split() if t != "$"]
+        if len(tokens) < 2:
+            return False
+        numeric_tokens = [t for t in tokens if self._LAYOUT_VALUE_RE.fullmatch(t)]
+        return len(numeric_tokens) > len(tokens) / 2
 
     def _reconstruct_table_from_word_positions(self, words: List[Dict[str, Any]]) -> Tuple[List[str], str]:
         """
@@ -504,10 +677,14 @@ class FinancialFileParser:
         ignoring however the source engine grouped words into "lines" in
         its own text stream (see the Tier 2 module comment above).
 
-        Row/column clustering as described by _cluster_words_into_rows() /
-        _cluster_column_boundaries(); each word is then assigned to its
-        (row, column) cell, same-cell words are joined with a space, and
-        each reconstructed row is classified as either:
+        Row clustering as described by _cluster_words_into_rows(); each
+        row's '$' + number pairs are merged (_merge_dollar_sign_tokens()),
+        value columns are found via _cluster_value_column_anchors() (x1 of
+        numeric tokens only, adaptive tolerance), and every word is then
+        assigned to its (row, column) cell — a value column if its x1 is
+        close to an anchor, otherwise the label column — same-cell words
+        are joined with a space, and each reconstructed row is classified
+        as either:
           - a DATA row: first column is non-numeric text AND at least half
             of the remaining non-empty columns look numeric (reusing
             _LAYOUT_VALUE_RE's number/'—'-placeholder pattern), or
@@ -524,14 +701,27 @@ class FinancialFileParser:
         rows = self._cluster_words_into_rows(words)
         if not rows:
             return [], ""
-        boundaries = self._cluster_column_boundaries(rows)
-        if not boundaries:
+        rows = [self._merge_dollar_sign_tokens(row) for row in rows]
+        anchors, tolerance = self._cluster_value_column_anchors(rows)
+        if not anchors:
+            return [], ""
+        if self._dominant_anchor_shape_fraction(rows, anchors, tolerance) < self._WORD_COL_MIN_SHAPE_CONFIDENCE:
             return [], ""
 
         tables: List[str] = []
         prose_lines: List[str] = []
         current_rows: List[Tuple[str, List[str]]] = []
         current_n_cols = [None]
+        # Which anchor INDICES were actually populated for the row run
+        # currently being accumulated — not just how many. Two rows can
+        # coincidentally produce the same value COUNT while their values
+        # landed on entirely different anchors (e.g. on a page with no
+        # real column alignment, where stray values drift onto whichever
+        # anchor happens to be nearby); grouping them into one table would
+        # silently splice unrelated columns together. Requiring the same
+        # anchor-index set to continue a run catches this even when the
+        # count alone wouldn't.
+        current_col_shape = [None]
         header_candidate = [""]
 
         def _flush():
@@ -551,19 +741,19 @@ class FinancialFileParser:
                     prose_lines.append((label + "  " + "  ".join(values)).strip())
             current_rows.clear()
             current_n_cols[0] = None
+            current_col_shape[0] = None
 
         for row_words in rows:
-            n_cols = len(boundaries)
-            cells: List[List[str]] = [[] for _ in range(n_cols)]
+            cells: List[List[str]] = [[] for _ in range(len(anchors) + 1)]
             for w in row_words:
-                col = self._assign_column_index(w["x0"], boundaries)
-                cells[col].append(w["text"])
+                col = self._assign_to_value_anchor(w["x1"], anchors, tolerance)
+                cells[0 if col is None else col + 1].append(w["text"])
             cell_texts = [" ".join(parts).strip() for parts in cells]
 
             first_col = cell_texts[0]
             rest_cols = [c for c in cell_texts[1:] if c]
             has_label = bool(first_col) and not self._LAYOUT_VALUE_RE.fullmatch(first_col)
-            numeric_rest = [c for c in rest_cols if self._LAYOUT_VALUE_RE.fullmatch(c)]
+            numeric_rest = [c for c in rest_cols if self._cell_looks_numeric(c)]
 
             is_data_row = (
                 has_label
@@ -582,10 +772,12 @@ class FinancialFileParser:
                     self._normalize_layout_value(c) if self._LAYOUT_VALUE_RE.fullmatch(c) else c
                     for c in cell_texts[1:] if c
                 ]
-                if current_n_cols[0] is not None and len(values) != current_n_cols[0]:
+                col_shape = tuple(i for i, c in enumerate(cell_texts[1:]) if c)
+                if current_col_shape[0] is not None and col_shape != current_col_shape[0]:
                     _flush()
                 current_rows.append((first_col, values))
                 current_n_cols[0] = len(values)
+                current_col_shape[0] = col_shape
             else:
                 _flush()
                 line_text = " ".join(c for c in cell_texts if c).strip()
@@ -596,6 +788,78 @@ class FinancialFileParser:
         _flush()
 
         return tables, "\n".join(prose_lines)
+
+    @staticmethod
+    def _compact_row_cells(row: list) -> list:
+        """
+        Collapse pdfplumber's raw per-row cell grid down to [label, value1,
+        value2, ...] by dropping blank cells and lone '$' cells. A real
+        10-K commonly shows the currency symbol only on the FIRST row of a
+        section and on subtotal/total rows... except pdfplumber's ruled-
+        line cell detector does the opposite just as often — a data row
+        gets a dedicated '$' cell but the very next subtotal row doesn't
+        (or vice versa) — so the SAME logical column lands at a different
+        index depending on which row you're looking at. Since every row
+        is later matched to the header purely by column INDEX (see
+        _extract_from_markdown_table_block in pot_reasoner.py), that
+        positional drift silently drops values from any row whose shape
+        doesn't match the header's. Compacting away the blank/'$' noise
+        makes every row's shape the same: label, then exactly its real
+        values in order — immune to whichever row happened to get the
+        '$' cell. A real placeholder value like '—' (em dash) is kept,
+        since it's a meaningful zero/blank for that period, not noise.
+        """
+        if not row:
+            return row
+        label = row[0]
+        rest = [c for c in row[1:] if c and c.strip() not in ("", "$")]
+        return [label] + rest
+
+    def _inject_missing_year_header(self, rows: list, page, table_top: float) -> list:
+        """
+        pdfplumber's find_tables() draws its table's bounding box from the
+        ruled lines alone — on a real 10-K, a horizontal rule often sits
+        between the true "As of .../For the years ended ..." date line and
+        the section-label row below it (e.g. "Assets", "Net sales"), so
+        the date line falls OUTSIDE the detected box and the section-label
+        row is mistaken for the table's own header. Every value on the
+        table then silently fails downstream extraction, which requires a
+        recognisable year in the header to accept a row's value at all.
+
+        If rows[0] doesn't contain a year, look at the page text just
+        above this table's bounding box for the nearest line that does,
+        and synthesize a proper header from it — keeping rows[0] itself
+        as an ordinary data row (its label is usually still real, e.g.
+        "Assets"; it simply has no values of its own) rather than
+        discarding it. Expects rows already compacted by
+        _compact_row_cells() so "how many years" and "how many value
+        columns the widest data row has" agree without extra bookkeeping.
+        """
+        if not rows:
+            return rows
+        header_text = " ".join(c or "" for c in rows[0])
+        if self._extract_year_headers(header_text):
+            return rows  # already has a real year header — nothing to fix
+
+        try:
+            above = page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
+            above_text = above.extract_text() or ""
+        except Exception:
+            above_text = ""
+        years: list = []
+        for line in reversed(above_text.split("\n")):
+            years = self._extract_year_headers(line)
+            if years:
+                break
+        if not years:
+            return rows  # no candidate found anywhere above — leave as-is
+
+        n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
+        n_value_cols = max(n_value_cols, len(years))
+        synthesized = [rows[0][0] or "Line Item"] + [
+            years[i] if i < len(years) else f"Col{i + 1}" for i in range(n_value_cols)
+        ]
+        return [synthesized, rows[0]] + rows[1:]
 
     def _ruled_line_tables_and_prose(self, page) -> Tuple[List[str], str]:
         """
@@ -618,7 +882,9 @@ class FinancialFileParser:
         filtered_page = page
         for t in found_tables:
             try:
-                md = self._table_to_markdown(t.extract())
+                rows = [self._compact_row_cells(r) for r in t.extract()]
+                rows = self._inject_missing_year_header(rows, page, t.bbox[1])
+                md = self._table_to_markdown(rows)
             except Exception:
                 md = ""
             if md:
