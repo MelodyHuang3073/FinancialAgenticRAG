@@ -6,11 +6,17 @@ import {
   Paperclip, AlertCircle, CheckCircle
 } from 'lucide-react';
 
-/* ─── Extract the largest contiguous Markdown pipe-table block out of a
-   page of mixed prose + table text (mirrors chunker.py's table-block
-   detection, kept minimal since this is display-only). ─── */
-function extractMarkdownTableBlock(text) {
-  if (!text) return '';
+/* ─── Extract every contiguous Markdown pipe-table block out of a page of
+   mixed prose + table text (mirrors chunker.py's table-block detection,
+   kept minimal since this is display-only). A real financial-statement
+   page routinely has more than one distinct table (e.g. a cash-flow
+   statement's operating/investing/financing sections after merging, or a
+   balance sheet plus a supplemental notes table on the same page) —
+   returning only the single largest block would silently drop the rest
+   from the Source Evidence panel even though parent_content genuinely
+   carries all of them. ─── */
+function extractMarkdownTableBlocks(text) {
+  if (!text) return [];
   const lines = text.split('\n');
   const isTableLine = (l) => {
     const t = l.trim();
@@ -27,11 +33,12 @@ function extractMarkdownTableBlock(text) {
     }
   }
   if (current.length) blocks.push(current);
-  if (!blocks.length) return '';
-  // Prefer the block with the most rows — that's the actual data table,
-  // as opposed to a stray line that happens to contain a '|'.
-  const best = blocks.reduce((a, b) => (b.length > a.length ? b : a));
-  return best.join('\n');
+  // A genuine table block needs at least 2 lines (header + separator, or
+  // header + one data row) — a lone '|'-containing line is almost always
+  // the "Company: X | Document: Y | Page: Z |" metadata prefix that
+  // starts every passage, not a real table, and must not be rendered as
+  // a fabricated one-row table.
+  return blocks.filter((b) => b.length >= 2).map((b) => b.join('\n'));
 }
 
 /* ─── Re-pad a Markdown pipe-table block so every '|' lines up vertically
@@ -392,18 +399,18 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
 
                           // A 'table_row' hit's own content is just the ONE
                           // matched line item (e.g. "Line Item: Net sales |
-                          // FY2023: 14,694 | ..."). Show the full table it
+                          // FY2023: 14,694 | ..."). Show the full table(s) it
                           // came from — pulled from parent_content — instead,
                           // so the panel displays the complete table
                           // structure rather than a single isolated row.
                           //
-                          // isTable is ONLY true when extractMarkdownTableBlock
-                          // found a genuine multi-row pipe block. Every
-                          // passage's content/parent_content ALSO starts with
-                          // a "Company: X | Document: Y | Page: Z |" metadata
-                          // prefix that itself contains '|' characters as a
-                          // plain field separator — a naive "does this text
-                          // contain any '|'" check would misfire on that
+                          // isTable is ONLY true when extractMarkdownTableBlocks
+                          // found at least one genuine multi-line pipe block.
+                          // Every passage's content/parent_content ALSO starts
+                          // with a "Company: X | Document: Y | Page: Z |"
+                          // metadata prefix that itself contains '|' characters
+                          // as a plain field separator — a naive "does this
+                          // text contain any '|'" check would misfire on that
                           // prefix and render a bogus one-column "table" out
                           // of ordinary prose whenever real table detection
                           // found nothing. If parent_content isn't a clean
@@ -412,14 +419,23 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                           // fall back to showing it as plain preformatted
                           // text — still the full context, just not
                           // rendered as a fabricated table.
+                          //
+                          // A real financial-statement page can legitimately
+                          // contain MORE than one distinct table (e.g. a
+                          // cash-flow statement's operating/investing/
+                          // financing sections, or a balance sheet plus a
+                          // supplemental notes table) — every block found is
+                          // kept and rendered on its own, not just the
+                          // largest one, so nothing parent_content actually
+                          // carries gets silently dropped from this panel.
                           const tableCandidate = ev.chunk_type === 'table_row'
                             ? (ev.parent_content || ev.content || '')
                             : (ev.content || '');
-                          const fullTableBlock = extractMarkdownTableBlock(tableCandidate);
-                          const isTable = !!fullTableBlock;
-                          const fullContent = fullTableBlock
-                            || (ev.chunk_type === 'table_row' ? (ev.parent_content || ev.content) : ev.content)
-                            || '';
+                          const fullTableBlocks = extractMarkdownTableBlocks(tableCandidate);
+                          const isTable = fullTableBlocks.length > 0;
+                          const fullContent = isTable
+                            ? fullTableBlocks.join('\n\n')
+                            : ((ev.chunk_type === 'table_row' ? (ev.parent_content || ev.content) : ev.content) || '');
                           const matchedLineItem = ev.chunk_type === 'table_row'
                             ? (ev.content || '').match(/Line Item:\s*([^|]+)/)?.[1]?.trim()
                             : null;
@@ -500,9 +516,9 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                               </button>
                               {isExpanded && (
                                 <div style={{ padding: '0 12px 14px' }}>
-                                  {fullTableBlock && matchedLineItem && (
+                                  {isTable && matchedLineItem && (
                                     <p style={{ fontSize: 11, color: '#854d0e', marginBottom: 6 }}>
-                                      Matched row: <strong>{matchedLineItem}</strong> (full table shown below)
+                                      Matched row: <strong>{matchedLineItem}</strong> (full table{fullTableBlocks.length > 1 ? 's' : ''} shown below)
                                     </p>
                                   )}
                                   {isTable && (
@@ -525,9 +541,22 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                                     </div>
                                   )}
                                   {isTable
-                                    ? ((evidenceViewMode[si] || 'markdown') === 'markdown'
-                                        ? <pre style={{ whiteSpace: 'pre', overflowX: 'auto', fontSize: 12, lineHeight: 1.6, color: '#334155', margin: 0, fontFamily: 'monospace', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: 10 }}>{formatAlignedMarkdownTable(fullContent)}</pre>
-                                        : <MarkdownTable text={fullContent} />)
+                                    ? (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {fullTableBlocks.map((block, bi) => (
+                                          <div key={bi}>
+                                            {fullTableBlocks.length > 1 && (
+                                              <p style={{ fontSize: 10, color: '#94a3b8', margin: '0 0 4px', fontFamily: 'monospace' }}>
+                                                Table {bi + 1} of {fullTableBlocks.length}
+                                              </p>
+                                            )}
+                                            {(evidenceViewMode[si] || 'markdown') === 'markdown'
+                                              ? <pre style={{ whiteSpace: 'pre', overflowX: 'auto', fontSize: 12, lineHeight: 1.6, color: '#334155', margin: 0, fontFamily: 'monospace', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: 10 }}>{formatAlignedMarkdownTable(block)}</pre>
+                                              : <MarkdownTable text={block} />}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )
                                     : <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#475569', margin: 0, fontFamily: 'monospace' }}>{fullContent || 'No chunk content available'}</pre>
                                   }
                                 </div>
