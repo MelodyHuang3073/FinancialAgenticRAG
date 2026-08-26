@@ -8,7 +8,7 @@ from collections import Counter
 from typing import List, Dict, Any, Tuple, Optional
 
 from app.rag.chunker import chunk_text
-from app.tools.table_parser import linearize_financial_table, to_markdown_table
+from app.tools.table_parser import linearize_financial_table, to_markdown_table, is_markdown_separator_row
 
 
 class FinancialFileParser:
@@ -893,6 +893,46 @@ class FinancialFileParser:
         ]
         return [synthesized, rows[0]] + rows[1:]
 
+    def _reinject_year_header_if_missing(self, md: str, page, table_top: float) -> str:
+        """
+        Post-process an ALREADY-BUILT Markdown table string with
+        _inject_missing_year_header()'s "look at the page text just above
+        this table for a nearby year" logic — table-format-agnostic,
+        since it works on Markdown text rather than raw pdfplumber cells.
+
+        Needed because _inject_missing_year_header() only runs inside the
+        Tier 1 ruled-line loop above; Tier 2's word-coordinate recovery
+        (used for whatever rows have NO ruled lines at all — see
+        _ruled_line_tables_and_prose()'s own docstring) builds its own
+        Markdown tables independently and has no equivalent step, so a
+        real row recovered that way (confirmed real case: Activision
+        Blizzard's "Property and equipment, net" balance sheet row) can
+        still end up under a generic "Col1 | Col2" header instead of the
+        real "2019 | 2018" — which then fails downstream extraction the
+        exact same way a missing Tier 1 header would.
+        """
+        lines = md.split("\n")
+        if len(lines) < 2:
+            return md
+        if self._extract_year_headers(lines[0]):
+            return md  # already has a real year header — nothing to fix
+
+        rows = [
+            [c.strip() for c in line.strip().strip("|").split("|")]
+            for line in lines
+            if not is_markdown_separator_row(line)
+        ]
+        rows = self._inject_missing_year_header(rows, page, table_top)
+        # _inject_missing_year_header() keeps the old header guess as an
+        # ordinary data row on the assumption it's usually a real section
+        # label (Tier 1's case, e.g. "Assets"). Tier 2's own header
+        # fallback is a generic "Line Item" placeholder instead, which
+        # carries no information and must not linger as a bogus row now
+        # that a real year header has been injected in front of it.
+        if len(rows) >= 2 and str(rows[1][0] or "").strip().lower() == "line item":
+            rows = [rows[0]] + rows[2:]
+        return self._table_to_markdown(rows)
+
     #: Maximum vertical gap (points) between one table's bottom edge and
     #: the next table's top edge for them to be merged into one table —
     #: see _merge_adjacent_tables(). Small enough that it won't bridge a
@@ -977,7 +1017,8 @@ class FinancialFileParser:
 
         md_tables = []
         filtered_page = page
-        for group in self._merge_adjacent_tables(found_tables):
+        merged_groups = self._merge_adjacent_tables(found_tables)
+        for group in merged_groups:
             try:
                 rows: list = []
                 for t in group:
@@ -1002,6 +1043,17 @@ class FinancialFileParser:
             recovered_tables, recovered_prose = [], None
 
         if recovered_tables:
+            # Same year-header context as Tier 1's own tables (usually a
+            # single "As of .../For the years ended ..." line near the
+            # top of a page's one real statement) — reuse the first
+            # ruled-line group's top as the reference point for "text
+            # above this" so a recovered table missing its own header
+            # gets the same treatment Tier 1 tables already get.
+            header_ref_top = merged_groups[0][0].bbox[1] if merged_groups else 0
+            recovered_tables = [
+                self._reinject_year_header_if_missing(md, page, header_ref_top)
+                for md in recovered_tables
+            ]
             md_tables.extend(recovered_tables)
             return md_tables, recovered_prose
 

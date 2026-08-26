@@ -34,6 +34,7 @@ _METRIC_NAMES: Dict[str, str] = {
     "equity":        "Shareholders Equity 股東權益 Total Equity",
     "cash":          "Cash Equivalents 現金及約當現金",
     "capex":         "Capital Expenditure CapEx 資本支出",
+    "ppe":           "Property Plant and Equipment PP&E Fixed Assets 不動產廠房及設備 固定資產",
     "depreciation":  "Depreciation Amortization 折舊",
     "ebitda":        "EBITDA",
     "roe":           "Return on Equity ROE Net Income Equity",
@@ -71,6 +72,8 @@ _RATIO_COMPONENTS: Dict[str, List[str]] = {
     "sga_pct_revenue":    ["sga", "revenue"],
     "cost_ratio":         ["cost_revenue", "revenue"],
     "capex_pct_revenue":  ["capex", "revenue"],
+    "fixed_asset_turnover":    ["revenue", "ppe"],
+    "operating_cash_flow_ratio": ["operating_cf", "current_liab"],
 }
 
 
