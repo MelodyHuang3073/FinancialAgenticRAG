@@ -41,7 +41,16 @@ _METRIC_KEYWORDS = {
     "equity":        ["股東權益", "shareholders equity", "stockholders equity", "equity"],
     "cash":          ["現金及約當現金", "cash and cash equivalents", "cash & equivalents",
                       "cash equivalents"],  # bare 'cash' removed to avoid collision with cash flow
-    "capex":         ["資本支出", "capital expenditure", "capex", "pp&e"],
+    "capex":         ["資本支出", "capital expenditure", "capex"],
+    # Property, Plant & Equipment is a BALANCE SHEET asset (the net book
+    # value of fixed assets), distinct from capex (the CASH FLOW
+    # STATEMENT spend to acquire/build those assets during the period).
+    # Conflating the two (as "pp&e" used to be a trigger for "capex")
+    # routed PP&E questions to the wrong statement and searched for the
+    # wrong term — confirmed root cause of fixed_asset_turnover's PP&E
+    # never being retrieved for a real Activision Blizzard question.
+    "ppe":           ["pp&e", "property, plant and equipment", "property and equipment",
+                       "fixed assets", "不動產、廠房及設備", "固定資產"],
     "depreciation":  ["折舊", "depreciation", "amortization"],
     "ebitda":        ["ebitda"],
     "roe":           ["roe", "return on equity"],
@@ -59,6 +68,8 @@ _METRIC_KEYWORDS = {
     "net_debt":         ["net debt", "淨負債"],
     "debt":             ["debt", "long-term debt", "short-term debt", "借款", "負債"],
     "working_capital":  ["working capital", "營運資金"],
+    "fixed_asset_turnover": ["fixed asset turnover", "fixed-asset turnover", "net ppe turnover"],
+    "operating_cash_flow_ratio": ["operating cash flow ratio", "cash flow ratio", "ocf ratio"],
     # ── Leverage / solvency metrics ───────────────────────────────────
     "debt_equity":      ["debt-to-equity", "d/e ratio", "leverage", "financial leverage"],
     "interest_coverage":["interest coverage", "times interest earned"],
@@ -110,6 +121,9 @@ _STATEMENT_TYPE_MAP: Dict[str, str] = {
     "current_ratio":    "balance_sheet",
     "debt_equity":      "balance_sheet",
     "interest_coverage":"balance_sheet",
+    "fixed_asset_turnover": "balance_sheet",
+    "operating_cash_flow_ratio": "cash_flow",
+    "ppe":              "balance_sheet",
     # Cash Flow metrics
     "capex":            "cash_flow",
     "depreciation":     "cash_flow",
@@ -150,6 +164,35 @@ _EXCLUSION_KEYWORDS = [
 ]
 
 
+def _extract_years(query: str) -> List[str]:
+    """
+    Every distinct fiscal year mentioned in the query. A dash/'to'-joined
+    range ("FY2017-FY2019", "2017 to 2019") is expanded to every year in
+    between (inclusive) — a plain year-token regex would otherwise return
+    only the two range endpoints, silently dropping the years in between.
+    Confirmed real impact: a "FY2017 - FY2019 3 year average" question
+    only generated retrieval steps for 2017 and 2019, never 2018, because
+    this used to be a bare findall with no range awareness (the same bug
+    already fixed in pot_reasoner._extract_query_years — duplicated here
+    since this module builds its own `years` independently).
+    """
+    years: List[str] = []
+    seen: set = set()
+    for m in re.finditer(r'(?:FY)?(20\d{2})\s*(?:[-–—]|to)\s*(?:FY)?(20\d{2})', query, re.IGNORECASE):
+        start, end = int(m.group(1)), int(m.group(2))
+        if 0 < end - start <= 10:
+            for y in range(start, end + 1):
+                ys = str(y)
+                if ys not in seen:
+                    years.append(ys)
+                    seen.add(ys)
+    for y in re.findall(r'(?:FY)?(20\d{2})', query):
+        if y not in seen:
+            years.append(y)
+            seen.add(y)
+    return sorted(years)
+
+
 class FinanceBenchClassifier:
     """
     Classifies a user question into FinanceBench taxonomy categories
@@ -163,7 +206,7 @@ class FinanceBenchClassifier:
         entity = self._extract_entity(query)
         target_metrics = self._extract_target_metrics(q_lower)
         calc_type = self._detect_calc_type(q_lower)
-        years = sorted(set(re.findall(r'(?:FY)?20\d{2}', query)))
+        years = _extract_years(query)
         quarters = sorted(set(re.findall(r'[Qq][1-4]', query)))
         has_explanation = any(kw in q_lower for kw in _EXPLANATION_KEYWORDS)
         has_assessment = any(kw in q_lower for kw in _ASSESSMENT_KEYWORDS)
@@ -506,6 +549,7 @@ class FinanceBenchClassifier:
             "equity":           "Shareholders Equity 股東權益",
             "cash":             "Cash Equivalents 現金及約當現金",
             "capex":            "Capital Expenditure CapEx 資本支出",
+            "ppe":              "Property Plant and Equipment PP&E Fixed Assets 不動產廠房及設備 固定資產",
             "depreciation":     "Depreciation Amortization 折舊",
             "ebitda":           "EBITDA",
             "roe":              "Return on Equity ROE Net Income Equity",
@@ -523,6 +567,8 @@ class FinanceBenchClassifier:
             "net_debt":         "Net Debt 淨負債",
             "debt":             "Debt Long-term Debt Short-term Debt Borrowings 負債",
             "working_capital":  "Working Capital 營運資金",
+            "fixed_asset_turnover": "Property Plant and Equipment PP&E Fixed Assets Revenue",
+            "operating_cash_flow_ratio": "Cash from Operations Operating Cash Flow Current Liabilities",
             # Leverage
             "debt_equity":      "Debt-to-Equity Leverage Financial Leverage",
             "interest_coverage":"Interest Coverage Times Interest Earned",
