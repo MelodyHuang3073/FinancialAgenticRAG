@@ -83,6 +83,20 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
         _ALIAS_TO_CANONICAL[_a.lower()] = _canonical
 
 
+_NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+)$')
+
+
+def _is_negated_match(item_lower: str, match_start: int) -> bool:
+    """
+    True if the text immediately before an alias match ends with a
+    negation prefix ("non-", "non ", "not "). Guards substring matching
+    against e.g. "current assets" matching inside "non-current assets",
+    or "operating income" matching inside "non-operating income" — a
+    generic check, not specific to any one canonical/alias pair.
+    """
+    return bool(_NEGATION_PREFIX_RE.search(item_lower[:match_start]))
+
+
 def _get_canonical(item_name: str, company_name: str = "") -> str:
     """
     Map a raw line item label to a canonical key.
@@ -91,6 +105,11 @@ def _get_canonical(item_name: str, company_name: str = "") -> str:
       1. Company-specific override aliases (from company_line_item_overrides)
       2. Global _ITEM_TAXONOMY (exact match)
       3. Global _ITEM_TAXONOMY (longest substring match)
+
+    Every substring match (priorities 1 and 3 — an exact match in
+    priority 2 can't be accidentally negated, since the whole string
+    would have to literally equal the alias) is rejected if it's
+    immediately preceded by a negation prefix — see _is_negated_match().
 
     Args:
         item_name    : raw line item string (e.g. "Total net revenues")
@@ -107,8 +126,10 @@ def _get_canonical(item_name: str, company_name: str = "") -> str:
         for canonical, aliases in overrides.items():
             for alias in aliases:
                 alias_lower = alias.lower()
-                # Exact or substring match
-                if alias_lower == item_lower or alias_lower in item_lower:
+                if alias_lower == item_lower:
+                    return canonical
+                idx = item_lower.find(alias_lower)
+                if idx != -1 and not _is_negated_match(item_lower, idx):
                     return canonical
 
     # ── Priority 2: Global taxonomy exact match ──────────────────────────────
@@ -119,9 +140,13 @@ def _get_canonical(item_name: str, company_name: str = "") -> str:
     best = ""
     best_len = 0
     for alias, canonical in _ALIAS_TO_CANONICAL.items():
-        if alias in item_lower and len(alias) > best_len:
-            best = canonical
-            best_len = len(alias)
+        idx = item_lower.find(alias)
+        if idx == -1 or len(alias) <= best_len:
+            continue
+        if _is_negated_match(item_lower, idx):
+            continue
+        best = canonical
+        best_len = len(alias)
     return best or "unknown"
 
 
@@ -280,6 +305,13 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
         content = ev.get("parent_content") or ev.get("content", "")
         if not content:
             continue
+        if _is_supplementary_schedule(content):
+            # Same guard as _extract_from_free_text() / the formula-guided
+            # path: a guarantor/parent-only/combining schedule reuses the
+            # real statements' line-item labels for a smaller reporting
+            # entity, so its numbers must never stand in for the actual
+            # company's consolidated figures here either.
+            continue
 
         # Extract company name for override lookup (Step 3/4)
         ev_company = ev.get("company", "")
@@ -350,45 +382,144 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
 # Extraction: formula-guided (alias-based)
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: Standard SEC-filing terminology for a supplementary/condensed
+#: financial schedule covering a SUBSET of the reporting entity —
+#: guarantor subsidiaries (required by SEC Rule 3-10 for guaranteed
+#: debt), parent-company-only statements, segment combining schedules.
+#: Not specific to any one company: these are generic terms used across
+#: many real 10-Ks. "deed of cross guarantee" is the equivalent term used
+#: by companies with Australian subsidiaries (e.g. under ASIC Class
+#: Order relief) — same underlying concept, different jurisdiction's
+#: wording, still generic rather than tied to one filer.
+_SUPPLEMENTARY_SCHEDULE_MARKERS = (
+    "guarantor", "obligor group", "obligor", "parent company only",
+    "parent-company-only", "condensed consolidating", "combining schedule",
+    "deed of cross guarantee",
+)
+
+
+def _is_supplementary_schedule(content: str) -> bool:
+    """
+    True if this evidence chunk looks like a supplementary schedule for a
+    SUBSET of the reporting entity rather than the real consolidated
+    statements. These routinely reuse the EXACT SAME line-item labels as
+    the primary statements ("Net sales", "Gross profit", "Total current
+    liabilities", "Inventories") for a much smaller reporting entity —
+    a real, confirmed failure mode: _score_row_match() alone can't catch
+    this, because the row genuinely IS an exact "Total X" match; it's
+    just for the wrong entity. Confirmed on Amcor's real 10-K, where a
+    "Deed of Cross Guarantee" schedule's $58M/$377M guarantor-group
+    Net sales/Gross profit outranked the real consolidated $14,694M/
+    $2,725M by being an equally "clean" exact-label match.
+    """
+    lower = content.lower()
+    return any(m in lower for m in _SUPPLEMENTARY_SCHEDULE_MARKERS)
+
+
+def _score_row_match(label: str, aliases: List[str]) -> int:
+    """
+    How well does a table row's own label match one of a variable's
+    aliases? Generic across every canonical/alias pair — never special-
+    cased to a specific line item.
+      2 = the label IS (once normalized) exactly one of the aliases, or
+          exactly "total {alias}" — a genuine total/subtotal row.
+      1 = the alias appears only as a substring of a longer label — a
+          sub-item, an "Other X" line, or a compound "X and Y" label.
+          Real, but not the total; callers should flag results built
+          from a score-1 match as approximate.
+      0 = no real match at all, including a substring match immediately
+          preceded by a negation prefix ("non-", "not ") — e.g. "current
+          assets" inside "non-current assets" doesn't count.
+    When multiple rows compete for the same (placeholder, year), the
+    highest score wins — this is what makes "Total net revenues" beat
+    "Subscription, licensing, and other revenues" for a revenue lookup,
+    and "Total current liabilities" beat "Other current liabilities" for
+    a current_liab lookup, purely by comparing the candidates rather than
+    hardcoding either company's line-item wording.
+    """
+    label_norm = re.sub(r'\s+', ' ', label.lower().strip().rstrip(':'))
+    for alias in aliases:
+        a = alias.lower().strip()
+        if not a:
+            continue
+        idx = label_norm.find(a)
+        if idx == -1 or _is_negated_match(label_norm, idx):
+            continue
+        if label_norm == a or label_norm == f"total {a}":
+            return 2
+        return 1
+    return 0
+
+
 def _extract_formula_guided(
     evidence_list: List[Dict[str, Any]],
     formula_entry: Dict[str, Any],
     query_years: List[str],
-) -> Tuple[Dict[str, float], Dict[str, List[Tuple[float, str]]]]:
+) -> Tuple[Dict[str, float], Dict[str, List[Tuple[float, str]]], Dict[str, Dict[str, Any]]]:
     """
     For each required variable in formula_entry, search evidence for a chunk whose
-    Line Item matches a known alias. Returns (final, resolved):
+    Line Item matches a known alias. Returns (final, resolved, meta):
       - final:    {placeholder -> best single float} — what every existing
                   caller expects (codegen for non-period_average formulas,
                   the extracted-variables summary shown to the user).
-      - resolved: {placeholder -> [(value, year), ...]} — every match found,
-                  needed by period_average formulas, which average a ratio
-                  across EVERY year the query asks about rather than
-                  picking one old/new pair (see _gen_formula_code()).
+      - resolved: {placeholder -> [(value, year), ...]} — every WINNING
+                  match (see below), needed by period_average formulas,
+                  which average a ratio across EVERY year the query asks
+                  about rather than picking one old/new pair (see
+                  _gen_formula_code()).
+      - meta:     {placeholder -> {"source": str, "is_approximate": bool}}
+                  source is one of "table-total" (row label IS the alias
+                  or "Total {alias}"), "table-partial" (matched a sub-
+                  item/compound label instead — is_approximate=True), a
+                  "-supplementary" suffixed variant of either (matched in
+                  a guarantor/parent-only/combining schedule rather than
+                  the primary statement — always is_approximate=True,
+                  even for an otherwise-exact "-total" match, since it's
+                  real data for the wrong reporting entity), "legacy",
+                  "free-text", "period-average" (mixed years), or
+                  "unresolved". Lets callers show exactly how each
+                  variable was actually obtained instead of a blanket
+                  "(formula)" label, so a suspicious value is visible at
+                  a glance rather than indistinguishable from a solid one.
 
-    Extraction priority per evidence chunk — Priority 1 is the actual fix
-    for the operating_income/revenue mix-up bug: the previous version
-    treated "does this alias substring appear ANYWHERE in the whole
-    chunk" as sufficient to accept a match, then scanned the ENTIRE
-    chunk's pipe-delimited fields for the first "year: value" pattern —
-    so on a real income-statement table (revenue and operating income
-    both present in the same evidence chunk, as they always are), an
-    "operating income" alias hit would happily resolve to Net sales'
-    value if that row's field got scanned first. Matching alias against
-    each ROW's own label — not the whole chunk — makes that structurally
-    impossible: a value can only be attributed to the row it actually
-    came from.
+    Extraction priority per evidence chunk — Priority 1 is the fix for
+    the operating_income/revenue mix-up bug: matching alias against each
+    ROW's own label — not the whole chunk — makes it structurally
+    impossible for one row's alias hit to resolve to a DIFFERENT row's
+    value. When several rows in the same table match the same alias
+    (e.g. both "Total current liabilities" and "Other current
+    liabilities" contain "current liabilities"), _score_row_match() picks
+    the real total over the sub-item instead of whichever happened to be
+    scanned first.
       1. Standard Markdown table (the format real PDF tables are stored
-         in) — matched ROW BY ROW via _extract_from_markdown_table_block().
+         in) — matched ROW BY ROW via _extract_from_markdown_table_block(),
+         scored via _score_row_match(), highest score per year wins.
       2. Legacy single-line "Line Item: X | Year: Val" format (kept for
          backward compatibility with content still in that shape).
       3. Free-text keyword-proximity fallback (_extract_from_free_text),
-         for genuinely unstructured narrative evidence only.
+         for genuinely unstructured narrative evidence only — and ONLY
+         when a canonical whose NAME actually matches this placeholder's
+         aliases is found. There is deliberately no "grab whichever
+         canonical happens to have data for our query years" fallback
+         beyond that: that exact mechanism was root-caused to
+         fixed_asset_turnover's ppe_new silently taking on revenue's
+         value (no real PP&E match existed anywhere, so the old fallback
+         grabbed the first unrelated canonical that had matching-year
+         data instead of leaving ppe_new unresolved).
     """
     var_aliases = get_variable_aliases(formula_entry)
     is_multi_year = formula_entry.get("multi_year", False)
     is_period_average = formula_entry.get("period_average", False)
-    resolved: Dict[str, List[Tuple[float, str]]] = {k: [] for k in var_aliases}
+
+    # candidates[placeholder] = [(value, year, score, source, is_primary), ...]
+    # -- every match found, BEFORE reducing to one winner per year. Always
+    # scans the FULL evidence list (no "first chunk match wins" early
+    # exit, even for simple formulas) -- a match found early is no longer
+    # trusted just for being early, since it could be a supplementary
+    # schedule's row scanned before the real primary statement's; the
+    # reduction step below picks the best candidate regardless of
+    # discovery order.
+    candidates: Dict[str, List[Tuple[float, str, int, str, bool]]] = {k: [] for k in var_aliases}
 
     for placeholder, aliases in var_aliases.items():
         aliases_lower = [a.lower() for a in aliases]
@@ -397,18 +528,18 @@ def _extract_formula_guided(
             if not content:
                 continue
             ev_company = ev.get("company", "")
+            is_primary = not _is_supplementary_schedule(content)
 
-            # ── Priority 1: standard Markdown table, matched per ROW ──────
+            # ── Priority 1: standard Markdown table, matched per ROW, scored ──
             if any(is_markdown_separator_row(l) for l in content.split("\n")):
                 for row in _extract_from_markdown_table_block(content, ev_company).values():
-                    label_lower = row["item"].lower()
-                    if not any(a in label_lower for a in aliases_lower):
+                    score = _score_row_match(row["item"], aliases)
+                    if score == 0:
                         continue
-                    pair = (row["val"], row["year"])
-                    if pair not in resolved[placeholder]:
-                        resolved[placeholder].append(pair)
-                if resolved[placeholder] and not (is_multi_year or is_period_average):
-                    break  # first chunk match wins for simple (single-year) formulas
+                    source = "table-total" if score == 2 else "table-partial"
+                    if not is_primary:
+                        source += "-supplementary"
+                    candidates[placeholder].append((row["val"], row["year"], score, source, is_primary))
                 continue  # this chunk is fully handled by the table parser
 
             content_lower = content.lower()
@@ -431,12 +562,43 @@ def _extract_formula_guided(
                 year = _normalize_year(ym.group(1))
                 val = _to_float(m_f.group(2))
                 if val is not None and val != 0:
-                    pair = (val, year)
-                    if pair not in resolved[placeholder]:
-                        resolved[placeholder].append(pair)
+                    source = "legacy" if is_primary else "legacy-supplementary"
+                    candidates[placeholder].append((val, year, 1, source, is_primary))
 
-            if resolved[placeholder] and not (is_multi_year or is_period_average):
-                break  # first chunk match wins for simple (single-year) formulas
+    # ── Reduce to the single best-scoring candidate per year ────────────────
+    # Priority is (is_primary, score) compared as a tuple: a match from a
+    # supplementary/guarantor schedule NEVER outranks one from the real
+    # primary statement, even a lower-scoring sub-item match — using the
+    # WRONG entity's "clean" total is worse than the RIGHT entity's
+    # partial data for computing a ratio about the actual company. Only
+    # within the same primary-ness tier does score (total vs. partial)
+    # break the tie.
+    resolved: Dict[str, List[Tuple[float, str]]] = {}
+    # winner_meta[placeholder][year] = (score, source) of the entry that
+    # won that year, kept alongside `resolved` (whose tuples must stay
+    # plain (value, year) — every existing consumer of the return value
+    # unpacks exactly two fields).
+    winner_meta: Dict[str, Dict[str, Tuple[int, str]]] = {}
+    for placeholder in var_aliases:
+        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, int]]] = {}
+        for val, yr, score, source, is_primary in candidates[placeholder]:
+            priority = (is_primary, score)
+            existing = best_by_year.get(yr)
+            if existing is None or priority > existing[3]:
+                best_by_year[yr] = (val, score, source, priority)
+        # A supplementary-schedule match is NEVER actually used, even as
+        # a last resort with nothing else available for that year — real
+        # data for the WRONG reporting entity is worse than no data at
+        # all for computing a ratio about the actual company (same
+        # philosophy as root cause 2: unresolved beats confidently
+        # wrong). The tuple-priority ordering above already lets a
+        # primary match win whenever both exist; this prunes the
+        # remaining case where supplementary was the ONLY candidate for
+        # a year, so that year falls through to the free-text fallback
+        # (or stays unresolved) instead of silently using it.
+        best_by_year = {y: v for y, v in best_by_year.items() if v[3][0]}
+        resolved[placeholder] = [(v, y) for y, (v, s, src, p) in best_by_year.items()]
+        winner_meta[placeholder] = {y: (s, src) for y, (v, s, src, p) in best_by_year.items()}
 
     # ── Free-text fallback: fill any placeholders still incomplete ──────────
     # Triggers when:
@@ -467,34 +629,50 @@ def _extract_formula_guided(
             for placeholder, aliases in var_aliases.items():
                 if not _needs_ft_fallback(placeholder, resolved[placeholder]):
                     continue  # already has complete multi-year data
-                # Try to match placeholder to a canonical
+                # Try to match placeholder to a canonical BY NAME.
                 base = placeholder.replace("_new", "").replace("_old", "")
-                # Find the canonical that best matches any alias
                 matched_canonical = None
-                for c, items_list in ft_by_canonical.items():
+                for c in ft_by_canonical:
                     if c == base or any(c in a.lower() or a.lower() in c for a in aliases):
                         matched_canonical = c
                         break
+                # Root cause 2 fix: no fallback beyond this. Previously,
+                # finding no name match here fell back to "whichever
+                # canonical has data for one of our query years" — which
+                # is how ppe_new silently took on revenue's value with no
+                # real PP&E match anywhere. If nothing genuinely matches
+                # this placeholder's own aliases, it stays unresolved.
                 if matched_canonical is None:
-                    # Fallback: look for canonical that has entries for our query years
-                    for c, items_list in ft_by_canonical.items():
-                        if any(yr in [y for _, y in items_list] for yr in query_years):
-                            matched_canonical = c
-                            break
-                if matched_canonical:
-                    resolved[placeholder] = ft_by_canonical[matched_canonical]
+                    continue
+                existing_years = {y for _, y in resolved[placeholder]}
+                for val, yr in ft_by_canonical[matched_canonical]:
+                    if yr in existing_years:
+                        continue  # keep the stronger table-sourced value for a year we already have
+                    resolved[placeholder].append((val, yr))
+                    winner_meta.setdefault(placeholder, {})[yr] = (1, "free-text")
+                    existing_years.add(yr)
 
     # ── Choose the best value for each placeholder ────────────────────────────
     final: Dict[str, float] = {}
+    meta: Dict[str, Dict[str, Any]] = {}
     for placeholder, matches in resolved.items():
         if not matches:
+            meta[placeholder] = {"source": "unresolved", "is_approximate": False}
             continue
+
+        picked_year: Optional[str] = None
         if is_period_average:
             # No single "best" value — the real per-year computation is
             # done by _gen_formula_code() from `resolved` directly. This
             # mean is only for the truthiness gate and the variable
             # summary shown to the user.
             final[placeholder] = sum(v for v, _ in matches) / len(matches)
+            year_meta = [winner_meta.get(placeholder, {}).get(y, (1, "unknown")) for _, y in matches]
+            meta[placeholder] = {
+                "source": "period-average",
+                "is_approximate": any(s < 2 or "supplementary" in src for s, src in year_meta),
+            }
+            continue
         elif is_multi_year:
             # _new / _old suffix: pick based on query years
             base = placeholder.replace("_new", "").replace("_old", "")
@@ -508,8 +686,10 @@ def _extract_formula_guided(
                 old_yr = new_yr = sorted_years[0] if sorted_years else "N/A"
             if "_old" in placeholder:
                 best = next((v for v, y in matches if y == old_yr), matches[0][0])
+                picked_year = next((y for v, y in matches if y == old_yr), matches[0][1])
             else:
                 best = next((v for v, y in matches if y == new_yr), matches[-1][0])
+                picked_year = next((y for v, y in matches if y == new_yr), matches[-1][1])
             final[placeholder] = best
         else:
             # Prefer value from query year
@@ -517,10 +697,77 @@ def _extract_formula_guided(
             for val, yr in matches:
                 if yr in query_years:
                     best = val
+                    picked_year = yr
                     break
-            final[placeholder] = best if best is not None else matches[0][0]
+            if best is None:
+                best, picked_year = matches[0]
+            final[placeholder] = best
 
-    return final, resolved
+        score, source = winner_meta.get(placeholder, {}).get(picked_year, (1, "unknown"))
+        meta[placeholder] = {"source": source, "is_approximate": score < 2 or "supplementary" in source}
+
+    return final, resolved, meta
+
+
+#: Values at or below this magnitude are exempt from the duplicate-value
+#: check below — 0, 1, and -1 can legitimately coincide between two
+#: genuinely unrelated metrics (e.g. both being exactly zero), so
+#: treating every such coincidence as suspected reuse would be too noisy
+#: to be useful.
+_DUPLICATE_VALUE_MIN_MAGNITUDE = 1.0
+
+
+def _detect_and_strip_duplicate_values(
+    resolved_formula: Dict[str, float],
+    resolved_formula_series: Dict[str, List[Tuple[float, str]]],
+    resolved_formula_meta: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    """
+    Two DIFFERENT variables (different base names, ignoring _new/_old —
+    revenue_new legitimately equalling revenue_old happens in a flat-YoY
+    evidence set and is not a bug) resolving to the exact same value is a
+    strong signal one of them silently borrowed the other's number
+    instead of genuinely finding its own — the confirmed real example is
+    fixed_asset_turnover's ppe_new landing on exactly revenue's value
+    with no real PP&E match anywhere in evidence.
+
+    Detected pairs are dropped back to unresolved IN PLACE (removed from
+    resolved_formula and resolved_formula_series) rather than flagged and
+    used anyway — this makes _gen_formula_code() fail naturally (it
+    already returns [] when a required variable is missing), which falls
+    through to generate_and_execute()'s PATH 2 (linearized-table
+    extraction), a genuinely different mechanism — the "retry via a
+    different path" behaviour, without needing separate re-retrieval
+    plumbing. Returns warning lines (as '# ...' comments) so the
+    collision is visible in the generated code / sandbox log rather than
+    silently disappearing.
+    """
+    warnings: List[str] = []
+    placeholders = list(resolved_formula.keys())
+    to_drop: set = set()
+    for i in range(len(placeholders)):
+        for j in range(i + 1, len(placeholders)):
+            ph_a, ph_b = placeholders[i], placeholders[j]
+            base_a = ph_a.replace("_new", "").replace("_old", "")
+            base_b = ph_b.replace("_new", "").replace("_old", "")
+            if base_a == base_b:
+                continue
+            val_a, val_b = resolved_formula[ph_a], resolved_formula[ph_b]
+            if abs(val_a) <= _DUPLICATE_VALUE_MIN_MAGNITUDE or abs(val_b) <= _DUPLICATE_VALUE_MIN_MAGNITUDE:
+                continue
+            if val_a == val_b:
+                to_drop.add(ph_a)
+                to_drop.add(ph_b)
+                warnings.append(
+                    f"# WARNING: '{ph_a}' and '{ph_b}' both resolved to {val_a} — "
+                    f"suspected value reuse between unrelated variables. Both dropped; "
+                    f"falling back to a different extraction path."
+                )
+    for ph in to_drop:
+        resolved_formula.pop(ph, None)
+        resolved_formula_series.pop(ph, None)
+        resolved_formula_meta[ph] = {"source": "unresolved", "is_approximate": False}
+    return warnings
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -646,6 +893,17 @@ def _extract_from_free_text(
         content = ev.get("parent_content") or ev.get("content", "")
         if not content or "Line Item:" in content:
             # pipe-delimited table chunk — handled by _extract_from_linearized_table
+            continue
+        if _is_supplementary_schedule(content):
+            # A guarantor/parent-only/combining schedule reuses the same
+            # line-item labels as the real consolidated statements for a
+            # much smaller reporting entity — keyword-proximity matching
+            # can't tell the difference the way _score_row_match()'s
+            # row-scoped comparison can, so this path must not touch such
+            # evidence at all rather than risk silently resolving to the
+            # wrong entity's numbers (confirmed real case: Amcor's "Deed
+            # of Cross Guarantee" schedule's $58M gross profit vs. the
+            # real consolidated $2,725M).
             continue
         content_lower = content.lower()
 
@@ -1140,9 +1398,19 @@ def _build_calculation_code(
             target_canonical = canonical
             break
 
+    # No "fall back to whatever's first in extracted_table" beyond this —
+    # that used to silently print an ENTIRELY UNRELATED line item as if
+    # it answered the question (confirmed real case: a fixed-asset-
+    # turnover query with no PP&E/revenue in evidence returned "Provision
+    # for inventories: 6.0" as the result, because that happened to be
+    # the first value extracted from whatever page WAS retrieved). If the
+    # query names a specific metric and nothing extracted matches it,
+    # returning False here is the honest outcome — it lets the caller
+    # fall through to free-text extraction and, failing that, the
+    # explicit "could not find structured financial data" message,
+    # instead of confidently stating a number that has nothing to do
+    # with what was asked.
     vars_to_use = groups.get(target_canonical, []) if target_canonical else []
-    if not vars_to_use:
-        vars_to_use = list(extracted_table.values())
 
     if vars_to_use:
         # Prefer preferred year
@@ -1184,9 +1452,14 @@ class ProgramOfThoughtReasoner:
         # ── Step 3: Formula-guided extraction ─────────────────────────────────
         resolved_formula: Dict[str, float] = {}
         resolved_formula_series: Dict[str, List[Tuple[float, str]]] = {}
+        resolved_formula_meta: Dict[str, Dict[str, Any]] = {}
+        duplicate_warnings: List[str] = []
         if formula_entry:
-            resolved_formula, resolved_formula_series = _extract_formula_guided(
+            resolved_formula, resolved_formula_series, resolved_formula_meta = _extract_formula_guided(
                 evidence_list, formula_entry, query_years
+            )
+            duplicate_warnings = _detect_and_strip_duplicate_values(
+                resolved_formula, resolved_formula_series, resolved_formula_meta
             )
 
         # ── Step 4: Build code ────────────────────────────────────────────────
@@ -1194,6 +1467,7 @@ class ProgramOfThoughtReasoner:
             "# FinAgent-RAG Program-of-Thought (PoT) Sandbox",
             "# Extracted from retrieved financial evidence",
         ]
+        code_lines.extend(duplicate_warnings)
 
         used_extraction = "formula"
 
@@ -1233,7 +1507,19 @@ class ProgramOfThoughtReasoner:
                     code_lines, extracted_table, query, q_lower, preferred_year
                 )
                 if not success_calc:
+                    # The evidence DID contain some structured table data,
+                    # but none of it matched what this question actually
+                    # asks about — result = 0.0 with an explicit warning
+                    # printed to the sandbox log, not a confident-looking
+                    # number borrowed from an unrelated line item (the
+                    # confirmed real bug: a fixed-asset-turnover question
+                    # with no PP&E/revenue in evidence used to silently
+                    # return "Provision for inventories: 6.0").
                     code_lines.append("result = 0.0")
+                    code_lines.append(
+                        "print('WARNING: retrieved evidence did not contain data relevant "
+                        "to this specific question -- result is not reliable.')"
+                    )
             else:
                 # PATH 2.5: free-text keyword extraction for PDF / MD&A narrative chunks
                 free_text_extracted = _extract_from_free_text(evidence_list, query_years)
@@ -1249,13 +1535,16 @@ class ProgramOfThoughtReasoner:
                         code_lines, free_text_extracted, query, q_lower, preferred_year
                     )
                     if not success_calc:
-                        first_v = list(free_text_extracted.values())[0]
-                        _item_lbl = first_v["item"]
-                        _item_yr = first_v["year"]
-                        _item_key = first_v["code_key"]
-                        code_lines.append(f"result = {_item_key}")
+                        # Same fix as the extracted_table branch above: no
+                        # more "grab whichever free-text value came first"
+                        # regardless of whether it has anything to do with
+                        # the question — an honest 0.0 + warning beats a
+                        # confidently wrong unrelated number.
+                        code_lines.append("result = 0.0")
                         code_lines.append(
-                            "print(f'" + _item_lbl + " (" + _item_yr + "): {result}')")
+                            "print('WARNING: retrieved evidence did not contain data relevant "
+                            "to this specific question -- result is not reliable.')"
+                        )
                     # Bug 1 fix: PATH 3 was unconditionally overwriting code_lines here.
                     # It is now correctly in the 'else' branch below.
                 else:
@@ -1290,10 +1579,20 @@ class ProgramOfThoughtReasoner:
             code_str = "\n".join(code_lines)
             success, res_val, stdout_err = execute_pot_code(code_str)
 
-        # Build extracted summary
+        # Build extracted summary — the middle field shows how each value
+        # was actually obtained (table-total / table-partial / legacy /
+        # free-text / period-average), not a blanket "formula" label, so
+        # a suspicious extraction (e.g. table-partial, meaning no real
+        # total row was ever found) is visible at a glance rather than
+        # indistinguishable from a solid one.
         if formula_entry and resolved_formula:
             extracted_summary = {
-                ph: (ph, "formula", val)
+                ph: (
+                    ph,
+                    resolved_formula_meta.get(ph, {}).get("source", "formula")
+                    + ("~approx" if resolved_formula_meta.get(ph, {}).get("is_approximate") else ""),
+                    val,
+                )
                 for ph, val in resolved_formula.items()
             }
         else:
