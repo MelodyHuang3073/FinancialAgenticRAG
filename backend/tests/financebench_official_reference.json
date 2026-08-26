@@ -1,0 +1,162 @@
+[
+  {
+    "financebench_id": "financebench_id_00499",
+    "doc_name": "3M_2022_10K",
+    "question_type": "domain-relevant",
+    "question": "Is 3M a capital-intensive business based on FY2022 data?",
+    "answer": "No, the company is managing its CAPEX and Fixed Assets pretty efficiently, which is evident from below key metrics:\nCAPEX/Revenue Ratio: 5.1%\nFixed assets/Total Assets: 20%\nReturn on Assets= 12.4%",
+    "justification": "CAPEX/Revenue\nFixed Assets/Total Assets\nROA=Net Income/Total Assets",
+    "evidence_excerpts": [
+      {
+        "page": 47,
+        "text": "3M Company and Subsidiaries\nConsolidated Statement of Income\nYears ended December 31\n(Millions, except per share amounts)\n2022\n2021\n2020\nNet sales\n$\n34,229 $\n35,355 $\n32,184"
+      },
+      {
+        "page": 49,
+        "text": "3M Company and Subsidiaries\nConsolidated Balance Sheet\nAt December 31\n(Dollars in millions, except per share amount)\n2022\n2021\nAssets\nCurrent assets\nCash and cash equivalents\n$\n3,655 $\n4,564 \nMarketable securities current\n238 \n201 \nAccounts receivable net of allowances of $174 and $189\n4,532 \n4,660 \nInventories\nFinished goods\n2,497 \n2,196 \nWork in process\n1,606 \n1,577 \nRaw materials and supplies\n1,269 \n1,212 \nTotal inventories\n5,372 \n4,985 \nPrepaids\n435 \n654 \nOther current assets\n456 \n339 \nTotal current assets\n14,688 \n15,403 \nProperty, plant and equipment\n25,998 \n27,213 \nLess: Accumulated depreciation\n(16,820)\n(17,784)\nProperty, plant and equipment net\n9,178 \n9,429 \nOperating lease right of use assets\n829 \n858 \nGoodwill\n12,790 \n13,486 \nIntangible assets net\n4,699 \n5,288 \nOther assets\n4,271 \n2,608 \nTotal assets\n$\n46,455 $\n47,072"
+      },
+      {
+        "page": 51,
+        "text": "3M Company and Subsidiaries\nConsolidated Statement of Cash Flows\nYears ended December 31\n(Millions)\n2022\n2021\n2020\nCash Flows from Operating Activities\nNet income including noncontrolling interest\n$\n5,791 $\n5,929 $\n5,453 \nAdjustments to reconcile net income including noncontrolling interest to net cash provided by operating\nactivities\nDepreciation and amortization\n1,831 \n1,915 \n1,911 \nLong-lived and indefinite-lived asset impairment expense\n618 \n \n6 \nGoodwill impairment expense\n271 \n \n \nCompany pension and postretirement contributions\n(158)\n(180)\n(156)\nCompany pension and postretirement expense\n178 \n206 \n322 \nStock-based compensation expense\n263 \n274 \n262 \nGain on business divestitures\n(2,724)\n \n(389)\nDeferred income taxes\n(663)\n(166)\n(165)\nChanges in assets and liabilities\nAccounts receivable\n(105)\n(122)\n165 \nInventories\n(629)\n(903)\n(91)\nAccounts payable\n111 \n518 \n252 \nAccrued income taxes (current and long-term)\n(47)\n(244)\n132 \nOther net\n854 \n227 \n411 \nNet cash provided by (used in) operating activities\n5,591 \n7,454 \n8,113 \nCash Flows from Investing Activities\nPurchases of property, plant and equipment (PP&E)\n(1,749)\n(1,603)\n(1,501)"
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_01226",
+    "doc_name": "3M_2022_10K",
+    "question_type": "domain-relevant",
+    "question": "What drove operating margin change as of FY2022 for 3M? If operating margin is not a useful metric for a company like this, then please state that and explain why.",
+    "answer": "Operating Margin for 3M in FY2022 has decreased by 1.7% primarily due to: \n-Decrease in gross Margin\n-mostly one-off charges including Combat Arms Earplugs litigation, impairment related to exiting PFAS manufacturing, costs related to exiting Russia and divestiture-related restructuring\ncharges",
+    "justification": null,
+    "evidence_excerpts": [
+      {
+        "page": 26,
+        "text": "SG&A, measured as a percent of sales, increased in 2022 when compared to the same period last year. SG&A was impacted by increased special item costs for significant\nlitigation primarily related to steps toward resolving Combat Arms Earplugs litigation (discussed in Note 16) resulting in a 2022 second quarter pre-tax charge of approximately\n$1.2 billion, certain impairment costs related to exiting PFAS manufacturing (see Note 15), costs related to exiting Russia (see Note 15), divestiture-related restructuring\ncharges (see Note 5), and continued investment in key growth initiatives. These increases were partially offset by restructuring benefits and ongoing general 3M cost\nmanagement."
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_01865",
+    "doc_name": "3M_2022_10K",
+    "question_type": "novel-generated",
+    "question": "If we exclude the impact of M&A, which segment has dragged down 3M's overall growth in 2022?",
+    "answer": "The consumer segment shrunk by 0.9% organically.",
+    "justification": null,
+    "evidence_excerpts": [
+      {
+        "page": 24,
+        "text": "Worldwide Sales Change \nBy Business Segment\nOrganic sales\nAcquisitions\nDivestitures\nTranslation\nTotal sales change\nSafety and Industrial\n1.0 %\n \n %\n %\n(4.2) %\n(3.2) %\nTransportation and Electronics\n1.2 \n \n(0.5)\n(4.6)\n(3.9)\nHealth Care\n3.2 \n \n(1.4)\n(3.8)\n(2.0)\nConsumer\n(0.9)\n \n(0.4)\n(2.6)\n(3.9)\nTotal Company\n1.2 \n \n(0.5)\n(3.9)\n(3.2)"
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_02987",
+    "doc_name": "ACTIVISIONBLIZZARD_2019_10K",
+    "question_type": "metrics-generated",
+    "question": "What is the FY2019 fixed asset turnover ratio for Activision Blizzard? Fixed asset turnover ratio is defined as: FY2019 revenue / (average PP&E between FY2018 and FY2019). Round your answer to two decimal places. Base your judgments on the information provided primarily in the statement of income and the statement of financial position.",
+    "answer": "24.26",
+    "justification": "The metric in question was calculated using other simpler metrics. The various simpler metrics (from the current and, if relevant, previous fiscal year(s)) used were:\n\nMetric 1: Total revenue. This metric was located in the 10K as a single line item named: Total net revenues.\n\nMetric 2: Ppne, net. This metric was located in the 10K as a single line item named: Property and equipment, net.",
+    "evidence_excerpts": [
+      {
+        "page": 68,
+        "text": "Table of Contents\nACTIVISION BLIZZARD, INC. AND SUBSIDIARIES\nCONSOLIDATED BALANCE SHEETS\n(Amounts in millions, except share data)\n \nAt December 31, 2019\n \nAt December 31, 2018\nAssets\n \n \nCurrent assets:\n \n \nCash and cash equivalents\n$\n5,794\n $\n4,225\nAccounts receivable, net of allowances of $132 and $190, at December 31, 2019 and December 31, 2018, respectively\n848\n \n1,035\nInventories, net\n32\n \n43\nSoftware development\n322\n \n264\nOther current assets\n296\n \n539\nTotal current assets\n7,292\n \n6,106\nSoftware development\n54\n \n65\nProperty and equipment, net\n253\n \n282\nDeferred income taxes, net\n1,293\n \n458\nOther assets\n658\n \n482\nIntangible assets, net\n531\n \n735\nGoodwill\n9,764\n \n9,762\nTotal assets\n$\n19,845\n $\n17,890\n \n \n \nLiabilities and Shareholders Equity\n \n \nCurrent liabilities:\n \n \nAccounts payable\n$\n292\n $\n253\nDeferred revenues\n1,375\n \n1,493\nAccrued expenses and other liabilities\n1,248\n \n896\nTotal current liabilities\n2,915\n \n2,642\nLong-term debt, net\n2,675\n \n2,671\nDeferred income taxes, net\n505\n \n18\nOther liabilities\n945\n \n1,167\nTotal liabilities\n7,040\n \n6,498\nCommitments and contingencies (Note 23)\n \nShareholders equity:\n \n \n \nCommon stock, $0.000001 par value, 2,400,000,000 shares authorized, 1,197,436,644 and 1,192,093,991 shares issued at\nDecember 31, 2019 and December 31, 2018, respectively\n\n \n\nAdditional paid-in capital\n11,174\n \n10,963\nLess: Treasury stock, at cost, 428,676,471 shares at December 31, 2019 and December 31, 2018\n(5,563) \n(5,563)\nRetained earnings\n7,813\n \n6,593\nAccumulated other comprehensive loss\n(619) \n(601)\nTotal shareholders equity\n12,805\n \n11,392\nTotal liabilities and shareholders equity\n$\n19,845\n $\n17,890\nThe accompanying notes are an integral part of these Consolidated Financial Statements.\nF-4"
+      },
+      {
+        "page": 69,
+        "text": "Table of Contents\nACTIVISION BLIZZARD, INC. AND SUBSIDIARIES\nCONSOLIDATED STATEMENTS OF OPERATIONS\n(Amounts in millions, except per share data)\n \nFor the Years Ended December 31,\n \n2019\n \n2018\n \n2017\nNet revenues\n \n \n \n \nProduct sales\n$\n1,975\n $\n2,255 $\n2,110\nSubscription, licensing, and other revenues\n4,514\n \n5,245 \n4,907\nTotal net revenues\n6,489\n \n7,500 \n7,017\n \n \n \n \nCosts and expenses\n \n \n \n \nCost of revenuesproduct sales:\n \n \n \nProduct costs\n656\n \n719 \n733\nSoftware royalties, amortization, and intellectual property licenses\n240\n \n371 \n300\nCost of revenuessubscription, licensing, and other revenues:\n \n \n \nGame operations and distribution costs\n965\n \n1,028 \n984\nSoftware royalties, amortization, and intellectual property licenses\n233\n \n399 \n484\nProduct development\n998\n \n1,101 \n1,069\nSales and marketing\n926\n \n1,062 \n1,378\nGeneral and administrative\n732\n \n822 \n745\nRestructuring and related costs\n132\n \n10 \n15\nTotal costs and expenses\n4,882\n \n5,512 \n5,708\n \n \n \n \nOperating income\n1,607\n \n1,988 \n1,309\nInterest and other expense (income), net (Note 18)\n(26) \n71 \n146\nLoss on extinguishment of debt\n\n \n40 \n12\nIncome before income tax expense\n1,633\n \n1,877 \n1,151\nIncome tax expense\n130\n \n29 \n878\nNet income\n$\n1,503\n $\n1,848 $\n273\n \n \n \n \nEarnings per common share\n \n \n \n \nBasic\n$\n1.96\n $\n2.43 $\n0.36\nDiluted\n$\n1.95\n $\n2.40 $\n0.36\n \n \n \n \nWeighted-average number of shares outstanding\n \n \n \n \nBasic\n767\n \n762 \n754\nDiluted\n771\n \n771 \n766\nThe accompanying notes are an integral part of these Consolidated Financial Statements.\nF-5"
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_07966",
+    "doc_name": "ACTIVISIONBLIZZARD_2019_10K",
+    "question_type": "metrics-generated",
+    "question": "What is the FY2017 - FY2019 3 year average of capex as a % of revenue for Activision Blizzard? Answer in units of percents and round to one decimal place. Calculate (or extract) the answer from the statement of income and the cash flow statement.",
+    "answer": "1.9%",
+    "justification": "The metric in question was calculated using other simpler metrics. The various simpler metrics (from the current and, if relevant, previous fiscal year(s)) used were:\n\nMetric 1: Capital expenditures. This metric was located in the 10K as a single line item named: Capital expenditures.\n\nMetric 2: Total revenue. This metric was located in the 10K as a single line item named: Total net revenues.",
+    "evidence_excerpts": [
+      {
+        "page": 69,
+        "text": "Table of Contents\nACTIVISION BLIZZARD, INC. AND SUBSIDIARIES\nCONSOLIDATED STATEMENTS OF OPERATIONS\n(Amounts in millions, except per share data)\n \nFor the Years Ended December 31,\n \n2019\n \n2018\n \n2017\nNet revenues\n \n \n \n \nProduct sales\n$\n1,975\n $\n2,255 $\n2,110\nSubscription, licensing, and other revenues\n4,514\n \n5,245 \n4,907\nTotal net revenues\n6,489\n \n7,500 \n7,017\n \n \n \n \nCosts and expenses\n \n \n \n \nCost of revenuesproduct sales:\n \n \n \nProduct costs\n656\n \n719 \n733\nSoftware royalties, amortization, and intellectual property licenses\n240\n \n371 \n300\nCost of revenuessubscription, licensing, and other revenues:\n \n \n \nGame operations and distribution costs\n965\n \n1,028 \n984\nSoftware royalties, amortization, and intellectual property licenses\n233\n \n399 \n484\nProduct development\n998\n \n1,101 \n1,069\nSales and marketing\n926\n \n1,062 \n1,378\nGeneral and administrative\n732\n \n822 \n745\nRestructuring and related costs\n132\n \n10 \n15\nTotal costs and expenses\n4,882\n \n5,512 \n5,708\n \n \n \n \nOperating income\n1,607\n \n1,988 \n1,309\nInterest and other expense (income), net (Note 18)\n(26) \n71 \n146\nLoss on extinguishment of debt\n\n \n40 \n12\nIncome before income tax expense\n1,633\n \n1,877 \n1,151\nIncome tax expense\n130\n \n29 \n878\nNet income\n$\n1,503\n $\n1,848 $\n273\n \n \n \n \nEarnings per common share\n \n \n \n \nBasic\n$\n1.96\n $\n2.43 $\n0.36\nDiluted\n$\n1.95\n $\n2.40 $\n0.36\n \n \n \n \nWeighted-average number of shares outstanding\n \n \n \n \nBasic\n767\n \n762 \n754\nDiluted\n771\n \n771 \n766\nThe accompanying notes are an integral part of these Consolidated Financial Statements.\nF-5"
+      },
+      {
+        "page": 72,
+        "text": "Table of Contents\nACTIVISION BLIZZARD, INC. AND SUBSIDIARIES\nCONSOLIDATED STATEMENTS OF CASH FLOWS\n(Amounts in millions)\n \nFor the Years Ended December 31,\n \n2019\n \n2018\n \n2017\nCash flows from operating activities:\n \n \n \n \n \nNet income\n$\n1,503\n $\n1,848\n $\n273\nAdjustments to reconcile net income to net cash provided by operating activities:\n \n \n \n \n \nDeferred income taxes\n(352) \n(35) \n(181)\nProvision for inventories\n6\n \n6\n \n33\nNon-cash operating lease cost\n64\n \n\n \n\nDepreciation and amortization\n328\n \n509\n \n888\nAmortization of capitalized software development costs and intellectual property licenses (1)\n225\n \n489\n \n311\nLoss on extinguishment of debt\n\n \n40\n \n12\nShare-based compensation expense (2)\n166\n \n209\n \n176\nUnrealized gain on equity investment (Note 10)\n(38) \n\n \n\nOther\n51\n \n7\n \n40\nChanges in operating assets and liabilities, net of effect from business acquisitions:\n \n \n \n \n \nAccounts receivable, net\n182\n \n(114) \n(165)\nInventories\n7\n \n(5) \n(26)\nSoftware development and intellectual property licenses\n(275) \n(372) \n(301)\nOther assets\n164\n \n(51) \n(97)\nDeferred revenues\n(154) \n(122) \n220\nAccounts payable\n31\n \n(65) \n85\nAccrued expenses and other liabilities\n(77) \n(554) \n945\nNet cash provided by operating activities\n1,831\n \n1,790\n \n2,213\nCash flows from investing activities:\n \n \n \n \n \nProceeds from maturities of available-for-sale investments\n153\n \n116\n \n80\nPurchases of available-for-sale investments\n(65) \n(209) \n(135)\nCapital expenditures\n(116) \n(131) \n(155)\nOther investing activities\n6\n \n(6) \n3\nNet cash used in investing activities\n(22) \n(230) \n(207)\nCash flows from financing activities:\n \n \n \n \n \nProceeds from issuance of common stock to employees\n105\n \n99\n \n178\nTax payment related to net share settlements on restricted stock units\n(59) \n(94) \n(56)\nDividends paid\n(283) \n(259) \n(226)\nProceeds from debt issuances, net of discounts\n\n \n\n \n3,741\nRepayment of long-term debt\n\n \n(1,740) \n(4,251)\nPremium payment for early redemption of note\n\n \n(25) \n\nOther financing activities\n\n \n(1) \n(10)\nNet cash used in financing activities\n(237) \n(2,020) \n(624)\nEffect of foreign exchange rate changes on cash and cash equivalents\n(3) \n(31) \n76\nNet increase (decrease) in cash and cash equivalents and restricted cash\n1,569\n \n(491) \n1,458\nCash and cash equivalents and restricted cash at beginning of period\n4,229\n \n4,720\n \n3,262\nCash and cash equivalents and restricted cash at end of period\n$\n5,798\n $\n4,229\n $\n4,720\n(1)\nExcludes deferral and amortization of share-based compensation expense.\n(2)\nIncludes the net effects of capitalization, deferral, and amortization of share-based compensation expense.\nThe accompanying notes are an integral part of these Consolidated Financial Statements.\nF-8"
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_03856",
+    "doc_name": "ADOBE_2017_10K",
+    "question_type": "metrics-generated",
+    "question": "What is the FY2017 operating cash flow ratio for Adobe? Operating cash flow ratio is defined as: cash from operations / total current liabilities. Round your answer to two decimal places. Please utilize information provided primarily within the balance sheet and the cash flow statement.",
+    "answer": "0.83",
+    "justification": "The metric in question was calculated using other simpler metrics. The various simpler metrics (from the current and, if relevant, previous fiscal year(s)) used were:\n\nMetric 1: Cash from operations. This metric was located in the 10K as a single line item named: Net cash provided by operating activities.\n\nMetric 2: Total current liabilities. This metric was located in the 10K as a single line item named: Total current liabilities.",
+    "evidence_excerpts": [
+      {
+        "page": 56,
+        "text": "Table of Contents\n57\n ADOBE SYSTEMS INCORPORATED\n CONSOLIDATED BALANCE SHEETS\n(In thousands, except par value)\n \nDecember 1,\n2017\nDecember 2,\n2016\nASSETS\nCurrent assets:\n \n \nCash and cash equivalents\n$\n2,306,072\n$\n1,011,315\nShort-term investments\n3,513,702\n3,749,985\nTrade receivables, net of allowances for doubtful accounts of $9,151 and $6,214, respectively\n1,217,968\n833,033\nPrepaid expenses and other current assets\n210,071\n245,441\nTotal current assets\n7,247,813\n5,839,774\nProperty and equipment, net\n936,976\n816,264\nGoodwill\n5,821,561\n5,406,474\nPurchased and other intangibles, net\n385,658\n414,405\nInvestment in lease receivable\n\n80,439\nOther assets\n143,548\n139,890\nTotal assets\n$\n14,535,556\n$\n12,697,246\nLIABILITIES AND STOCKHOLDERS EQUITY\nCurrent liabilities:\n \n \nTrade payables\n$\n113,538\n$\n88,024\nAccrued expenses\n993,773\n739,630\nIncome taxes payable\n14,196\n38,362\nDeferred revenue\n2,405,950\n1,945,619\nTotal current liabilities\n3,527,457\n2,811,635\nLong-term liabilities:\nDebt and capital lease obligations\n1,881,421\n1,892,200\nDeferred revenue\n88,592\n69,131\nIncome taxes payable\n173,088\n184,381\nDeferred income taxes\n279,941\n217,660\nOther liabilities\n125,188\n97,404\nTotal liabilities\n6,075,687\n5,272,411\nCommitments and contingencies\nStockholders equity:\n \n \nPreferred stock, $0.0001 par value; 2,000 shares authorized; none issued\n\n\nCommon stock, $0.0001 par value; 900,000 shares authorized; 600,834 shares issued; \n 491,262 and 494,254 shares outstanding, respectively\n61\n61\nAdditional paid-in-capital\n5,082,195\n4,616,331\nRetained earnings\n9,573,870\n8,114,517\nAccumulated other comprehensive income (loss)\n(111,821)\n(173,602)\nTreasury stock, at cost (109,572 and 106,580 shares, respectively), net of reissuances\n(6,084,436)\n(5,132,472)\nTotal stockholders equity\n8,459,869\n7,424,835\nTotal liabilities and stockholders equity\n$\n14,535,556\n$\n12,697,246\nSee accompanying Notes to Consolidated Financial Statements."
+      },
+      {
+        "page": 60,
+        "text": "Table of Contents\n61\nADOBE SYSTEMS INCORPORATED\n CONSOLIDATED STATEMENTS OF CASH FLOWS\n(In thousands)\n \nYears Ended\n \nDecember 1,\n2017\nDecember 2,\n2016\nNovember 27,\n2015\nCash flows from operating activities:\n \n \nNet income\n$\n1,693,954\n$\n1,168,782\n$\n629,551\nAdjustments to reconcile net income to net cash provided by operating activities:\nDepreciation, amortization and accretion\n325,997\n331,535\n339,473\nStock-based compensation\n451,451\n349,912\n335,859\nDeferred income taxes\n51,605\n24,222\n(69,657)\nGain on the sale of property\n\n\n(21,415)\nUnrealized (gains) losses on investments\n(5,494)\n3,145\n(9,210)\nExcess tax benefits from stock-based compensation\n\n(75,105)\n(68,153)\nOther non-cash items\n4,625\n2,022\n1,216\nChanges in operating assets and liabilities, net of acquired assets and\n assumed liabilities:\nTrade receivables, net\n(187,173)\n(160,416)\n(79,502)\nPrepaid expenses and other current assets\n28,040\n(71,021)\n(7,701)\nTrade payables\n(45,186)\n(6,281)\n22,870\nAccrued expenses\n154,125\n64,978\n(22,564)\nIncome taxes payable\n(34,493)\n43,115\n97,934\nDeferred revenue\n475,402\n524,840\n320,801\nNet cash provided by operating activities\n2,912,853\n2,199,728\n1,469,502\nCash flows from investing activities:\n \n \nPurchases of short-term investments\n(1,931,011)\n(2,285,222)\n(2,064,833)\nMaturities of short-term investments\n759,737\n769,228\n371,790\nProceeds from sales of short-term investments\n1,393,929\n860,849\n1,176,476\nAcquisitions, net of cash acquired\n(459,626)\n(48,427)\n(826,004)\nPurchases of property and equipment\n(178,122)\n(203,805)\n(184,936)\nProceeds from sale of property\n\n\n57,779\nPurchases of long-term investments, intangibles and other assets\n(29,918)\n(58,433)\n(22,779)\nProceeds from sale of long-term investments\n2,134\n5,777\n4,149\nNet cash used for investing activities\n(442,877)\n(960,033)\n(1,488,358)\nCash flows from financing activities:\n \n \nPurchases of treasury stock\n(1,100,000)\n(1,075,000)\n(625,000)\nProceeds from issuance of treasury stock\n158,351\n145,697\n164,270\nTaxes paid related to net share settlement of equity awards\n(240,126)\n(236,400)\n(186,373)\nExcess tax benefits from stock-based compensation\n\n75,105\n68,153\nProceeds from debt issuance\n\n\n989,280\nRepayment of debt and capital lease obligations\n(1,960)\n(108)\n(602,189)\nDebt issuance costs\n\n\n(8,828)\nNet cash used for financing activities\n(1,183,735)\n(1,090,706)\n(200,687)\nEffect of foreign currency exchange rates on cash and cash equivalents\n8,516\n(14,234)\n(21,297)\nNet increase (decrease) in cash and cash equivalents\n1,294,757\n134,755\n(240,840)\nCash and cash equivalents at beginning of year\n1,011,315\n876,560\n1,117,400\nCash and cash equivalents at end of year\n$\n2,306,072\n$\n1,011,315\n$\n876,560\nSupplemental disclosures:\n \nCash paid for income taxes, net of refunds\n$\n396,668\n$\n249,884\n$\n203,010\nCash paid for interest\n$\n69,430\n$\n66,193\n$\n56,014\nNon-cash investing activities:\nInvestment in lease receivable applied to building purchase\n$\n80,439\n$\n\n$\n\nIssuance of common stock and stock awards assumed in business acquisitions\n$\n10,348\n$\n\n$\n677\nSee accompanying Notes to Consolidated Financial Statements."
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_00799",
+    "doc_name": "AMCOR_2023_10K",
+    "question_type": "domain-relevant",
+    "question": "Has AMCOR's quick ratio improved or declined between FY2023 and FY2022? If the quick ratio is not something that a financial analyst would ask about a company like this, then state that and explain why.",
+    "answer": "The quick ratio has slightly improved from 0.67 times to 0.69 times between FY 2023 and FY 2022.(3.4% jump)",
+    "justification": "Quick Ratio= (Total current assets-(Raw materials and supplies+Work in process and finished goods))/Total current liabilities\n(5308-992-1221)/4476\n(5853-1114-1325)/5103",
+    "evidence_excerpts": [
+      {
+        "page": 51,
+        "text": "Amcor plc and Subsidiaries\nConsolidated Balance Sheets\n($ in millions, except share and per share data)\nAs of June 30,\n2023\n2022\nAssets\nCurrent assets:\nCash and cash equivalents\n$\n689 \n$\n775 \nTrade receivables, net of allowance for credit losses of $21 and $25, respectively\n1,875 \n1,935 \nInventories, net\nRaw materials and supplies\n992 \n1,114 \nWork in process and finished goods\n1,221 \n1,325 \nPrepaid expenses and other current assets\n531 \n512 \nAssets held for sale, net\n \n192 \nTotal current assets\n5,308 \n5,853 \nNon-current assets:\nProperty, plant, and equipment, net\n3,762 \n3,646 \nOperating lease assets\n533 \n560 \nDeferred tax assets\n134 \n130 \nOther intangible assets, net\n1,524 \n1,657 \nGoodwill\n5,366 \n5,285 \nEmployee benefit assets\n67 \n89 \nOther non-current assets\n309 \n206 \nTotal non-current assets\n11,695 \n11,573 \nTotal assets\n$\n17,003 \n$\n17,426 \nLiabilities\nCurrent liabilities:\nCurrent portion of long-term debt\n$\n13 \n$\n14 \nShort-term debt\n80 \n136 \nTrade payables\n2,690 \n3,073 \nAccrued employee costs\n396 \n471 \nOther current liabilities\n1,297 \n1,344 \nLiabilities held for sale\n \n65 \nTotal current liabilities\n4,476 \n5,103 \nNon-current liabilities:\nLong-term debt, less current portion\n6,653 \n6,340 \nOperating lease liabilities\n463 \n493 \nDeferred tax liabilities\n616 \n677 \nEmployee benefit obligations\n224 \n201 \nOther non-current liabilities\n481 \n471 \nTotal non-current liabilities\n8,437 \n8,182 \nTotal liabilities\n$\n12,913 \n$\n13,285 \nCommitments and contingencies (See Note 20)\nShareholders' Equity\nAmcor plc shareholders equity:\nOrdinary shares ($0.01 par value):\nAuthorized (9,000 million shares)\nIssued (1,448 and 1,489 million shares, respectively)\n$\n14 \n$\n15 \nAdditional paid-in capital\n4,021 \n4,431 \nRetained earnings\n865 \n534 \nAccumulated other comprehensive loss\n(862)\n(880)\nTreasury shares (1 and 2 million shares, respectively)\n(12)\n(18)\nTotal Amcor plc shareholders' equity\n4,026 \n4,082 \nNon-controlling interests\n64 \n59 \nTotal shareholders' equity\n4,090 \n4,141 \nTotal liabilities and shareholders' equity\n$\n17,003 \n$\n17,426 \nSee accompanying notes to consolidated financial statements.\n5"
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_01079",
+    "doc_name": "AMCOR_2023_10K",
+    "question_type": "domain-relevant",
+    "question": "What are major acquisitions that AMCOR has done in FY2023, FY2022 and FY2021?",
+    "answer": "Amcor completed these acquisitions during FY2023:\n-100% equity interest of a flexibles manufacturing company in the Czech Republic\n- 100% equity interest in a medical device packaging manufacturing site in\nShanghai, China.\n-acquisition of a New Zealand-based leading manufacturer of state-of-the-art, automated protein\npackaging machines.",
+    "justification": null,
+    "evidence_excerpts": [
+      {
+        "page": 63,
+        "text": "On August 1, 2022, the Company completed the acquisition of 100% equity interest in a Czech Republic company that operates a world-class\nflexible packaging manufacturing plant. The purchase consideration of $59 million included a deferred portion of $5 million that was paid in the\nfirst quarter of fiscal year 2024. The acquisition is part of the Company's Flexibles reportable segment and resulted in the recognition of acquired\nidentifiable net assets of $36 million and goodwill of $23 million. Goodwill is not deductible for tax purposes. The fair values of the identifiable\nnet assets acquired and goodwill are based on the Company's best estimate as of June 30, 2023.\n On March 17, 2023, the Company completed the acquisition of 100% equity interest in a medical device packaging manufacturing site in\nShanghai, China. The purchase consideration of $60 million is subject to customary post-closing adjustments. The consideration includes\ncontingent consideration of $20 million, to be earned and paid in cash over the three years following the acquisition date, subject to meeting\ncertain performance targets. The acquisition is part of the Company's Flexibles reportable segment and resulted in the recognition of acquired\nidentifiable net assets of $21 million and goodwill of $39 million. Goodwill is not deductible for tax purposes. The fair values of the contingent\nconsideration, identifiable net assets acquired, and goodwill are based on the Company's best estimate as of June 30, 2023, and are considered\npreliminary. The Company aims to complete the purchase price allocation as soon as practicable but no later than one year from the date of the\nacquisition.\n On May 31, 2023, the Company completed the acquisition of a New Zealand based leading manufacturer of state-of-the-art, automated protein\npackaging machines. The purchase consideration of $45 million is subject to customary post-closing adjustments. The consideration includes\ncontingent consideration of $13 million, to be earned and paid in cash over the two years following the acquisition date, subject to meeting\ncertain performance targets. The acquisition is part of the Company's Flexibles reportable segment and resulted in the recognition of acquired\nidentifiable net assets of $9 million and goodwill of $36 million. Goodwill is deductible for tax purposes. The fair values of the contingent\nconsideration, identifiable net assets acquired, and goodwill are based on the Company's best estimate as of June 30, 2023, and are considered\npreliminary. The Company aims to complete the purchase price allocation as soon as practicable but no later than one year from the date of the\nacquisition."
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_01148",
+    "doc_name": "AMCOR_2023_10K",
+    "question_type": "domain-relevant",
+    "question": "What industry does AMCOR primarily operate in?",
+    "answer": "Amcor is a global leader in packaging production for various use cases.",
+    "justification": null,
+    "evidence_excerpts": [
+      {
+        "page": 4,
+        "text": "Today, we are a global leader in developing and producing responsible\npackaging for food, beverage, pharmaceutical, medical, home and personal-care, and other products"
+      }
+    ]
+  },
+  {
+    "financebench_id": "financebench_id_00684",
+    "doc_name": "AMCOR_2023_10K",
+    "question_type": "domain-relevant",
+    "question": "Does AMCOR have an improving gross margin profile as of FY2023? If gross margin is not a useful metric for a company like this, then state that and explain why.",
+    "answer": "No. For AMCOR there has been a slight decline in gross margins by 0.8%.",
+    "justification": "Gross Profit/Net Sales\n2725/14694\n2820/14544",
+    "evidence_excerpts": [
+      {
+        "page": 49,
+        "text": "Amcor plc and Subsidiaries\nConsolidated Statements of Income\n($ in millions, except per share data)\nFor the years ended June 30,\n2023\n2022\n2021\nNet sales\n$\n14,694 \n$\n14,544 \n$\n12,861 \nCost of sales\n(11,969)\n(11,724)\n(10,129)\nGross profit\n2,725 \n2,820 \n2,732"
+      }
+    ]
+  }
+]

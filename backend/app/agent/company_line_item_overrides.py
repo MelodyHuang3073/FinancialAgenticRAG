@@ -16,6 +16,7 @@ HOW TO EXTEND:
   metric keys mapping to a list of company-specific aliases.
   No code changes needed elsewhere — pot_reasoner picks this up automatically.
 """
+import re
 from typing import Dict, List
 
 # Primary override table
@@ -105,11 +106,17 @@ COMPANY_LINE_ITEM_OVERRIDES: Dict[str, Dict[str, List[str]]] = {
 def get_overrides_for_company(company_name: str) -> Dict[str, List[str]]:
     """
     Return the alias overrides dict for the given company name.
-    Matching is case-insensitive substring: "3M_2022_10K" -> matches "3m".
-    Returns an empty dict if no overrides are registered.
+    Matching is case-insensitive substring on an alphanumeric-only
+    normalisation of both sides, so it survives the separator/spacing
+    differences real filenames introduce, e.g. the uploaded filename
+    stem "ACTIVISIONBLIZZARD_2019_10K" (no space, all caps) still
+    matches the override key "activision blizzard".
     """
-    name_lower = company_name.lower().strip()
+    def _normalise(s: str) -> str:
+        return re.sub(r'[^a-z0-9]', '', s.lower())
+
+    name_norm = _normalise(company_name)
     for key, overrides in COMPANY_LINE_ITEM_OVERRIDES.items():
-        if key in name_lower:
+        if _normalise(key) in name_norm:
             return overrides
     return {}
