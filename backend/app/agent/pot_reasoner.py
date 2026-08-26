@@ -203,16 +203,29 @@ def _extract_query_years(query: str) -> List[str]:
 
 def _extract_from_markdown_table_block(content: str, ev_company: str = "") -> Dict[str, Dict]:
     """
-    Parse a standard Markdown pipe table embedded in `content`:
+    Parse EVERY standard Markdown pipe table embedded in `content`:
         | Line Item | 2023 | 2024 |
         |---|---|---|
         | Revenue | 2,161.7 | 2,894.3 |
         | Net Income | 567.8 | 601.2 |
 
-    The line immediately above the '|---|---|' separator row is the header
-    row (first column = line-item label, remaining columns = period/year
-    labels); every line below the separator, up to the first blank/non-pipe
-    line, is a data row.
+    The line immediately above each '|---|---|' separator row is that
+    block's own header row (first column = line-item label, remaining
+    columns = period/year labels); every line below the separator, up to
+    the first blank/non-pipe line, is that block's data rows.
+
+    A real page's parent_content routinely contains SEVERAL such table
+    blocks concatenated together (e.g. a cash-flow statement split into
+    "Net income / adjustments" and "changes in operating assets /
+    Net cash provided by operating activities" blocks by an intervening
+    blank line) — a version that stopped after the FIRST block would
+    silently never see rows in any later block, no matter how well they
+    matched. Confirmed real case: Adobe's "Net cash provided by operating
+    activities" row lived in the second block of a two-block cash-flow
+    parent_content; a first-block-only parser found nothing for it and
+    the formula-guided extraction fell through to an unrelated fallback.
+    Each block gets its OWN header/period_headers, since two blocks on
+    the same page aren't guaranteed to share identical columns.
 
     Returns entries in the EXACT same shape as _extract_from_linearized_table()
     ({code_key: {item, canonical, year, val, code_key}}), so downstream
@@ -222,58 +235,62 @@ def _extract_from_markdown_table_block(content: str, ev_company: str = "") -> Di
     extracted: Dict[str, Dict] = {}
     lines = content.split("\n")
 
-    sep_idx = next(
-        (i for i, l in enumerate(lines) if i > 0 and is_markdown_separator_row(l)),
-        None,
-    )
-    if sep_idx is None:
-        return extracted
-
-    header_cells = [c.strip() for c in lines[sep_idx - 1].strip().strip("|").split("|")]
-    if len(header_cells) < 2:
-        return extracted
-    period_headers = header_cells[1:]
-
-    for line in lines[sep_idx + 1:]:
-        stripped = line.strip()
-        if not stripped or "|" not in stripped:
-            break  # table block ended
-
-        cells = [c.strip() for c in stripped.strip("|").split("|")]
-        if len(cells) < 2:
-            continue
-        line_item_name = cells[0]
-        if not line_item_name:
+    i = 0
+    while i < len(lines):
+        if i == 0 or not is_markdown_separator_row(lines[i]):
+            i += 1
             continue
 
-        canonical = _get_canonical(line_item_name, company_name=ev_company)
-        sanitized = _sanitize(line_item_name)
+        sep_idx = i
+        header_cells = [c.strip() for c in lines[sep_idx - 1].strip().strip("|").split("|")]
+        if len(header_cells) < 2:
+            i = sep_idx + 1
+            continue
+        period_headers = header_cells[1:]
 
-        for i, val_str in enumerate(cells[1:]):
-            if i >= len(period_headers):
-                break
-            ym = re.search(r"(20\d{2}|FY\d{4})", period_headers[i])
-            if not ym:
-                continue
-            year = _normalize_year(ym.group(1))
-            val = _to_float(val_str)
-            if val is None:
-                continue
+        j = sep_idx + 1
+        while j < len(lines):
+            stripped = lines[j].strip()
+            if not stripped or "|" not in stripped:
+                break  # this block ended — outer loop resumes scanning from here
 
-            base_key = f"val_{year}_{sanitized}"
-            key = base_key
-            idx = 1
-            while key in extracted and abs(extracted[key]["val"] - val) > 0.001:
-                key = f"{base_key}_{idx}"
-                idx += 1
-            if key not in extracted:
-                extracted[key] = {
-                    "item": line_item_name,
-                    "canonical": canonical,
-                    "year": year,
-                    "val": val,
-                    "code_key": key,
-                }
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if len(cells) < 2 or not cells[0]:
+                j += 1
+                continue
+            line_item_name = cells[0]
+
+            canonical = _get_canonical(line_item_name, company_name=ev_company)
+            sanitized = _sanitize(line_item_name)
+
+            for k, val_str in enumerate(cells[1:]):
+                if k >= len(period_headers):
+                    break
+                ym = re.search(r"(20\d{2}|FY\d{4})", period_headers[k])
+                if not ym:
+                    continue
+                year = _normalize_year(ym.group(1))
+                val = _to_float(val_str)
+                if val is None:
+                    continue
+
+                base_key = f"val_{year}_{sanitized}"
+                key = base_key
+                idx = 1
+                while key in extracted and abs(extracted[key]["val"] - val) > 0.001:
+                    key = f"{base_key}_{idx}"
+                    idx += 1
+                if key not in extracted:
+                    extracted[key] = {
+                        "item": line_item_name,
+                        "canonical": canonical,
+                        "year": year,
+                        "val": val,
+                        "code_key": key,
+                    }
+            j += 1
+
+        i = j  # resume scanning for the NEXT '|---|' block from here
 
     return extracted
 
@@ -511,19 +528,28 @@ def _extract_formula_guided(
     is_multi_year = formula_entry.get("multi_year", False)
     is_period_average = formula_entry.get("period_average", False)
 
-    # candidates[placeholder] = [(value, year, score, source, is_primary), ...]
-    # -- every match found, BEFORE reducing to one winner per year. Always
-    # scans the FULL evidence list (no "first chunk match wins" early
-    # exit, even for simple formulas) -- a match found early is no longer
-    # trusted just for being early, since it could be a supplementary
-    # schedule's row scanned before the real primary statement's; the
-    # reduction step below picks the best candidate regardless of
-    # discovery order.
-    candidates: Dict[str, List[Tuple[float, str, int, str, bool]]] = {k: [] for k in var_aliases}
+    # candidates[placeholder] = [(value, year, score, source, is_primary,
+    # evidence_index, line_item_label), ...] -- every match found, BEFORE
+    # reducing to one winner per year. Always scans the FULL evidence
+    # list (no "first chunk match wins" early exit, even for simple
+    # formulas) -- a match found early is no longer trusted just for
+    # being early, since it could be a supplementary schedule's row
+    # scanned before the real primary statement's; the reduction step
+    # below picks the best candidate regardless of discovery order.
+    # evidence_index/line_item_label exist purely for provenance (see
+    # meta["source_detail"] below) -- so a wrong extraction can be traced
+    # straight back to which evidence item and which line item produced
+    # it, without re-diagnosing from the raw PDF each time.
+    candidates: Dict[str, List[Tuple[float, str, int, str, bool, int, str]]] = {
+        k: [] for k in var_aliases
+    }
+
+    year_col_re = re.compile(
+        r"(.*?(?:20\d{2}|FY\d{4})[^:]*?)\s*:\s*([\d,]+\.?\d*)", re.IGNORECASE
+    )
 
     for placeholder, aliases in var_aliases.items():
-        aliases_lower = [a.lower() for a in aliases]
-        for ev in evidence_list:
+        for ev_idx, ev in enumerate(evidence_list):
             content = ev.get("parent_content") or ev.get("content", "")
             if not content:
                 continue
@@ -539,31 +565,59 @@ def _extract_formula_guided(
                     source = "table-total" if score == 2 else "table-partial"
                     if not is_primary:
                         source += "-supplementary"
-                    candidates[placeholder].append((row["val"], row["year"], score, source, is_primary))
+                    candidates[placeholder].append(
+                        (row["val"], row["year"], score, source, is_primary, ev_idx, row["item"])
+                    )
                 continue  # this chunk is fully handled by the table parser
 
-            content_lower = content.lower()
-            alias_hit = any(a in content_lower for a in aliases_lower)
-            if not alias_hit:
-                continue
-
-            # ── Priority 2: legacy single-line colon format ───────────────
-            fields = [f.strip() for f in content.split("|")]
-            year_col_re = re.compile(
-                r"(.*?(?:20\d{2}|FY\d{4})[^:]*?)\s*:\s*([\d,]+\.?\d*)", re.IGNORECASE
-            )
-            for f in fields:
-                m_f = year_col_re.search(f)
-                if not m_f:
+            # ── Priority 2: legacy "Company: X | ... | Line Item: Y | ──
+            # 2017: A | 2016: B" format, ONE SEGMENT PER LINE ITEM.
+            #
+            # Root cause fix: the previous version checked "does an alias
+            # appear ANYWHERE in this whole content string" and separately
+            # scanned the WHOLE string for every "year: value"-shaped
+            # field, with no link between the two — so an alias matching
+            # one line item's label could pull a completely unrelated
+            # line item's number out of the same content blob (confirmed
+            # real case: Adobe's cash_from_operations alias correctly
+            # matched "Net cash provided by operating activities", but
+            # the number used, 759,737, actually belonged to a different
+            # row, "Maturities of short-term investments", elsewhere in
+            # the same page's parent_content). A real 10-K page's
+            # parent_content can legitimately contain MANY line items
+            # concatenated together, so alias-matching must be scoped to
+            # ONE line item's own segment, never the whole blob.
+            #
+            # "Line Item:" is the fixed marker that starts each line
+            # item's own segment in this format — splitting on it (kept
+            # via the lookahead) gives one segment per line item, each
+            # independently scored via the SAME _score_row_match() used
+            # for Priority 1, so a value is never attributed to a line
+            # item whose label didn't actually match.
+            for seg in re.split(r'(?=Line Item:)', content):
+                label_m = re.search(r'Line Item:\s*([^|]+)', seg)
+                if not label_m:
                     continue
-                ym = re.search(r"(20\d{2}|FY\d{4})", m_f.group(1))
-                if not ym:
+                seg_label = label_m.group(1).strip()
+                score = _score_row_match(seg_label, aliases)
+                if score == 0:
                     continue
-                year = _normalize_year(ym.group(1))
-                val = _to_float(m_f.group(2))
-                if val is not None and val != 0:
-                    source = "legacy" if is_primary else "legacy-supplementary"
-                    candidates[placeholder].append((val, year, 1, source, is_primary))
+                source = "legacy-total" if score == 2 else "legacy-partial"
+                if not is_primary:
+                    source += "-supplementary"
+                for f in [x.strip() for x in seg.split("|")]:
+                    m_f = year_col_re.search(f)
+                    if not m_f:
+                        continue
+                    ym = re.search(r"(20\d{2}|FY\d{4})", m_f.group(1))
+                    if not ym:
+                        continue
+                    year = _normalize_year(ym.group(1))
+                    val = _to_float(m_f.group(2))
+                    if val is not None and val != 0:
+                        candidates[placeholder].append(
+                            (val, year, score, source, is_primary, ev_idx, seg_label)
+                        )
 
     # ── Reduce to the single best-scoring candidate per year ────────────────
     # Priority is (is_primary, score) compared as a tuple: a match from a
@@ -574,18 +628,18 @@ def _extract_formula_guided(
     # within the same primary-ness tier does score (total vs. partial)
     # break the tie.
     resolved: Dict[str, List[Tuple[float, str]]] = {}
-    # winner_meta[placeholder][year] = (score, source) of the entry that
-    # won that year, kept alongside `resolved` (whose tuples must stay
-    # plain (value, year) — every existing consumer of the return value
-    # unpacks exactly two fields).
-    winner_meta: Dict[str, Dict[str, Tuple[int, str]]] = {}
+    # winner_meta[placeholder][year] = (score, source, evidence_index,
+    # line_item_label) of the entry that won that year, kept alongside
+    # `resolved` (whose tuples must stay plain (value, year) — every
+    # existing consumer of the return value unpacks exactly two fields).
+    winner_meta: Dict[str, Dict[str, Tuple[int, str, int, str]]] = {}
     for placeholder in var_aliases:
-        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, int]]] = {}
-        for val, yr, score, source, is_primary in candidates[placeholder]:
+        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, int], int, str]] = {}
+        for val, yr, score, source, is_primary, ev_idx, line_item_label in candidates[placeholder]:
             priority = (is_primary, score)
             existing = best_by_year.get(yr)
             if existing is None or priority > existing[3]:
-                best_by_year[yr] = (val, score, source, priority)
+                best_by_year[yr] = (val, score, source, priority, ev_idx, line_item_label)
         # A supplementary-schedule match is NEVER actually used, even as
         # a last resort with nothing else available for that year — real
         # data for the WRONG reporting entity is worse than no data at
@@ -597,8 +651,10 @@ def _extract_formula_guided(
         # a year, so that year falls through to the free-text fallback
         # (or stays unresolved) instead of silently using it.
         best_by_year = {y: v for y, v in best_by_year.items() if v[3][0]}
-        resolved[placeholder] = [(v, y) for y, (v, s, src, p) in best_by_year.items()]
-        winner_meta[placeholder] = {y: (s, src) for y, (v, s, src, p) in best_by_year.items()}
+        resolved[placeholder] = [(v, y) for y, (v, s, src, p, ei, lbl) in best_by_year.items()]
+        winner_meta[placeholder] = {
+            y: (s, src, ei, lbl) for y, (v, s, src, p, ei, lbl) in best_by_year.items()
+        }
 
     # ── Free-text fallback: fill any placeholders still incomplete ──────────
     # Triggers when:
@@ -649,7 +705,7 @@ def _extract_formula_guided(
                     if yr in existing_years:
                         continue  # keep the stronger table-sourced value for a year we already have
                     resolved[placeholder].append((val, yr))
-                    winner_meta.setdefault(placeholder, {})[yr] = (1, "free-text")
+                    winner_meta.setdefault(placeholder, {})[yr] = (1, "free-text", -1, matched_canonical)
                     existing_years.add(yr)
 
     # ── Choose the best value for each placeholder ────────────────────────────
@@ -667,10 +723,16 @@ def _extract_formula_guided(
             # mean is only for the truthiness gate and the variable
             # summary shown to the user.
             final[placeholder] = sum(v for v, _ in matches) / len(matches)
-            year_meta = [winner_meta.get(placeholder, {}).get(y, (1, "unknown")) for _, y in matches]
+            year_meta = [
+                winner_meta.get(placeholder, {}).get(y, (1, "unknown", -1, "?")) for _, y in matches
+            ]
             meta[placeholder] = {
                 "source": "period-average",
-                "is_approximate": any(s < 2 or "supplementary" in src for s, src in year_meta),
+                "is_approximate": any(s < 2 or "supplementary" in src for s, src, ei, lbl in year_meta),
+                "source_detail": "; ".join(
+                    f"{y}={v} <- evidence[{ei}] Line Item \"{lbl}\"" if ei >= 0 else f"{y}={v} <- free-text"
+                    for (v, y), (s, src, ei, lbl) in zip(matches, year_meta)
+                ),
             }
             continue
         elif is_multi_year:
@@ -703,8 +765,17 @@ def _extract_formula_guided(
                 best, picked_year = matches[0]
             final[placeholder] = best
 
-        score, source = winner_meta.get(placeholder, {}).get(picked_year, (1, "unknown"))
-        meta[placeholder] = {"source": source, "is_approximate": score < 2 or "supplementary" in source}
+        score, source, ev_idx, line_item_label = winner_meta.get(placeholder, {}).get(
+            picked_year, (1, "unknown", -1, "?")
+        )
+        meta[placeholder] = {
+            "source": source,
+            "is_approximate": score < 2 or "supplementary" in source,
+            "source_detail": (
+                f"evidence[{ev_idx}] Line Item \"{line_item_label}\""
+                if ev_idx >= 0 else f"free-text match on \"{line_item_label}\""
+            ),
+        }
 
     return final, resolved, meta
 
@@ -1079,6 +1150,7 @@ def _gen_formula_code(
     resolved: Dict[str, float],
     extracted_table: Dict[str, Dict],
     resolved_series: Optional[Dict[str, List[Tuple[float, str]]]] = None,
+    resolved_meta: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[str]:
     """Generate Python code lines using the formula template.
 
@@ -1089,6 +1161,12 @@ def _gen_formula_code(
     (the full {placeholder -> [(value, year), ...]} from
     _extract_formula_guided) carries what that needs; `resolved` (one
     value per placeholder) is enough for every other formula shape.
+
+    `resolved_meta` (also from _extract_formula_guided) is used only to
+    annotate each variable assignment with WHERE it came from (which
+    evidence item, which line item) as an inline comment — so a wrong
+    extraction is traceable straight from the generated code/sandbox log
+    instead of needing to re-diagnose against the raw PDF each time.
     """
     lines = []
     fk = formula_entry.get("formula_key", "custom")
@@ -1105,7 +1183,10 @@ def _gen_formula_code(
         return []
 
     for ph, val in resolved.items():
-        lines.append(f"{ph} = {val}")
+        ph_meta = (resolved_meta or {}).get(ph, {})
+        detail = ph_meta.get("source_detail")
+        comment = f"  # {ph_meta.get('source', '?')} <- {detail}" if detail else ""
+        lines.append(f"{ph} = {val}{comment}")
 
     # Check all needed placeholders are available
     needed = set(re.findall(r"[a-z_][a-z0-9_]*", expr)) - {"years", "math"}
@@ -1226,6 +1307,36 @@ def _find_same_item_pair(
     return None, None
 
 
+_CANONICAL_TO_ALIASES: Dict[str, List[str]] = {c: aliases for c, aliases in _ITEM_TAXONOMY}
+
+
+def _pick_best_in_group(
+    items: List[Dict],
+    canonical: str,
+    preferred_year: Optional[str] = None,
+) -> Optional[Dict]:
+    """
+    Among several rows that all normalized to the same canonical (e.g. both
+    "Total current assets" and "Prepaid expenses and other current assets"
+    contain the substring "current assets" and so both get tagged
+    canonical="current_assets"), pick the one that's actually the
+    total/subtotal line rather than an arbitrary sub-component — using the
+    same total-row-priority scoring _extract_formula_guided() already uses
+    (_score_row_match: 2 = genuine total row, 1 = sub-item substring match).
+    Ties broken by matching preferred_year, then by first occurrence.
+    """
+    if not items:
+        return None
+    aliases = _CANONICAL_TO_ALIASES.get(canonical, [canonical])
+
+    def sort_key(x: Dict) -> Tuple[int, int]:
+        score = _score_row_match(x["item"], aliases)
+        year_match = 1 if preferred_year and x["year"] == preferred_year else 0
+        return (score, year_match)
+
+    return max(items, key=sort_key)
+
+
 def _find_pair_for_margin(
     groups: Dict[str, List[Dict]],
     num_canonical: str,
@@ -1234,26 +1345,30 @@ def _find_pair_for_margin(
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Find (numerator_var, denominator_var) for a margin calculation.
-    Prefers matching the SAME year.  Falls back to any available year.
+    Prefers matching the SAME year, and among same-year candidates prefers
+    genuine total/subtotal rows over sub-items (same scoring as
+    _pick_best_in_group). Falls back to any available year.
     """
     nums = groups.get(num_canonical, [])
     dens = groups.get(den_canonical, [])
     if not nums or not dens:
         return None, None
 
-    # Try same-year match first
-    for n in nums:
-        for d in dens:
-            if n["year"] == d["year"]:
-                if preferred_year is None or n["year"] == preferred_year:
-                    return n, d
+    num_aliases = _CANONICAL_TO_ALIASES.get(num_canonical, [num_canonical])
+    den_aliases = _CANONICAL_TO_ALIASES.get(den_canonical, [den_canonical])
 
-    # Fallback: any year match (prefer preferred_year)
-    if preferred_year:
-        n = next((x for x in nums if x["year"] == preferred_year), nums[0])
-        d = next((x for x in dens if x["year"] == preferred_year), dens[0])
-    else:
-        n, d = nums[0], dens[0]
+    same_year_pairs = [(n, d) for n in nums for d in dens if n["year"] == d["year"]]
+    if same_year_pairs:
+        def pair_key(pair: Tuple[Dict, Dict]) -> Tuple[int, int]:
+            n, d = pair
+            year_match = 1 if preferred_year and n["year"] == preferred_year else 0
+            score = _score_row_match(n["item"], num_aliases) + _score_row_match(d["item"], den_aliases)
+            return (year_match, score)
+        return max(same_year_pairs, key=pair_key)
+
+    # Fallback: no shared year — best candidate for each side independently
+    n = _pick_best_in_group(nums, num_canonical, preferred_year)
+    d = _pick_best_in_group(dens, den_canonical, preferred_year)
     return n, d
 
 
@@ -1351,8 +1466,8 @@ def _build_calculation_code(
         ca_list = groups.get("current_assets", [])
         cl_list = groups.get("current_liab", [])
         if ca_list and cl_list:
-            ca = next((x for x in ca_list if x["year"] == preferred_year), ca_list[0])
-            cl = next((x for x in cl_list if x["year"] == preferred_year), cl_list[0])
+            ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
+            cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
             code_lines.append(f"# Current Ratio = Current Assets / Current Liabilities")
             code_lines.append(f"result = round({ca['code_key']} / {cl['code_key']}, 4)")
             yr = ca['year']
@@ -1365,10 +1480,10 @@ def _build_calculation_code(
         inv_list = groups.get("inventory", [])
         cl_list = groups.get("current_liab", [])
         if ca_list and cl_list:
-            ca = next((x for x in ca_list if x["year"] == preferred_year), ca_list[0])
-            cl = next((x for x in cl_list if x["year"] == ca["year"]), cl_list[0])
+            ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
+            cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
             if inv_list:
-                inv = next((x for x in inv_list if x["year"] == ca["year"]), inv_list[0])
+                inv = _pick_best_in_group(inv_list, "inventory", ca["year"])
                 code_lines.append(f"# Quick Ratio = (Current Assets - Inventory) / Current Liabilities")
                 code_lines.append(f"result = round(({ca['code_key']} - {inv['code_key']}) / {cl['code_key']}, 4)")
             else:
@@ -1413,11 +1528,7 @@ def _build_calculation_code(
     vars_to_use = groups.get(target_canonical, []) if target_canonical else []
 
     if vars_to_use:
-        # Prefer preferred year
-        if preferred_year:
-            best = next((v for v in vars_to_use if v["year"] == preferred_year), vars_to_use[0])
-        else:
-            best = vars_to_use[0]
+        best = _pick_best_in_group(vars_to_use, target_canonical, preferred_year)
         item_label = best['item']
         yr = best['year']
         code_lines.append(f"result = {best['code_key']}")
@@ -1476,7 +1587,8 @@ class ProgramOfThoughtReasoner:
             fk = formula_entry.get("formula_key", "")
             code_lines.append(f"# Formula: {fk} — {formula_entry.get('result_label', '')}")
             formula_code = _gen_formula_code(
-                formula_entry, resolved_formula, extracted_table, resolved_formula_series
+                formula_entry, resolved_formula, extracted_table,
+                resolved_formula_series, resolved_formula_meta,
             )
             if formula_code:
                 code_lines.extend(formula_code)
@@ -1589,8 +1701,11 @@ class ProgramOfThoughtReasoner:
             extracted_summary = {
                 ph: (
                     ph,
-                    resolved_formula_meta.get(ph, {}).get("source", "formula")
-                    + ("~approx" if resolved_formula_meta.get(ph, {}).get("is_approximate") else ""),
+                    (
+                        resolved_formula_meta.get(ph, {}).get("source", "formula")
+                        + ("~approx" if resolved_formula_meta.get(ph, {}).get("is_approximate") else "")
+                        + " <- " + resolved_formula_meta.get(ph, {}).get("source_detail", "?")
+                    ),
                     val,
                 )
                 for ph, val in resolved_formula.items()
