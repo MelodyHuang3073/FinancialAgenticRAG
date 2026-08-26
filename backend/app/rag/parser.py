@@ -1206,6 +1206,31 @@ class FinancialFileParser:
         passages = []
         table_name = f"{filename} (Page {page_num} – Financial Table)"
         parent_id = f"parent_{company_name}_p{page_num}_tbl"
+
+        # The section heading/title text immediately BEFORE the first
+        # table block (e.g. "Amcor plc and Subsidiaries / Consolidated
+        # Statements of Income", or — critically — "Deed of Cross
+        # Guarantee / Consolidated Statements of Income" for a
+        # supplementary guarantor schedule that otherwise reuses the
+        # exact same line-item labels as the real consolidated
+        # statements). Without this, parent_content contained ONLY the
+        # bare table blocks with no surrounding context at all, so
+        # nothing downstream — not a human reading the Source Evidence
+        # panel, not pot_reasoner's _is_supplementary_schedule() check —
+        # could tell a guarantor schedule's table apart from the real
+        # one; confirmed real case: Amcor's page 105 guarantor schedule's
+        # $58M gross profit silently passed every check meant to exclude
+        # it, purely because the words "Deed of Cross Guarantee" were
+        # never actually part of the evidence text being checked. Only
+        # the last few lines are kept — the line(s) right above the
+        # table are almost always its own title, not earlier boilerplate
+        # further up the page.
+        first_block_pos = page_text.find(table_blocks[0])
+        leading_context = page_text[:first_block_pos].strip() if first_block_pos > 0 else ""
+        if leading_context:
+            leading_lines = [l for l in leading_context.split("\n") if l.strip()]
+            leading_context = "\n".join(leading_lines[-6:])
+
         # The full CLEAN Markdown table(s) — not a raw page_text[:1000]
         # slice, which can cut off before ever reaching the table (real
         # pages usually lead with boilerplate/title text) or capture it
@@ -1216,6 +1241,7 @@ class FinancialFileParser:
         # plain text.
         parent_content = (
             f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
+            + (leading_context + "\n\n" if leading_context else "")
             + "\n\n".join(table_blocks)
         )
 
