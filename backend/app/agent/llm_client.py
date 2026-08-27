@@ -123,6 +123,12 @@ class LLMAnswerGenerator:
                 f"\nPoT result: {pot_res.get('result_value')}\n"
                 f"Sandbox output: {pot_res.get('output_log', '')[:600]}"
             )
+            if pot_res.get("is_degraded_formula"):
+                pot_summary += (
+                    f"\n⚠️ CRITICAL: {pot_res.get('degraded_note', '')} "
+                    "You MUST explicitly state this limitation in your answer -- do not "
+                    "present the shown number as the exact metric the question asked for."
+                )
 
         verification_summary = ""
         if verification_res:
