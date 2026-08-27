@@ -83,16 +83,22 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
         _ALIAS_TO_CANONICAL[_a.lower()] = _canonical
 
 
-_NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+)$')
+_NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+)$')
 
 
 def _is_negated_match(item_lower: str, match_start: int) -> bool:
     """
-    True if the text immediately before an alias match ends with a
-    negation prefix ("non-", "non ", "not "). Guards substring matching
-    against e.g. "current assets" matching inside "non-current assets",
-    or "operating income" matching inside "non-operating income" — a
-    generic check, not specific to any one canonical/alias pair.
+    True if the text immediately before an alias match ends with a prefix
+    that turns the alias into a fundamentally different accounting
+    concept: a straight negation ("non-", "non ", "not ") — e.g. "current
+    assets" matching inside "non-current assets" — or a recognition-timing
+    modifier ("deferred ", "unearned ") that turns an income-statement
+    line into an unrelated balance-sheet liability — e.g. bare "revenue"
+    matching inside "deferred revenues" (a contract-liability line, not
+    income; confirmed real case: Activision Blizzard's balance sheet
+    "Deferred revenues" row was picked as FY2019 revenue for a fixed-
+    asset-turnover calculation). Generic across every canonical/alias
+    pair, not specific to any one company or metric.
     """
     return bool(_NEGATION_PREFIX_RE.search(item_lower[:match_start]))
 
@@ -194,6 +200,33 @@ def _extract_query_years(query: str) -> List[str]:
         if ny not in seen:
             years.append(ny)
             seen.add(ny)
+    return years
+
+
+#: Language implying a two-point comparison, even when the query text
+#: only names the LATEST year (e.g. "improving...as of FY2023" implies
+#: vs. FY2022 — confirmed real case: "Does AMCOR have an improving gross
+#: margin profile as of FY2023?" names only 2023, yet the gold answer is
+#: a FY2023-vs-FY2022 comparison). Generic phrasing, not tied to any one
+#: metric or company.
+_TREND_KEYWORDS = (
+    "improv", "declin", "trend", "profile", "increased or decreased",
+    "increase or decrease", "compared to", "year over year", "yoy",
+)
+
+
+def _with_implied_trend_year(query_years: Optional[List[str]], q_lower: str) -> List[str]:
+    """
+    If trend language is present but query_years names only one year,
+    append year-1 so multi-year comparison logic has a second year to
+    compare against.
+    """
+    years = list(query_years or [])
+    if len(set(years)) == 1 and any(t in q_lower for t in _TREND_KEYWORDS):
+        try:
+            years = years + [str(int(years[0]) - 1)]
+        except ValueError:
+            pass
     return years
 
 
@@ -936,9 +969,19 @@ _TEXT_PATTERNS: List[Tuple[List[str], str, str]] = [
 
 # Regex: number optionally followed by % or B/M/T suffix
 _NUM_PATTERN = re.compile(
-    r"([\d,]+(?:\.\d+)?)\s*(?:%|percent|billion|million|trillion|\u5104|B|M)?",
+    r"([\d,]+(?:\.\d+)?)\s*(%|percent|billion|million|trillion|\u5104|B|M)?",
     re.IGNORECASE,
 )
+
+#: Canonicals whose value IS legitimately a percentage. Every other
+#: canonical (revenue, net_income, etc.) needs an absolute dollar figure \u2014
+#: a nearby "15%" in prose almost always describes a rate of CHANGE
+#: ("decreased 15% to $X"), not the metric's own value, so it must never
+#: win as a candidate for a dollar-value canonical (confirmed real case:
+#: Activision Blizzard MD&A text "net revenues decreased 15% to $4.9
+#: billion" produced revenue=15.0 because 15 was simply the nearest
+#: number after the matched year token).
+_PCT_CANONICALS = {"gross_margin_pct", "op_margin_pct", "net_margin_pct"}
 # Year pattern
 _YEAR_NEAR = re.compile(r"(?:FY)?(20\d{2})")
 
@@ -963,7 +1006,22 @@ def _extract_from_free_text(
     for ev in evidence_list:
         content = ev.get("parent_content") or ev.get("content", "")
         if not content or "Line Item:" in content:
-            # pipe-delimited table chunk — handled by _extract_from_linearized_table
+            # legacy "Line Item: X | Year: Val" chunk — handled by
+            # _extract_from_linearized_table
+            continue
+        if any(is_markdown_separator_row(l) for l in content.split("\n")):
+            # Standard Markdown table (|---|---|) — also handled by
+            # _extract_from_linearized_table via _extract_from_markdown_table_block().
+            # Without this check the SAME table content was scanned a
+            # second time by this function's crude keyword-proximity
+            # heuristic, which has no concept of table structure — a
+            # bare "revenue" trigger matched somewhere in a flattened
+            # balance-sheet table and grabbed a totally unrelated cell's
+            # number (confirmed real case: Activision Blizzard's balance
+            # sheet table produced "revenue = 11,174", the value actually
+            # belonging to "Additional paid-in capital", just because it
+            # was the nearest number after the trigger word once the
+            # table was flattened to plain text).
             continue
         if _is_supplementary_schedule(content):
             # A guarantor/parent-only/combining schedule reuses the same
@@ -1017,6 +1075,9 @@ def _extract_from_free_text(
                             continue
                         if abs(candidate) < 0.01:       # skip near-zero
                             continue
+                        suffix = (m.group(2) or "").lower()
+                        if suffix in ("%", "percent") and canonical not in _PCT_CANONICALS:
+                            continue  # a rate-of-change % is not this dollar-value metric's own value
                         val = candidate
                         break
 
@@ -1046,6 +1107,9 @@ def _extract_from_free_text(
                         if 1900 <= candidate <= 2099:
                             continue
                         if abs(candidate) < 0.01:
+                            continue
+                        suffix = (m.group(2) or "").lower()
+                        if suffix in ("%", "percent") and canonical not in _PCT_CANONICALS:
                             continue
                         val = candidate
                         break
@@ -1151,6 +1215,8 @@ def _gen_formula_code(
     extracted_table: Dict[str, Dict],
     resolved_series: Optional[Dict[str, List[Tuple[float, str]]]] = None,
     resolved_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+    query_years: Optional[List[str]] = None,
+    q_lower: str = "",
 ) -> List[str]:
     """Generate Python code lines using the formula template.
 
@@ -1181,6 +1247,49 @@ def _gen_formula_code(
 
     if not resolved:
         return []
+
+    # ── Multi-year trend comparison ─────────────────────────────────────────
+    # A "did X improve or decline" question needs the SAME ratio computed
+    # for two years to actually answer, not one year's snapshot (same
+    # rationale as _emit_multi_year_ratio, used by the non-formula-library
+    # calculation path for the identical reason). Skipped for is_multi_year
+    # formulas (fixed_asset_turnover etc.) — those already compare two
+    # years INSIDE a single ratio (average PP&E across years), so a
+    # year-over-year comparison of the ratio ITSELF is a different,
+    # unrequested question. Only fires when every placeholder the formula
+    # needs actually has resolved data for both comparison years — no
+    # partial/guessed comparison.
+    if not is_multi_year and resolved_series:
+        trend_years = sorted(set(_with_implied_trend_year(query_years, q_lower)))
+        if len(trend_years) >= 2:
+            needed_phs = set(re.findall(r"[a-z_][a-z0-9_]*", expr)) - {"years", "math"}
+            per_year_vals: Dict[str, Dict[str, float]] = {}
+            for yr in trend_years:
+                ph_vals = {}
+                for ph in needed_phs:
+                    match = next((v for v, y in resolved_series.get(ph, []) if y == yr), None)
+                    if match is None:
+                        ph_vals = None
+                        break
+                    ph_vals[ph] = match
+                if ph_vals is not None:
+                    per_year_vals[yr] = ph_vals
+            if len(per_year_vals) >= 2:
+                trend_lines: List[str] = []
+                uses_builtin_pct = any(fn in expr for fn in ["yoy(", "cagr(", "* 100", "*100"])
+                year_exprs = []
+                for yr in sorted(per_year_vals):
+                    ph_vals = per_year_vals[yr]
+                    for ph, val in ph_vals.items():
+                        trend_lines.append(f"{ph}_{yr} = {val}")
+                    yr_expr = expr
+                    for ph in needed_phs:
+                        yr_expr = re.sub(rf"\b{re.escape(ph)}\b", f"{ph}_{yr}", yr_expr)
+                    if unit == "%" and not uses_builtin_pct:
+                        yr_expr = f"({yr_expr}) * 100"
+                    year_exprs.append((yr, yr_expr))
+                _emit_multi_year_ratio(trend_lines, label, unit, year_exprs)
+                return trend_lines
 
     for ph, val in resolved.items():
         ph_meta = (resolved_meta or {}).get(ph, {})
@@ -1372,6 +1481,26 @@ def _find_pair_for_margin(
     return n, d
 
 
+def _pair_for_year(
+    groups: Dict[str, List[Dict]],
+    num_canonical: str,
+    den_canonical: str,
+    year: str,
+) -> Tuple[Optional[Dict], Optional[Dict]]:
+    """
+    Same as _find_pair_for_margin, but scoped to a single specific year —
+    used when a question asks to compare a margin/ratio ACROSS years
+    (e.g. "did gross margin improve between FY2022 and FY2023"), so each
+    year's numerator/denominator must come from that year's own data,
+    never bleed in a different year's value as a fallback.
+    """
+    nums = [x for x in groups.get(num_canonical, []) if x["year"] == year]
+    dens = [x for x in groups.get(den_canonical, []) if x["year"] == year]
+    if not nums or not dens:
+        return None, None
+    return _find_pair_for_margin({num_canonical: nums, den_canonical: dens}, num_canonical, den_canonical, year)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FinanceBench-aligned calculation builder
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1396,18 +1525,59 @@ _CURRENT_RATIO_TRIGGERS = ["current ratio", "流動比率"]
 _QUICK_RATIO_TRIGGERS = ["quick ratio", "acid", "速動"]
 
 
+def _emit_multi_year_ratio(
+    code_lines: List[str],
+    label: str,
+    unit: str,
+    year_exprs: List[Tuple[str, str]],
+) -> None:
+    """
+    Emit code that computes and prints a ratio for EACH of 2+ years, plus
+    an explicit numeric delta between the first and last — so a "did X
+    improve or decline between year A and year B" question gets both
+    real numbers AND an explicit year-over-year comparison to draw on,
+    instead of a single year's value with nothing to compare it against
+    (confirmed real case: Amcor's gross-margin question only ever
+    computed FY2023 alone, so the final answer had no actual FY2022
+    figure to compare against and guessed the wrong direction). Reports
+    "increased"/"decreased" rather than "improved"/"declined" — whether a
+    higher number is actually better differs by metric (a higher current
+    ratio is good, a higher SG&A-to-revenue ratio is not), so the neutral
+    direction is left for the answer-synthesis stage to interpret.
+    year_exprs: [(year, python_expr_string), ...] sorted oldest to newest.
+    """
+    result_vars: List[Tuple[str, str]] = []
+    for yr, expr in year_exprs:
+        var = f"{_sanitize(label)}_{yr}"
+        code_lines.append(f"{var} = round({expr}, 4)")
+        code_lines.append(f"print(f'{label} ({yr}): {{{var}}}{unit}')")
+        result_vars.append((yr, var))
+    first_yr, first_var = result_vars[0]
+    last_yr, last_var = result_vars[-1]
+    code_lines.append(f"result = {last_var}")
+    code_lines.append(f"_delta = round({last_var} - {first_var}, 4)")
+    code_lines.append(
+        "_direction = 'increased' if _delta > 0 else ('decreased' if _delta < 0 else 'stayed flat')"
+    )
+    code_lines.append(
+        f"print(f'{label} change ({first_yr}->{last_yr}): {{_direction}} by {{abs(_delta)}}{unit}')"
+    )
+
+
 def _build_calculation_code(
     code_lines: List[str],
     extracted_table: Dict[str, Dict],
     query: str,
     q_lower: str,
     preferred_year: Optional[str] = None,
+    query_years: Optional[List[str]] = None,
 ) -> bool:
     """
     Build the calculation section of the PoT code.
     Returns True if a calculation was successfully generated.
     """
     groups = _group_by_canonical(extracted_table)
+    query_years = _with_implied_trend_year(query_years, q_lower)
 
     # ── CAGR ──────────────────────────────────────────────────────────────────
     if "cagr" in q_lower or "複合成長率" in q_lower:
@@ -1466,6 +1636,21 @@ def _build_calculation_code(
         ca_list = groups.get("current_assets", [])
         cl_list = groups.get("current_liab", [])
         if ca_list and cl_list:
+            distinct_years = sorted(set(query_years or []))
+            if len(distinct_years) >= 2:
+                year_exprs = []
+                for yr in distinct_years:
+                    ca_yr = [x for x in ca_list if x["year"] == yr]
+                    cl_yr = [x for x in cl_list if x["year"] == yr]
+                    if not ca_yr or not cl_yr:
+                        continue
+                    ca = _pick_best_in_group(ca_yr, "current_assets")
+                    cl = _pick_best_in_group(cl_yr, "current_liab")
+                    year_exprs.append((yr, f"{ca['code_key']} / {cl['code_key']}"))
+                if len(year_exprs) >= 2:
+                    code_lines.append("# Current Ratio = Current Assets / Current Liabilities")
+                    _emit_multi_year_ratio(code_lines, "Current Ratio", "x", year_exprs)
+                    return True
             ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
             cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
             code_lines.append(f"# Current Ratio = Current Assets / Current Liabilities")
@@ -1480,6 +1665,27 @@ def _build_calculation_code(
         inv_list = groups.get("inventory", [])
         cl_list = groups.get("current_liab", [])
         if ca_list and cl_list:
+            distinct_years = sorted(set(query_years or []))
+            if len(distinct_years) >= 2:
+                year_exprs = []
+                for yr in distinct_years:
+                    ca_yr = [x for x in ca_list if x["year"] == yr]
+                    cl_yr = [x for x in cl_list if x["year"] == yr]
+                    if not ca_yr or not cl_yr:
+                        continue
+                    ca = _pick_best_in_group(ca_yr, "current_assets")
+                    cl = _pick_best_in_group(cl_yr, "current_liab")
+                    inv_yr = [x for x in inv_list if x["year"] == yr]
+                    if inv_yr:
+                        inv = _pick_best_in_group(inv_yr, "inventory")
+                        year_exprs.append((yr, f"({ca['code_key']} - {inv['code_key']}) / {cl['code_key']}"))
+                    else:
+                        year_exprs.append((yr, f"{ca['code_key']} / {cl['code_key']}"))
+                if len(year_exprs) >= 2:
+                    label = "Quick Ratio" if inv_list else "Quick Ratio (approx, no inventory data)"
+                    code_lines.append("# Quick Ratio = (Current Assets - Inventory) / Current Liabilities")
+                    _emit_multi_year_ratio(code_lines, label, "x", year_exprs)
+                    return True
             ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
             cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
             if inv_list:
@@ -1496,6 +1702,17 @@ def _build_calculation_code(
     # ── Margin / Ratio ────────────────────────────────────────────────────────
     for triggers, num_c, den_c, label in _MARGIN_MAP:
         if any(t in q_lower for t in triggers):
+            distinct_years = sorted(set(query_years or []))
+            if len(distinct_years) >= 2:
+                year_exprs = []
+                for yr in distinct_years:
+                    n_yr, d_yr = _pair_for_year(groups, num_c, den_c, yr)
+                    if n_yr and d_yr:
+                        year_exprs.append((yr, f"margin({n_yr['code_key']}, {d_yr['code_key']})"))
+                if len(year_exprs) >= 2:
+                    code_lines.append(f"# {label} = {num_c} / {den_c}")
+                    _emit_multi_year_ratio(code_lines, label, "%", year_exprs)
+                    return True
             n, d = _find_pair_for_margin(groups, num_c, den_c, preferred_year)
             if n and d:
                 code_lines.append(f"# {label} = {num_c} / {den_c}")
@@ -1589,6 +1806,7 @@ class ProgramOfThoughtReasoner:
             formula_code = _gen_formula_code(
                 formula_entry, resolved_formula, extracted_table,
                 resolved_formula_series, resolved_formula_meta,
+                query_years, q_lower,
             )
             if formula_code:
                 code_lines.extend(formula_code)
@@ -1616,7 +1834,7 @@ class ProgramOfThoughtReasoner:
 
                 # Build the calculation
                 success_calc = _build_calculation_code(
-                    code_lines, extracted_table, query, q_lower, preferred_year
+                    code_lines, extracted_table, query, q_lower, preferred_year, query_years
                 )
                 if not success_calc:
                     # The evidence DID contain some structured table data,
@@ -1644,7 +1862,7 @@ class ProgramOfThoughtReasoner:
                     code_lines.append("")
                     code_lines.append("# Calculation (from narrative text)")
                     success_calc = _build_calculation_code(
-                        code_lines, free_text_extracted, query, q_lower, preferred_year
+                        code_lines, free_text_extracted, query, q_lower, preferred_year, query_years
                     )
                     if not success_calc:
                         # Same fix as the extracted_table branch above: no
