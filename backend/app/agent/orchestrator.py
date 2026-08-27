@@ -348,6 +348,11 @@ class FinAgentRAGOrchestrator:
             "verification": verification_res,
             "pot_code": pot_res.get("code") if pot_res else "",
             "sandbox_log": pot_res.get("output_log") if pot_res else "",
+            "is_degraded_formula": pot_res.get("is_degraded_formula", False) if pot_res else False,
+            "degraded_note": pot_res.get("degraded_note", "") if pot_res else "",
+            "result_series": pot_res.get("result_series", []) if pot_res else [],
+            "result_delta": pot_res.get("result_delta") if pot_res else None,
+            "result_direction": pot_res.get("result_direction") if pot_res else None,
             # Return ALL evidence items (with sub_question tag) so the frontend
             # can display every data point that contributed to the calculation
             "evidence_sources": evidence_meta if evidence_meta else [
@@ -500,6 +505,15 @@ class FinAgentRAGOrchestrator:
         # ── Line 2: Sandbox output summary ──
         if log:
             parts.append(f"\n> {log}")
+
+        # ── Degraded-formula warning: a different formula was silently
+        # substituted (e.g. Current Ratio in place of Quick Ratio) because
+        # the exact metric asked for couldn't be computed — this rule-
+        # based fallback only fires when the LLM synthesis call is
+        # unavailable, so the caveat must be stated here too, not just in
+        # the LLM prompt instruction.
+        if pot_res.get("is_degraded_formula"):
+            parts.append(f"\n⚠️ **Note**: {pot_res.get('degraded_note', '')}")
 
         # ── Line 3: Key data points used ──
         if extracted_vars:

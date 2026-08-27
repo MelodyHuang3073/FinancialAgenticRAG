@@ -222,8 +222,13 @@ function formatResultValue(value) {
   return String(value);
 }
 
-function ResultSummaryCard({ value, label = '最終計算結果' }) {
-  if (value === null || value === undefined || value === '') return null;
+function ResultSummaryCard({ value, series, delta, direction, label = '最終計算結果' }) {
+  // A question asking "did X improve/decline between year A and year B" is
+  // answered by the CHANGE, not a single year's snapshot — when the
+  // backend computed a year-over-year comparison (series has both years),
+  // show that comparison as the headline instead of just the latest value.
+  const hasSeries = Array.isArray(series) && series.length >= 2;
+  if (!hasSeries && (value === null || value === undefined || value === '')) return null;
 
   return (
     <div style={{
@@ -235,11 +240,33 @@ function ResultSummaryCard({ value, label = '最終計算結果' }) {
       boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: '#166534', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-        {label}
+        {hasSeries ? `${label}（${series[0].year} → ${series[series.length - 1].year}）` : label}
       </div>
-      <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-        {formatResultValue(value)}
-      </div>
+      {hasSeries ? (
+        <div style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          {series.map((pt, i) => (
+            <span key={pt.year} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+              {i > 0 && <span style={{ fontSize: 20, color: '#6ee7b7' }}>→</span>}
+              <span style={{ fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
+                {formatResultValue(pt.value)}
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#059669', marginLeft: 4 }}>
+                  ({pt.year})
+                </span>
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
+          {formatResultValue(value)}
+        </div>
+      )}
+      {hasSeries && delta !== null && delta !== undefined && (
+        <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: '#047857' }}>
+          {direction === 'increased' ? '↑' : direction === 'decreased' ? '↓' : '—'}{' '}
+          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}
+        </div>
+      )}
       <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
         Review the number first, then expand the reasoning below.
       </div>
@@ -357,7 +384,12 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
           borderRadius: 18, padding: '20px 24px',
           boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
         }}>
-          <ResultSummaryCard value={msg.result.result_value} />
+          <ResultSummaryCard
+            value={msg.result.result_value}
+            series={msg.result.result_series}
+            delta={msg.result.result_delta}
+            direction={msg.result.result_direction}
+          />
 
           {summaryText && (
             <div style={{ marginBottom: 12 }}>

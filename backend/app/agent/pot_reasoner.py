@@ -501,6 +501,107 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
     return 0
 
 
+#: Some formula variables are never reported as a single line item — a
+#: filer's own statement structure splits them into several sub-items
+#: instead (e.g. Amcor's balance sheet has no "Inventory" row at all,
+#: just "Raw materials and supplies" + "Work in process and finished
+#: goods"). Keyed by the SAME placeholder name used in
+#: financial_formula_library.py's required_vars (the codebase's existing
+#: convention for naming a concept consistently across formulas), each
+#: value lists the sub-item alias fragments that, summed together for a
+#: given year, approximate the composite concept. Generic mechanism, not
+#: tied to Amcor or quick_ratio — any formula whose required_vars uses
+#: one of these placeholder names benefits automatically.
+_COMPOSITE_ITEM_ALIASES: Dict[str, List[str]] = {
+    "inventory": [
+        "raw materials", "raw materials and supplies",
+        "work in process", "work in process and finished goods",
+        "finished goods", "merchandise inventory",
+        "存貨", "原料", "在製品", "製成品",
+    ],
+}
+
+
+def _resolve_composite_item(
+    evidence_list: List[Dict[str, Any]],
+    sub_aliases: List[str],
+) -> Dict[str, Tuple[float, List[str]]]:
+    """
+    Approximate a composite line item (e.g. "inventory") by summing its
+    known sub-items across a filer's own statement structure, when no
+    single row matches the composite concept directly.
+
+    Each sub-alias is resolved INDEPENDENTLY using the same per-row/
+    per-segment scoring as _extract_formula_guided()'s Priority 1/2 scan
+    (so "Total X"-style sub-total rows still win over looser matches),
+    reduced to its own single best-scoring row per year — this prevents
+    double-counting when the same sub-item legitimately appears on more
+    than one page (e.g. a balance-sheet summary AND a detailed note).
+    Distinct sub-aliases' per-year values are then summed. Supplementary
+    schedules (guarantor/parent-only) are excluded, same as everywhere
+    else in this module.
+
+    Returns {year: (summed_value, [line_item_label, ...])} — the label
+    list is kept for provenance (what was actually added together).
+    """
+    # sub_candidates[sub_alias] = {year: (value, score, is_primary, line_item_label)}
+    sub_best: Dict[str, Dict[str, Tuple[float, int, bool, str]]] = {a: {} for a in sub_aliases}
+
+    for ev in evidence_list:
+        content = ev.get("parent_content") or ev.get("content", "")
+        if not content:
+            continue
+        is_primary = not _is_supplementary_schedule(content)
+
+        rows: List[Tuple[str, str, float]] = []  # (label, year, val)
+        if any(is_markdown_separator_row(l) for l in content.split("\n")):
+            ev_company = ev.get("company", "")
+            for row in _extract_from_markdown_table_block(content, ev_company).values():
+                rows.append((row["item"], row["year"], row["val"]))
+        else:
+            year_col_re = re.compile(
+                r"(.*?(?:20\d{2}|FY\d{4})[^:]*?)\s*:\s*([\d,]+\.?\d*)", re.IGNORECASE
+            )
+            for seg in re.split(r'(?=Line Item:)', content):
+                label_m = re.search(r'Line Item:\s*([^|]+)', seg)
+                if not label_m:
+                    continue
+                seg_label = label_m.group(1).strip()
+                for f in [x.strip() for x in seg.split("|")]:
+                    m_f = year_col_re.search(f)
+                    if not m_f:
+                        continue
+                    ym = re.search(r"(20\d{2}|FY\d{4})", m_f.group(1))
+                    if not ym:
+                        continue
+                    val = _to_float(m_f.group(2))
+                    if val is not None and val != 0:
+                        rows.append((seg_label, _normalize_year(ym.group(1)), val))
+
+        for label, year, val in rows:
+            for sub_alias in sub_aliases:
+                score = _score_row_match(label, [sub_alias])
+                if score == 0:
+                    continue
+                existing = sub_best[sub_alias].get(year)
+                priority = (is_primary, score)
+                if existing is None or priority > (existing[2], existing[1]):
+                    sub_best[sub_alias][year] = (val, score, is_primary, label)
+
+    # Sum distinct sub-aliases' best value per year. A sub-alias with no
+    # match anywhere just doesn't contribute (a partial sum from whatever
+    # sub-items ARE found is still better signal than nothing — the
+    # caller marks the result is_approximate regardless).
+    by_year: Dict[str, Tuple[float, List[str]]] = {}
+    for sub_alias, year_map in sub_best.items():
+        for year, (val, score, is_primary, label) in year_map.items():
+            total, labels = by_year.get(year, (0.0, []))
+            if label in labels:
+                continue  # same row already counted under a different matching sub-alias
+            by_year[year] = (total + val, labels + [label])
+    return by_year
+
+
 def _extract_formula_guided(
     evidence_list: List[Dict[str, Any]],
     formula_entry: Dict[str, Any],
@@ -705,6 +806,30 @@ def _extract_formula_guided(
             return True
         return False
 
+    # ── Composite-item fallback: some formula variables are only ever
+    # reported as several sub-items, never one line (see
+    # _COMPOSITE_ITEM_ALIASES). Tried BEFORE the free-text fallback —
+    # summing genuinely structured sub-item rows is more reliable than
+    # narrative-text keyword proximity. Never overrides a year that
+    # already has a real direct match.
+    for placeholder in var_aliases:
+        if placeholder not in _COMPOSITE_ITEM_ALIASES:
+            continue
+        if not _needs_ft_fallback(placeholder, resolved[placeholder]):
+            continue
+        composite_by_year = _resolve_composite_item(
+            evidence_list, _COMPOSITE_ITEM_ALIASES[placeholder]
+        )
+        existing_years = {y for _, y in resolved[placeholder]}
+        for yr, (total_val, labels) in composite_by_year.items():
+            if yr in existing_years:
+                continue
+            resolved[placeholder].append((total_val, yr))
+            winner_meta.setdefault(placeholder, {})[yr] = (
+                1, "composite", -1, " + ".join(labels)
+            )
+            existing_years.add(yr)
+
     any_needs_fallback = any(_needs_ft_fallback(ph, v) for ph, v in resolved.items())
     if any_needs_fallback and query_years:
         ft = _extract_from_free_text(evidence_list, query_years)
@@ -763,7 +888,8 @@ def _extract_formula_guided(
                 "source": "period-average",
                 "is_approximate": any(s < 2 or "supplementary" in src for s, src, ei, lbl in year_meta),
                 "source_detail": "; ".join(
-                    f"{y}={v} <- evidence[{ei}] Line Item \"{lbl}\"" if ei >= 0 else f"{y}={v} <- free-text"
+                    f"{y}={v} <- sum of sub-items: {lbl}" if src == "composite"
+                    else (f"{y}={v} <- evidence[{ei}] Line Item \"{lbl}\"" if ei >= 0 else f"{y}={v} <- free-text")
                     for (v, y), (s, src, ei, lbl) in zip(matches, year_meta)
                 ),
             }
@@ -801,13 +927,16 @@ def _extract_formula_guided(
         score, source, ev_idx, line_item_label = winner_meta.get(placeholder, {}).get(
             picked_year, (1, "unknown", -1, "?")
         )
+        if source == "composite":
+            detail = f"sum of sub-items: {line_item_label}"
+        elif ev_idx >= 0:
+            detail = f"evidence[{ev_idx}] Line Item \"{line_item_label}\""
+        else:
+            detail = f"free-text match on \"{line_item_label}\""
         meta[placeholder] = {
             "source": source,
             "is_approximate": score < 2 or "supplementary" in source,
-            "source_detail": (
-                f"evidence[{ev_idx}] Line Item \"{line_item_label}\""
-                if ev_idx >= 0 else f"free-text match on \"{line_item_label}\""
-            ),
+            "source_detail": detail,
         }
 
     return final, resolved, meta
@@ -1571,9 +1700,16 @@ def _build_calculation_code(
     q_lower: str,
     preferred_year: Optional[str] = None,
     query_years: Optional[List[str]] = None,
+    degraded_notes: Optional[List[str]] = None,
 ) -> bool:
     """
     Build the calculation section of the PoT code.
+    `degraded_notes`, if given, is appended to whenever this function
+    silently substitutes a DIFFERENT formula than the one actually asked
+    about (e.g. Current Ratio in place of Quick Ratio, because no
+    inventory data — direct or composite — could be found) — never
+    overwritten by the caller, only appended to, since generate_and_execute
+    passes the same list across the extracted_table AND free-text attempts.
     Returns True if a calculation was successfully generated.
     """
     groups = _group_by_canonical(extracted_table)
@@ -1668,6 +1804,7 @@ def _build_calculation_code(
             distinct_years = sorted(set(query_years or []))
             if len(distinct_years) >= 2:
                 year_exprs = []
+                any_degraded = False
                 for yr in distinct_years:
                     ca_yr = [x for x in ca_list if x["year"] == yr]
                     cl_yr = [x for x in cl_list if x["year"] == yr]
@@ -1681,10 +1818,20 @@ def _build_calculation_code(
                         year_exprs.append((yr, f"({ca['code_key']} - {inv['code_key']}) / {cl['code_key']}"))
                     else:
                         year_exprs.append((yr, f"{ca['code_key']} / {cl['code_key']}"))
+                        any_degraded = True
                 if len(year_exprs) >= 2:
-                    label = "Quick Ratio" if inv_list else "Quick Ratio (approx, no inventory data)"
+                    label = "Quick Ratio (approx, no inventory data)" if any_degraded else "Quick Ratio"
                     code_lines.append("# Quick Ratio = (Current Assets - Inventory) / Current Liabilities")
                     _emit_multi_year_ratio(code_lines, label, "x", year_exprs)
+                    if any_degraded and degraded_notes is not None:
+                        degraded_notes.append(
+                            "Quick Ratio could not be computed for at least one year (no "
+                            "inventory line item found, even after trying known sub-item "
+                            "breakdowns like raw materials + work in process) -- the value(s) "
+                            "shown use Current Ratio (Current Assets / Current Liabilities) as "
+                            "an approximation, which is NOT the true Quick Ratio and will read "
+                            "higher than the real figure."
+                        )
                     return True
             ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
             cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
@@ -1695,6 +1842,14 @@ def _build_calculation_code(
             else:
                 code_lines.append(f"# Quick Ratio (approx, no inventory data) = CA / CL")
                 code_lines.append(f"result = round({ca['code_key']} / {cl['code_key']}, 4)")
+                if degraded_notes is not None:
+                    degraded_notes.append(
+                        "Quick Ratio could not be computed (no inventory line item found, "
+                        "even after trying known sub-item breakdowns like raw materials + "
+                        "work in process) -- the value shown uses Current Ratio (Current "
+                        "Assets / Current Liabilities) as an approximation, which is NOT the "
+                        "true Quick Ratio and will read higher than the real figure."
+                    )
             yr = ca['year']
             code_lines.append(f"print(f'Quick Ratio ({yr}): {{result}}x')")
             return True
@@ -1798,6 +1953,7 @@ class ProgramOfThoughtReasoner:
         code_lines.extend(duplicate_warnings)
 
         used_extraction = "formula"
+        degraded_notes: List[str] = []
 
         if formula_entry and resolved_formula:
             # PATH 1: Formula library
@@ -1834,7 +1990,8 @@ class ProgramOfThoughtReasoner:
 
                 # Build the calculation
                 success_calc = _build_calculation_code(
-                    code_lines, extracted_table, query, q_lower, preferred_year, query_years
+                    code_lines, extracted_table, query, q_lower, preferred_year, query_years,
+                    degraded_notes,
                 )
                 if not success_calc:
                     # The evidence DID contain some structured table data,
@@ -1862,7 +2019,8 @@ class ProgramOfThoughtReasoner:
                     code_lines.append("")
                     code_lines.append("# Calculation (from narrative text)")
                     success_calc = _build_calculation_code(
-                        code_lines, free_text_extracted, query, q_lower, preferred_year, query_years
+                        code_lines, free_text_extracted, query, q_lower, preferred_year, query_years,
+                        degraded_notes,
                     )
                     if not success_calc:
                         # Same fix as the extracted_table branch above: no
@@ -1901,13 +2059,41 @@ class ProgramOfThoughtReasoner:
         code_str = "\n".join(code_lines)
 
         # ── Step 5: Execute with repair loop ──────────────────────────────────
-        success, res_val, stdout_err = execute_pot_code(code_str)
+        success, res_val, stdout_err, sandbox_locals = execute_pot_code(code_str)
         repair_count = 0
         while not success and repair_count < 2:
             repair_count += 1
             code_lines.append("result = 0.0")
             code_str = "\n".join(code_lines)
-            success, res_val, stdout_err = execute_pot_code(code_str)
+            success, res_val, stdout_err, sandbox_locals = execute_pot_code(code_str)
+
+        # A multi-year comparison (_emit_multi_year_ratio) always sets
+        # exactly these two names — when present, expose the FULL
+        # per-year series (not just the latest year's `result`) so a
+        # "did X improve or decline between year A and year B" answer's
+        # headline number can actually show the comparison, not a lone
+        # snapshot (confirmed real case: the frontend's result card showed
+        # only Quick Ratio's FY2023 value for a question explicitly asking
+        # about the FY2022->FY2023 change).
+        result_series: List[Dict[str, Any]] = []
+        result_delta = sandbox_locals.get("_delta") if success else None
+        result_direction = sandbox_locals.get("_direction") if success else None
+        if result_delta is not None:
+            year_re = re.compile(r"^(.*)_((?:19|20)\d{2})$")
+            series_items = []
+            for key, val in sandbox_locals.items():
+                m = year_re.match(key)
+                if m and isinstance(val, (int, float)) and not isinstance(val, bool):
+                    series_items.append((m.group(2), val))
+            # Multiple multi-year blocks could in principle coexist; keep
+            # only entries sharing the year-set actually used by the
+            # winning _delta/_direction pair — approximate by keeping the
+            # two most recently assigned per-year values (dict preserves
+            # insertion order in the generated code), which are exactly
+            # the ones _emit_multi_year_ratio's own delta was computed
+            # from.
+            if series_items:
+                result_series = [{"year": y, "value": v} for y, v in series_items[-2:]]
 
         # Build extracted summary — the middle field shows how each value
         # was actually obtained (table-total / table-partial / legacy /
@@ -1943,4 +2129,9 @@ class ProgramOfThoughtReasoner:
             "repairs_triggered": repair_count,
             "extraction_method": used_extraction,
             "formula_used": formula_entry.get("formula_key") if formula_entry else None,
+            "is_degraded_formula": bool(degraded_notes),
+            "degraded_note": " ".join(degraded_notes),
+            "result_series": result_series,
+            "result_delta": result_delta,
+            "result_direction": result_direction,
         }
