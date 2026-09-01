@@ -362,6 +362,11 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
             # entity, so its numbers must never stand in for the actual
             # company's consolidated figures here either.
             continue
+        if _is_quarterly_breakdown_table(content):
+            # A quarter's own value (e.g. Q1 revenue) must never stand in
+            # for the annual total it shares a label with — see
+            # _is_quarterly_breakdown_table()'s docstring.
+            continue
 
         # Extract company name for override lookup (Step 3/4)
         ev_company = ev.get("company", "")
@@ -466,6 +471,96 @@ def _is_supplementary_schedule(content: str) -> bool:
     return any(m in lower for m in _SUPPLEMENTARY_SCHEDULE_MARKERS)
 
 
+#: Markers indicating a "Selected Quarterly Financial Data" disclosure —
+#: a standard SEC 10-K schedule that breaks a fiscal year's figures down
+#: into Q1-Q4 (plus a full-year total column), reusing the SAME line-item
+#: labels ("Revenue", "Net earnings...") as the real annual income
+#: statement. Not specific to any one filer — this is a routine Item 8
+#: disclosure most 10-Ks include.
+_QUARTERLY_DATA_MARKERS = (
+    "quarterly financial data", "quarterly results", "selected quarterly",
+    "quarterly financial information",
+)
+
+#: A table header cell naming a real calendar/fiscal year (e.g. "2017").
+_YEAR_HEADER_CELL_RE = re.compile(r"^(?:FY)?(?:19|20)\d{2}$")
+#: table_parser.py's fallback name for a column it found no real period
+#: header for (e.g. an unlabeled quarter column).
+_COL_PLACEHOLDER_CELL_RE = re.compile(r"^Col\d+$")
+
+
+def _is_quarterly_breakdown_table(content: str) -> bool:
+    """
+    True if content is (or contains) a quarter-by-quarter breakdown table
+    rather than a genuine multi-year annual comparison. A quarter's own
+    value (e.g. Q1 revenue) must NEVER stand in for the annual total it
+    shares a label with — unlike a supplementary guarantor schedule (real
+    data for the wrong ENTITY, still usable as a last resort), a
+    quarterly slice is real data for the wrong PERIOD entirely, so this
+    is checked separately from _is_supplementary_schedule() and excludes
+    outright rather than merely deprioritizing.
+
+    Detected two ways:
+      1. A title/keyword marker (_QUARTERLY_DATA_MARKERS).
+      2. Structural + arithmetic signature: a header row naming exactly
+         ONE real year immediately followed by exactly 4 generic "ColN"
+         placeholders (table_parser.py's fallback name for a column whose
+         real header it couldn't read — exactly what happens when a
+         table's actual columns are unlabeled quarters, not years),
+         CONFIRMED by checking that a data row under that header actually
+         has the quarters-sum-to-the-annual-total relationship (the first
+         4 numeric values add up to the 5th, within rounding). The header
+         shape alone is deliberately NOT sufficient — plenty of unrelated
+         5-column tables (segment breakdowns, geographic tables) also
+         produce generic "ColN" placeholders when their real sub-headers
+         aren't captured; only the quarters-sum-to-total arithmetic is
+         actually specific to quarterly data, so the header shape is
+         merely where we choose to look for it (confirmed both ways on
+         Best Buy's quarterly data table: header
+         "| Revenue | 2017 | Col2 | Col3 | Col4 | Col5 |", data row
+         "8,443 | 8,533 | 8,945 | 13,482 | 39,403" — 8443+8533+8945+13482
+         = 39403 exactly; confirmed NOT to fire on 3M's segment table,
+         Best Buy's store-count-by-state table, or American Water Works'
+         state revenue table, none of which have this property even
+         though some also produce generic "ColN" headers).
+    """
+    lower = content.lower()
+    if any(m in lower for m in _QUARTERLY_DATA_MARKERS):
+        return True
+    lines = content.split("\n")
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("|") or is_markdown_separator_row(stripped):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        data_cells = cells[1:]  # skip the row-label cell
+        year_cells = [c for c in data_cells if _YEAR_HEADER_CELL_RE.match(c)]
+        col_placeholder_cells = [c for c in data_cells if _COL_PLACEHOLDER_CELL_RE.match(c)]
+        if len(year_cells) != 1 or len(col_placeholder_cells) != 4:
+            continue
+        # Header shape matches — confirm with the arithmetic invariant on
+        # a nearby data row before concluding this is genuinely quarterly.
+        for j in range(i + 1, min(i + 6, len(lines))):
+            data_line = lines[j].strip()
+            if not data_line.startswith("|"):
+                break
+            if is_markdown_separator_row(data_line):
+                continue
+            data = [c.strip() for c in data_line.strip("|").split("|")][1:]
+            if len(data) != 5:
+                continue
+            nums = [_to_float(c) for c in data]
+            if any(n is None for n in nums):
+                continue
+            quarters_sum = sum(nums[:4])
+            annual_total = nums[4]
+            if annual_total != 0 and abs(quarters_sum - annual_total) / abs(annual_total) < 0.02:
+                return True
+    return False
+
+
 def _score_row_match(label: str, aliases: List[str]) -> int:
     """
     How well does a table row's own label match one of a variable's
@@ -487,7 +582,15 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
     a current_liab lookup, purely by comparing the candidates rather than
     hardcoding either company's line-item wording.
     """
+    # Strip bare "$" tokens before comparing — a table-extraction
+    # artifact from a currency-symbol column bleeding into the label
+    # column (confirmed real case: Best Buy's real "Revenue" annual row
+    # parsed as "Revenue $ $ $ $ $", which failed the exact-match check
+    # against alias "revenue" purely because of this trailing noise,
+    # letting an unrelated but cleanly-labeled row outscore it).
     label_norm = re.sub(r'\s+', ' ', label.lower().strip().rstrip(':'))
+    label_norm = re.sub(r'(?:(?<=\s)|^)\$(?=\s|$)', '', label_norm)
+    label_norm = re.sub(r'\s+', ' ', label_norm).strip()
     for alias in aliases:
         a = alias.lower().strip()
         if not a:
@@ -549,7 +652,7 @@ def _resolve_composite_item(
 
     for ev in evidence_list:
         content = ev.get("parent_content") or ev.get("content", "")
-        if not content:
+        if not content or _is_quarterly_breakdown_table(content):
             continue
         is_primary = not _is_supplementary_schedule(content)
 
@@ -685,7 +788,7 @@ def _extract_formula_guided(
     for placeholder, aliases in var_aliases.items():
         for ev_idx, ev in enumerate(evidence_list):
             content = ev.get("parent_content") or ev.get("content", "")
-            if not content:
+            if not content or _is_quarterly_breakdown_table(content):
                 continue
             ev_company = ev.get("company", "")
             is_primary = not _is_supplementary_schedule(content)
@@ -1163,6 +1266,8 @@ def _extract_from_free_text(
             # of Cross Guarantee" schedule's $58M gross profit vs. the
             # real consolidated $2,725M).
             continue
+        if _is_quarterly_breakdown_table(content):
+            continue
         content_lower = content.lower()
 
         for triggers, canonical, display_name in _TEXT_PATTERNS:
@@ -1515,11 +1620,25 @@ def _infer_target_canonical(query_lower: str) -> Optional[str]:
 def _find_same_item_pair(
     vars_list: List[Dict],
     query_lower: str = "",
+    query_years: Optional[List[str]] = None,
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
     Find two vars with the SAME canonical item but DIFFERENT years.
     Bug 3 fix: prefer the canonical that matches what the user asked about
     (e.g. prefer 'revenue' over 'net_income' when query asks about revenue YoY).
+
+    When the query names two or more specific years, the pair is
+    restricted to exactly those years for whichever canonical is tried —
+    never silently substituted for a different pair of years the same
+    canonical happens to also have data for (confirmed real case: "What
+    is Adobe's YoY change in operating income from FY2015 to FY2016?"
+    was answered using FY2015->FY2017, because those were simply the
+    oldest/newest years operating_income had ANY data for in the
+    retrieved evidence — a 10-K income statement routinely shows 3
+    comparative years — ignoring which two years were actually asked
+    about). If the target canonical doesn't cover both requested years,
+    that canonical is skipped entirely rather than guessing a different
+    pair of years for it.
     """
     # Group by canonical
     groups: Dict[str, List[Dict]] = {}
@@ -1533,14 +1652,26 @@ def _find_same_item_pair(
         canonical_order.remove(target)
         canonical_order.insert(0, target)
 
+    specific_years = sorted(set(query_years)) if query_years and len(set(query_years)) >= 2 else None
+
     for c in canonical_order:
         items = groups[c]
         sorted_items = sorted(items, key=lambda x: str(x["year"]))
-        unique_years = list({x["year"] for x in sorted_items})
-        if len(unique_years) >= 2:
-            old = next(x for x in sorted_items if x["year"] == sorted(unique_years)[0])
-            new = next(x for x in sorted_items if x["year"] == sorted(unique_years)[-1])
-            return old, new
+        unique_years = {x["year"] for x in sorted_items}
+
+        if specific_years:
+            if not set(specific_years).issubset(unique_years):
+                continue  # this canonical doesn't cover the years actually asked about
+            old_yr, new_yr = specific_years[0], specific_years[-1]
+        else:
+            if len(unique_years) < 2:
+                continue
+            sorted_years = sorted(unique_years)
+            old_yr, new_yr = sorted_years[0], sorted_years[-1]
+
+        old = next(x for x in sorted_items if x["year"] == old_yr)
+        new = next(x for x in sorted_items if x["year"] == new_yr)
+        return old, new
 
     return None, None
 
@@ -1650,7 +1781,10 @@ _MARGIN_MAP: List[Tuple[List[str], str, str, str]] = [
 
 _ROE_TRIGGERS = ["roe", "return on equity"]
 _ROA_TRIGGERS = ["roa", "return on assets"]
-_CURRENT_RATIO_TRIGGERS = ["current ratio", "流動比率"]
+_CURRENT_RATIO_TRIGGERS = [
+    "current ratio", "working capital ratio", "working capital",
+    "流動比率", "營運資金比率",
+]
 _QUICK_RATIO_TRIGGERS = ["quick ratio", "acid", "速動"]
 
 
@@ -1718,7 +1852,7 @@ def _build_calculation_code(
     # ── CAGR ──────────────────────────────────────────────────────────────────
     if "cagr" in q_lower or "複合成長率" in q_lower:
         # Bug 3 fix: prefer the canonical the user asked about
-        v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower)
+        v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
             try:
                 yrs = abs(float(v2["year"]) - float(v1["year"])) or 1.0
@@ -1737,7 +1871,7 @@ def _build_calculation_code(
                     "변동", "change", "增加多少", "減少多少"]
     if any(t in q_lower for t in yoy_triggers):
         # Bug 3 fix: pass q_lower so _find_same_item_pair prefers the item the user asked about
-        v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower)
+        v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
             code_lines.append(f"# YoY: {v1['item']}")
             code_lines.append(f"result_yoy = yoy({v1['code_key']}, {v2['code_key']})")
