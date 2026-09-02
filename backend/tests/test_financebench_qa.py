@@ -1,18 +1,27 @@
 """
-End-to-end regression test using REAL questions from the FinanceBench
-open-source benchmark (patronus-ai/financebench, data/financebench_open_source.jsonl),
-filtered down to the 10 questions whose doc_name matches the 4 real 10-K PDFs
-this project already ships test fixtures for:
+End-to-end regression test against real 10-K PDFs and ground-truth answers.
 
-    3M_2022_10K.pdf, ACTIVISIONBLIZZARD_2019_10K.pdf,
-    AMCOR_2023_10K.pdf, ADOBE_2017_10K.pdf
+financebench_qa_subset.json holds every question from the FinanceBench
+open-source benchmark (patronus-ai/financebench on Hugging Face,
+https://huggingface.co/datasets/PatronusAI/financebench) whose doc_name
+matches a PDF fixture this project ships in tests/financebench_pdfs/ —
+fetched directly from the dataset's own rows (question/answer/question_type
+copied verbatim, not retyped or independently recomputed), so this stays a
+straightforward mirror of the official benchmark rather than a hand-curated
+subset. As of the last refresh that's 52 questions across ~19 distinct
+10-Ks. Re-running the fetch (see the datasets-server API,
+https://datasets-server.huggingface.co/rows?dataset=PatronusAI/financebench)
+and filtering by which doc_names have a matching PDF in
+tests/financebench_pdfs/ regenerates this file when new PDF fixtures are
+added.
 
-Unlike test_backend.py (which uses synthetic sample_reports.json data) and the
-tests/test_*.py unit suite (which uses hand-built PDF fixtures to test parser/
-chunker internals directly), THIS file is the only place in the project that
-exercises the full pipeline — parse real PDF -> classify -> retrieve -> PoT
-reasoning -> final answer — against ground-truth answers with known correct
-values, on the exact documents the project is meant to handle.
+Unlike the tests/test_*.py unit suite (which uses hand-built PDF fixtures to
+test parser/chunker internals directly), THIS file is the only place in the
+project that exercises the full pipeline — parse real PDF -> classify ->
+retrieve -> PoT reasoning -> final answer — against ground-truth answers with
+known correct values, on the exact documents the project is meant to handle.
+With this many real PDFs now indexed, a full run is slow (expect it to take
+well over 30 minutes under an LLM-backed orchestrator).
 
 Run directly for a human-readable pass/fail report:
     python tests/test_financebench_qa.py
@@ -41,8 +50,35 @@ QA_PATH = os.path.join(os.path.dirname(__file__), "financebench_qa_subset.json")
 DOC_TO_FILE = {
     "3M_2022_10K": ("3M_2022_10K.pdf", "3M"),
     "ACTIVISIONBLIZZARD_2019_10K": ("ACTIVISIONBLIZZARD_2019_10K.pdf", "Activision Blizzard"),
-    "AMCOR_2023_10K": ("AMCOR_2023_10K.pdf", "Amcor"),
+    "ADOBE_2015_10K": ("ADOBE_2015_10K.pdf", "Adobe"),
+    "ADOBE_2016_10K": ("ADOBE_2016_10K.pdf", "Adobe"),
     "ADOBE_2017_10K": ("ADOBE_2017_10K.pdf", "Adobe"),
+    "ADOBE_2022_10K": ("ADOBE_2022_10K.pdf", "Adobe"),
+    "AES_2022_10K": ("AES_2022_10K.pdf", "AES Corporation"),
+    "AMAZON_2017_10K": ("AMAZON_2017_10K.pdf", "Amazon"),
+    "AMCOR_2023_10K": ("AMCOR_2023_10K.pdf", "Amcor"),
+    "AMD_2015_10K": ("AMD_2015_10K.pdf", "AMD"),
+    "AMD_2022_10K": ("AMD_2022_10K.pdf", "AMD"),
+    "AMERICANWATERWORKS_2020_10K": ("AMERICANWATERWORKS_2020_10K.pdf", "American Water Works"),
+    "AMERICANWATERWORKS_2021_10K": ("AMERICANWATERWORKS_2021_10K.pdf", "American Water Works"),
+    "AMERICANWATERWORKS_2022_10K": ("AMERICANWATERWORKS_2022_10K.pdf", "American Water Works"),
+    "BESTBUY_2017_10K": ("BESTBUY_2017_10K.pdf", "Best Buy"),
+    "BESTBUY_2019_10K": ("BESTBUY_2019_10K.pdf", "Best Buy"),
+    "BLOCK_2016_10K": ("BLOCK_2016_10K.pdf", "Block"),
+    "BLOCK_2020_10K": ("BLOCK_2020_10K.pdf", "Block"),
+    "BOEING_2018_10K": ("BOEING_2018_10K.pdf", "Boeing"),
+    "COCACOLA_2017_10K": ("COCACOLA_2017_10K.pdf", "Coca-Cola"),
+    "COCACOLA_2021_10K": ("COCACOLA_2021_10K.pdf", "Coca-Cola"),
+    "COCACOLA_2022_10K": ("COCACOLA_2022_10K.pdf", "Coca-Cola"),
+    "CORNING_2020_10K": ("CORNING_2020_10K.pdf", "Corning"),
+    "CORNING_2021_10K": ("CORNING_2021_10K.pdf", "Corning"),
+    "CORNING_2022_10K": ("CORNING_2022_10K.pdf", "Corning"),
+    "CVSHEALTH_2018_10K": ("CVSHEALTH_2018_10K.pdf", "CVS Health"),
+    "GENERALMILLS_2019_10K": ("GENERALMILLS_2019_10K.pdf", "General Mills"),
+    "GENERALMILLS_2020_10K": ("GENERALMILLS_2020_10K.pdf", "General Mills"),
+    "GENERALMILLS_2022_10K": ("GENERALMILLS_2022_10K.pdf", "General Mills"),
+    "JOHNSON_JOHNSON_2022_10K": ("JOHNSON_JOHNSON_2022_10K.pdf", "Johnson & Johnson"),
+    "KRAFTHEINZ_2019_10K": ("KRAFTHEINZ_2019_10K.pdf", "Kraft Heinz"),
 }
 
 _NUM_RE = re.compile(r"-?\d[\d,]*\.?\d*")
