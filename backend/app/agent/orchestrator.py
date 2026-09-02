@@ -19,6 +19,7 @@ from app.agent.pot_reasoner import ProgramOfThoughtReasoner
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import LLMAnswerGenerator
+from app.agent.financial_formula_library import detect_formula, get_variable_aliases
 
 
 class FinAgentRAGOrchestrator:
@@ -102,7 +103,25 @@ class FinAgentRAGOrchestrator:
         })
 
         # ── Step 2: Query Decomposition (now context-aware) ──
-        if answer_mode == "NUMERIC":
+        # When the question matches a KNOWN formula (pot_reasoner will use
+        # this exact same formula to compute the answer), retrieval steps
+        # are generated directly from that formula's own required_vars
+        # alias lists — bypassing LLM-based decomposition, which is
+        # non-deterministic and has been confirmed to sometimes retrieve
+        # evidence unrelated to what the formula actually needs (real
+        # case: a 5-variable "days payable outstanding" formula got
+        # LLM-decomposed into sub-queries about cash and marketable
+        # securities on one run, and correctly about accounts
+        # payable/COGS/inventory on another run of the SAME question —
+        # sheer sampling variance). Deriving sub-queries from the
+        # formula's own aliases guarantees retrieval searches for
+        # exactly what extraction will later look for, deterministically.
+        formula_entry = detect_formula(query) if answer_mode == "NUMERIC" else None
+        if formula_entry:
+            sub_questions = self._build_formula_subquestions(
+                formula_entry, classification["entity"], classification["years"]
+            )
+        elif answer_mode == "NUMERIC":
             sub_questions = self.decomposer.decompose(
                 query,
                 target_metrics=classification["target_metrics"],
@@ -454,6 +473,67 @@ class FinAgentRAGOrchestrator:
             seen.add(hit_id)
             unique.append(hit)
         return unique
+
+    def _build_formula_subquestions(
+        self, formula_entry: Dict[str, Any], entity: str, years: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        One retrieval step per formula placeholder, using that
+        placeholder's OWN primary alias as the search text — the same
+        alias list _extract_formula_guided() will later score candidate
+        rows against, so retrieval and extraction are guaranteed to be
+        looking for the same thing, deterministically (see the call site
+        for why this replaces LLM decomposition for formula questions).
+
+        Year targeting mirrors _extract_formula_guided()'s own picking
+        rule for each formula shape:
+          - period_average: one step per placeholder per year in the
+            full requested range (every year is needed to compute the
+            average).
+          - multi_year (old/new pairs, e.g. fixed_asset_turnover,
+            dpo): "_old"-suffixed placeholders target the earliest
+            requested year, "_new"-suffixed or bare placeholders target
+            the latest.
+          - otherwise: every placeholder targets the single latest
+            requested year (or no year filter if none was named).
+        """
+        required_vars = get_variable_aliases(formula_entry)
+        is_multi_year = formula_entry.get("multi_year", False)
+        is_period_average = formula_entry.get("period_average", False)
+        sorted_years = sorted(set(years)) if years else []
+
+        steps: List[Dict[str, Any]] = []
+        for placeholder, aliases in required_vars.items():
+            # This codebase's alias lists consistently put the Chinese
+            # term first (e.g. required_vars["ap_old"] ==
+            # ["應付帳款", "accounts payable"]) — aliases[0] would search
+            # an all-English 10-K for Chinese text, retrieving nothing
+            # relevant (confirmed real case: DPO's own retrieval queries
+            # came out as "Amazon 應付帳款 2016" etc., matching zero real
+            # content in the English filing). Prefer the first ASCII/
+            # Latin-alphabet alias — every formula in the library also
+            # lists an English variant — falling back to aliases[0] only
+            # if none exists.
+            primary_alias = next((a for a in aliases if a.isascii()), aliases[0] if aliases else placeholder)
+            if is_period_average and sorted_years:
+                target_years = sorted_years
+            elif is_multi_year and len(sorted_years) >= 2:
+                target_years = [sorted_years[0] if placeholder.endswith("_old") else sorted_years[-1]]
+            elif sorted_years:
+                target_years = [sorted_years[-1]]
+            else:
+                target_years = [""]
+
+            for yr in target_years:
+                steps.append({
+                    "step": len(steps) + 1,
+                    "type": "retrieval",
+                    "query": f"{entity} {primary_alias} {yr}".strip(),
+                    "target_metric": placeholder,
+                    "target_year": yr,
+                    "source": "formula",
+                })
+        return steps
 
     def _build_non_numeric_subquestions(self, query: str, answer_mode: str) -> List[Dict[str, str]]:
         templates = {

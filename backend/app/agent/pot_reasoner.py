@@ -70,7 +70,8 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
                          "cash provided by operating", "營業活動現金"]),
     ("capex",          ["capital expenditure", "purchases of ppe",
                          "capital expenditure", "資本支出"]),
-    ("depreciation",   ["depreciation", "amortization", "d&a", "折舊"]),
+    ("depreciation",   ["depreciation and amortization", "depreciation & amortization",
+                         "depreciation", "amortization", "d&a", "折舊"]),
     ("fcf",            ["free cash flow", "fcf", "自由現金流"]),
     # Misc
     ("data_center_rev",["data center revenue", "data center"]),
@@ -203,6 +204,28 @@ def _extract_query_years(query: str) -> List[str]:
     return years
 
 
+def _kw_match(triggers, q_lower: str) -> bool:
+    """
+    True if q_lower contains ANY trigger with a genuine word boundary
+    immediately BEFORE it — not merely as a substring anywhere. Short
+    trigger keywords ("rd", "roa", "roe") are prone to appearing INSIDE
+    ordinary English words with no boundary at all (confirmed real
+    cases: "roa" — the Return on Assets keyword — matched inside
+    "Approach the question..." boilerplate instruction text with zero
+    relation to ROA, and separately "rd" — the R&D keyword — matched
+    inside "According to the details...", each time silently swapping
+    in an entirely unrelated calculation for what the question actually
+    asked). Only a LEFT boundary is required (not a trailing one) so
+    intentional word-stem triggers like "improv" (meant to match
+    "improve"/"improving"/"improved") and "declin" keep matching as
+    prefixes — a full \\b...\\b would break those.
+    """
+    for t in triggers:
+        if re.search(r'\b' + re.escape(t), q_lower):
+            return True
+    return False
+
+
 #: Language implying a two-point comparison, even when the query text
 #: only names the LATEST year (e.g. "improving...as of FY2023" implies
 #: vs. FY2022 — confirmed real case: "Does AMCOR have an improving gross
@@ -222,7 +245,7 @@ def _with_implied_trend_year(query_years: Optional[List[str]], q_lower: str) -> 
     compare against.
     """
     years = list(query_years or [])
-    if len(set(years)) == 1 and any(t in q_lower for t in _TREND_KEYWORDS):
+    if len(set(years)) == 1 and _kw_match(_TREND_KEYWORDS, q_lower):
         try:
             years = years + [str(int(years[0]) - 1)]
         except ValueError:
@@ -1619,7 +1642,12 @@ def _gen_formula_code(
         lines.append(f"result = round({expr}, 4)")
         lines.append(f"print(f'{label}: {{result}}x')")
     else:
-        lines.append(f"result = {expr}")
+        # Round even here — formulas with no "%"/"x" unit (e.g. DPO's
+        # day-count, unadjusted EBITDA's dollar sum) still routinely get
+        # asked for with an explicit "round to N decimal places"
+        # instruction; 2 decimals is a reasonable general default rather
+        # than leaving raw floating-point division noise in the answer.
+        lines.append(f"result = round({expr}, 2)")
         lines.append(f"print(f'{label}: {{result}}')")
     return lines
 
@@ -1660,9 +1688,8 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
 def _infer_target_canonical(query_lower: str) -> Optional[str]:
     """Return the most likely canonical label for the item the user is asking about."""
     for triggers, canonical in _QUERY_CANONICAL_HINTS:
-        for t in triggers:
-            if t in query_lower:
-                return canonical
+        if _kw_match(triggers, query_lower):
+            return canonical
     return None
 
 
@@ -1688,6 +1715,16 @@ def _find_same_item_pair(
     about). If the target canonical doesn't cover both requested years,
     that canonical is skipped entirely rather than guessing a different
     pair of years for it.
+
+    If the query names a SPECIFIC metric (target is not None) but that
+    metric was never extracted at all, this returns (None, None) rather
+    than falling through to try unrelated canonicals — confirmed real
+    case: "What is Amazon's year-over-year change in REVENUE...?" had no
+    "revenue" canonical anywhere in the retrieved evidence, so the old
+    fall-through behavior computed YoY growth of "cash and cash
+    equivalents" instead (the first canonical that happened to have 2+
+    years of data) — a number with nothing to do with what was asked.
+    Honest "insufficient data" beats a confidently wrong unrelated metric.
     """
     # Group by canonical
     groups: Dict[str, List[Dict]] = {}
@@ -1697,9 +1734,12 @@ def _find_same_item_pair(
     # Determine priority order: put query-relevant canonical first
     target = _infer_target_canonical(query_lower) if query_lower else None
     canonical_order = list(groups.keys())
-    if target and target in canonical_order:
-        canonical_order.remove(target)
-        canonical_order.insert(0, target)
+    if target:
+        if target in canonical_order:
+            canonical_order.remove(target)
+            canonical_order.insert(0, target)
+        else:
+            return None, None
 
     specific_years = sorted(set(query_years)) if query_years and len(set(query_years)) >= 2 else None
 
@@ -1824,6 +1864,8 @@ _MARGIN_MAP: List[Tuple[List[str], str, str, str]] = [
                                     "net_income",    "revenue",    "Net Profit Margin"),
     (["r&d", "rd", "研發費用佔"],   "rd_expense",    "revenue",    "R&D % of Revenue"),
     (["sg&a", "sga", "推銷"],       "sga",           "revenue",    "SG&A % of Revenue"),
+    (["d&a", "depreciation and amortization", "depreciation & amortization",
+      "折舊攤銷佔"],                "depreciation",  "revenue",    "D&A % of Revenue"),
     (["cost ratio", "cogs ratio"],  "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
     (["capex%", "capex ratio"],     "capex",          "revenue",   "CapEx % of Revenue"),
 ]
@@ -1899,7 +1941,7 @@ def _build_calculation_code(
     query_years = _with_implied_trend_year(query_years, q_lower)
 
     # ── CAGR ──────────────────────────────────────────────────────────────────
-    if "cagr" in q_lower or "複合成長率" in q_lower:
+    if _kw_match(["cagr"], q_lower) or "複合成長率" in q_lower:
         # Bug 3 fix: prefer the canonical the user asked about
         v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
@@ -1918,7 +1960,7 @@ def _build_calculation_code(
     # ── YoY Growth ────────────────────────────────────────────────────────────
     yoy_triggers = ["yoy", "year over year", "成長率", "年增", "growth rate", "growth",
                     "변동", "change", "增加多少", "減少多少"]
-    if any(t in q_lower for t in yoy_triggers):
+    if _kw_match(yoy_triggers, q_lower):
         # Bug 3 fix: pass q_lower so _find_same_item_pair prefers the item the user asked about
         v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
@@ -1931,7 +1973,7 @@ def _build_calculation_code(
             return True
 
     # ── ROE ───────────────────────────────────────────────────────────────────
-    if any(t in q_lower for t in _ROE_TRIGGERS):
+    if _kw_match(_ROE_TRIGGERS, q_lower):
         n, d = _find_pair_for_margin(groups, "net_income", "equity", preferred_year)
         if n and d:
             code_lines.append(f"# ROE = Net Income / Equity")
@@ -1941,7 +1983,7 @@ def _build_calculation_code(
             return True
 
     # ── ROA ───────────────────────────────────────────────────────────────────
-    if any(t in q_lower for t in _ROA_TRIGGERS):
+    if _kw_match(_ROA_TRIGGERS, q_lower):
         n, d = _find_pair_for_margin(groups, "net_income", "total_assets", preferred_year)
         if n and d:
             code_lines.append(f"# ROA = Net Income / Total Assets")
@@ -1951,7 +1993,7 @@ def _build_calculation_code(
             return True
 
     # ── Current Ratio ─────────────────────────────────────────────────────────
-    if any(t in q_lower for t in _CURRENT_RATIO_TRIGGERS):
+    if _kw_match(_CURRENT_RATIO_TRIGGERS, q_lower):
         ca_list = groups.get("current_assets", [])
         cl_list = groups.get("current_liab", [])
         if ca_list and cl_list:
@@ -1979,7 +2021,7 @@ def _build_calculation_code(
             return True
 
     # ── Quick Ratio ───────────────────────────────────────────────────────────
-    if any(t in q_lower for t in _QUICK_RATIO_TRIGGERS):
+    if _kw_match(_QUICK_RATIO_TRIGGERS, q_lower):
         ca_list = groups.get("current_assets", [])
         inv_list = groups.get("inventory", [])
         cl_list = groups.get("current_liab", [])
@@ -2039,7 +2081,7 @@ def _build_calculation_code(
 
     # ── Margin / Ratio ────────────────────────────────────────────────────────
     for triggers, num_c, den_c, label in _MARGIN_MAP:
-        if any(t in q_lower for t in triggers):
+        if _kw_match(triggers, q_lower):
             distinct_years = sorted(set(query_years or []))
             if len(distinct_years) >= 2:
                 year_exprs = []

@@ -65,6 +65,8 @@ _METRIC_KEYWORDS = {
     "current_liab":     ["current liabilities", "流動負債"],
     "inventory":        ["inventory", "存貨", "inventories"],
     "accounts_rec":     ["accounts receivable", "應收帳款", "receivables"],
+    "accounts_payable": ["accounts payable", "應付帳款", "payables"],
+    "dpo":              ["days payable outstanding", "dpo"],
     "net_debt":         ["net debt", "淨負債"],
     "debt":             ["debt", "long-term debt", "short-term debt", "借款", "負債"],
     "working_capital":  ["working capital", "營運資金"],
@@ -114,6 +116,8 @@ _STATEMENT_TYPE_MAP: Dict[str, str] = {
     "current_liab":     "balance_sheet",
     "inventory":        "balance_sheet",
     "accounts_rec":     "balance_sheet",
+    "accounts_payable": "balance_sheet",
+    "dpo":              "balance_sheet",
     "net_debt":         "balance_sheet",
     "debt":             "balance_sheet",
     "working_capital":  "balance_sheet",
@@ -162,6 +166,26 @@ _EXCLUSION_KEYWORDS = [
     "acquisition", "organic", "merger",
     "剔除", "排除", "不含", "併購", "併入",
 ]
+
+
+def _kw_match(triggers, q_lower: str) -> bool:
+    """
+    True if q_lower contains ANY trigger with a genuine word boundary
+    immediately BEFORE it — not merely as a substring anywhere. Short
+    trigger keywords ("roa", "roe") are prone to appearing INSIDE
+    ordinary English words with no boundary at all (confirmed real case:
+    "roa" — the Return on Assets keyword — matched inside "Approach the
+    question..." boilerplate instruction text with zero relation to ROA,
+    silently misclassifying the whole question). Only a LEFT boundary is
+    required (not a trailing one) so multi-word phrases still match
+    normally regardless of what follows them. Duplicated from
+    pot_reasoner._kw_match (same rationale) since this module builds its
+    own classification independently.
+    """
+    for t in triggers:
+        if re.search(r'\b' + re.escape(t), q_lower):
+            return True
+    return False
 
 
 def _extract_years(query: str) -> List[str]:
@@ -407,19 +431,15 @@ class FinanceBenchClassifier:
         """Return a list of canonical metric keys found in the query."""
         found = []
         for metric_key, keywords in _METRIC_KEYWORDS.items():
-            for kw in keywords:
-                if kw in q_lower:
-                    if metric_key not in found:
-                        found.append(metric_key)
-                    break
+            if _kw_match(keywords, q_lower):
+                found.append(metric_key)
         return found
 
     def _detect_calc_type(self, q_lower: str) -> str:
         """Detect the primary calculation type requested."""
         for calc_key, keywords in _CALC_KEYWORDS.items():
-            for kw in keywords:
-                if kw in q_lower:
-                    return calc_key
+            if _kw_match(keywords, q_lower):
+                return calc_key
         return ""
 
     def _classify_question_type(self, target_metrics, calc_type, years, has_expl, has_assess, has_excl) -> str:

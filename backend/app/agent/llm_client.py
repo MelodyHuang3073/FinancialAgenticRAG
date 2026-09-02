@@ -119,10 +119,20 @@ class LLMAnswerGenerator:
 
         pot_summary = ""
         if pot_res:
+            result_value = pot_res.get("result_value")
             pot_summary = (
-                f"\nPoT result: {pot_res.get('result_value')}\n"
+                f"\nPoT result: {result_value}\n"
                 f"Sandbox output: {pot_res.get('output_log', '')[:600]}"
             )
+            if result_value is not None:
+                pot_summary += (
+                    f"\n⚠️ CRITICAL: The PoT result above ({result_value}) was computed by a "
+                    "verified Python sandbox, NOT by you. You MUST quote this exact number "
+                    "(reformatted for units/rounding exactly as the question asks, but not "
+                    "recalculated) as your answer. Do NOT redo the arithmetic yourself from "
+                    "the raw evidence figures below -- independent re-derivation has produced "
+                    "wrong numbers before even when every input you cited was correct."
+                )
             if pot_res.get("is_degraded_formula"):
                 pot_summary += (
                     f"\n⚠️ CRITICAL: {pot_res.get('degraded_note', '')} "
