@@ -14,6 +14,7 @@ Each entry in FORMULA_LIBRARY contains:
   unit          : "%" | "x" | "" (times, ratio, or raw value)
 """
 
+import re
 from typing import Dict, Any, List, Optional
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,7 +133,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
 
     # ── Return Ratios ─────────────────────────────────────────────────────────
     "roe": {
-        "keywords_zh": ["股東權益報酬率", "權益報酬率", "roe"],
+        "keywords_zh": ["股東權益報酬率", "權益報酬率"],
         "keywords_en": ["return on equity", "roe"],
         "formula_expr": "net_income / shareholders_equity",
         "required_vars": {
@@ -144,7 +145,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "period_average": True,
     },
     "roa": {
-        "keywords_zh": ["資產報酬率", "roa"],
+        "keywords_zh": ["資產報酬率"],
         "keywords_en": ["return on assets", "roa"],
         "formula_expr": "net_income / total_assets",
         "required_vars": {
@@ -156,7 +157,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "period_average": True,
     },
     "roic": {
-        "keywords_zh": ["投入資本報酬率", "roic"],
+        "keywords_zh": ["投入資本報酬率"],
         "keywords_en": ["return on invested capital", "roic"],
         "formula_expr": "nopat / invested_capital",
         "required_vars": {
@@ -271,7 +272,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
 
     # ── Per Share ─────────────────────────────────────────────────────────────
     "eps": {
-        "keywords_zh": ["每股盈餘", "eps"],
+        "keywords_zh": ["每股盈餘"],
         "keywords_en": ["eps", "earnings per share"],
         "formula_expr": "net_income / shares_outstanding",
         "required_vars": {
@@ -320,7 +321,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "multi_year": True,
     },
     "cagr_generic": {
-        "keywords_zh": ["複合成長率", "cagr"],
+        "keywords_zh": ["複合成長率"],
         "keywords_en": ["cagr", "compound annual growth", "compound growth rate"],
         "formula_expr": "(value_end / value_start) ** (1 / years) - 1",
         "required_vars": {
@@ -369,6 +370,17 @@ def detect_formula(query: str) -> Optional[Dict[str, Any]]:
 
     Priority: exact Chinese keyword match > English keyword match.
     If multiple match, the first found wins (ordering in FORMULA_LIBRARY matters).
+
+    English keywords are matched on a WORD BOUNDARY, not a bare substring
+    — several formula abbreviations are short enough to appear inside
+    ordinary English words (confirmed real case: "roa" — the keyword for
+    Return on Assets — matched inside "Approach the question asked by...",
+    a boilerplate instruction sentence with no relation to ROA at all,
+    causing the whole formula, and thus the whole calculation, to be
+    wrong). Chinese keywords are left as plain substring matches since
+    Chinese text has no whitespace word boundaries to anchor on, and the
+    library's Chinese keywords are multi-character phrases unlikely to
+    collide with unrelated text the way 3-letter English abbreviations do.
     """
     q_lower = query.lower()
 
@@ -381,7 +393,7 @@ def detect_formula(query: str) -> Optional[Dict[str, Any]]:
     # Second pass: English keywords
     for key, entry in FORMULA_LIBRARY.items():
         for kw in entry.get("keywords_en", []):
-            if kw in q_lower:
+            if re.search(r'\b' + re.escape(kw) + r'\b', q_lower):
                 return {**entry, "formula_key": key}
 
     return None
