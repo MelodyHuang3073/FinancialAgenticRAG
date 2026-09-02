@@ -6,6 +6,148 @@ import {
   Paperclip, AlertCircle, CheckCircle
 } from 'lucide-react';
 
+/* ─── Extract every contiguous Markdown pipe-table block out of a page of
+   mixed prose + table text (mirrors chunker.py's table-block detection,
+   kept minimal since this is display-only). A real financial-statement
+   page routinely has more than one distinct table (e.g. a cash-flow
+   statement's operating/investing/financing sections after merging, or a
+   balance sheet plus a supplemental notes table on the same page) —
+   returning only the single largest block would silently drop the rest
+   from the Source Evidence panel even though parent_content genuinely
+   carries all of them. ─── */
+function extractMarkdownTableBlocks(text) {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const isTableLine = (l) => {
+    const t = l.trim();
+    return t.startsWith('|') && t.includes('|');
+  };
+  const blocks = [];
+  let current = [];
+  for (const line of lines) {
+    if (isTableLine(line)) {
+      current.push(line);
+    } else if (current.length) {
+      blocks.push(current);
+      current = [];
+    }
+  }
+  if (current.length) blocks.push(current);
+  // A genuine table block needs at least 2 lines (header + separator, or
+  // header + one data row) — a lone '|'-containing line is almost always
+  // the "Company: X | Document: Y | Page: Z |" metadata prefix that
+  // starts every passage, not a real table, and must not be rendered as
+  // a fabricated one-row table.
+  return blocks.filter((b) => b.length >= 2).map((b) => b.join('\n'));
+}
+
+/* ─── Re-pad a Markdown pipe-table block so every '|' lines up vertically
+   in a monospace view — i.e. the "properly aligned raw Markdown" form you'd
+   get from a formatter, as opposed to the loosely-spaced text the backend
+   emits. Numeric-looking columns are right-aligned (label columns stay
+   left-aligned), matching how financial statements are normally read. ─── */
+function formatAlignedMarkdownTable(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return text;
+
+  const splitRow = (l) => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  const rows = lines.map(splitRow);
+  const isSeparator = (row) => row.every(c => /^:?-+:?$/.test(c));
+  // '—'/'–'/'-' alone is the standard financial-statement placeholder for
+  // a zero/blank period — treat it as numeric so it doesn't break right-
+  // alignment for an otherwise all-numeric column.
+  const isNumericCell = (c) => c === '' || /^[—–-]$/.test(c) || /^[(\-$]?[\d,]+(\.\d+)?\)?%?$/.test(c);
+
+  const nCols = Math.max(...rows.map(r => r.length));
+  const norm = rows.map(r => {
+    const padded = [...r];
+    while (padded.length < nCols) padded.push('');
+    return padded;
+  });
+
+  const widths = new Array(nCols).fill(3);
+  const numericCol = new Array(nCols).fill(true);
+  norm.forEach((row) => {
+    if (isSeparator(row)) return;
+    row.forEach((cell, ci) => {
+      widths[ci] = Math.max(widths[ci], cell.length);
+      if (cell !== '' && !isNumericCell(cell)) numericCol[ci] = false;
+    });
+  });
+
+  const padCell = (cell, ci) => {
+    const w = widths[ci];
+    const gap = ' '.repeat(Math.max(0, w - cell.length));
+    return numericCol[ci] && ci > 0 ? gap + cell : cell + gap;
+  };
+
+  return norm
+    .map((row) => {
+      if (isSeparator(row)) {
+        return '| ' + widths.map((w, ci) => (numericCol[ci] && ci > 0 ? '-'.repeat(Math.max(1, w - 1)) + ':' : '-'.repeat(w))).join(' | ') + ' |';
+      }
+      return '| ' + row.map((c, ci) => padCell(c, ci)).join(' | ') + ' |';
+    })
+    .join('\n');
+}
+
+/* ─── Markdown Table renderer ─── */
+function MarkdownTable({ text }) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  // Detect if this looks like a pipe-delimited table block
+  const tableLines = lines.filter(l => l.startsWith('|') || l.includes(' | '));
+  if (tableLines.length < 2) return <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12, color: '#334155', margin: 0 }}>{text}</pre>;
+
+  // Parse header + separator + rows (only from the actual table lines —
+  // stray prose lines without '|' must never become bogus single-cell rows)
+  const rows = tableLines.map(l => l.split('|').map(c => c.trim()).filter(c => c !== ''));
+  const isSeparator = (row) => row.every(c => /^[-:]+$/.test(c));
+  const headerRowIdx = rows.findIndex((r, i) => i + 1 < rows.length && isSeparator(rows[i + 1]));
+
+  if (headerRowIdx === -1) {
+    // No proper header found — render as simple definition rows
+    return (
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={ri} style={{ background: ri % 2 === 0 ? '#f8fafc' : '#fff' }}>
+              {row.map((cell, ci) => (
+                <td key={ci} style={{ border: '1px solid #e2e8f0', padding: '4px 8px', color: '#334155' }}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  const headerRow = rows[headerRowIdx];
+  const dataRows = rows.filter((_, i) => i !== headerRowIdx && !isSeparator(rows[i]));
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: '#f1f5f9' }}>
+            {headerRow.map((h, i) => (
+              <th key={i} style={{ border: '1px solid #cbd5e1', padding: '5px 10px', textAlign: 'left', fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {dataRows.map((row, ri) => (
+            <tr key={ri} style={{ background: ri % 2 === 0 ? '#fff' : '#f8fafc' }}>
+              {row.map((cell, ci) => (
+                <td key={ci} style={{ border: '1px solid #e2e8f0', padding: '4px 10px', color: ci === 0 ? '#0f172a' : '#334155', fontWeight: ci === 0 ? 600 : 400 }}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /* ─── Markdown-like bold renderer ─── */
 function AnswerText({ text }) {
   if (!text) return null;
@@ -80,8 +222,13 @@ function formatResultValue(value) {
   return String(value);
 }
 
-function ResultSummaryCard({ value, label = '最終計算結果' }) {
-  if (value === null || value === undefined || value === '') return null;
+function ResultSummaryCard({ value, series, delta, direction, label = '最終計算結果' }) {
+  // A question asking "did X improve/decline between year A and year B" is
+  // answered by the CHANGE, not a single year's snapshot — when the
+  // backend computed a year-over-year comparison (series has both years),
+  // show that comparison as the headline instead of just the latest value.
+  const hasSeries = Array.isArray(series) && series.length >= 2;
+  if (!hasSeries && (value === null || value === undefined || value === '')) return null;
 
   return (
     <div style={{
@@ -93,11 +240,33 @@ function ResultSummaryCard({ value, label = '最終計算結果' }) {
       boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: '#166534', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-        {label}
+        {hasSeries ? `${label}（${series[0].year} → ${series[series.length - 1].year}）` : label}
       </div>
-      <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-        {formatResultValue(value)}
-      </div>
+      {hasSeries ? (
+        <div style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          {series.map((pt, i) => (
+            <span key={pt.year} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+              {i > 0 && <span style={{ fontSize: 20, color: '#6ee7b7' }}>→</span>}
+              <span style={{ fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
+                {formatResultValue(pt.value)}
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#059669', marginLeft: 4 }}>
+                  ({pt.year})
+                </span>
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
+          {formatResultValue(value)}
+        </div>
+      )}
+      {hasSeries && delta !== null && delta !== undefined && (
+        <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: '#047857' }}>
+          {direction === 'increased' ? '↑' : direction === 'decreased' ? '↓' : '—'}{' '}
+          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}
+        </div>
+      )}
       <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
         Review the number first, then expand the reasoning below.
       </div>
@@ -186,6 +355,7 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
   const [showReasoning, setShowReasoning] = useState(true);
   const [showTraceDetails, setShowTraceDetails] = useState(false);
   const [expandedEvidence, setExpandedEvidence] = useState(null);
+  const [evidenceViewMode, setEvidenceViewMode] = useState({}); // { [index]: 'table' | 'markdown' }
   const { summaryText, detailText } = splitAnswerText(msg.result.final_answer);
 
   return (
@@ -214,7 +384,12 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
           borderRadius: 18, padding: '20px 24px',
           boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
         }}>
-          <ResultSummaryCard value={msg.result.result_value} />
+          <ResultSummaryCard
+            value={msg.result.result_value}
+            series={msg.result.result_series}
+            delta={msg.result.result_delta}
+            direction={msg.result.result_direction}
+          />
 
           {summaryText && (
             <div style={{ marginBottom: 12 }}>
@@ -253,9 +428,62 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {msg.result.evidence_sources.map((ev, si) => {
                           const isExpanded = expandedEvidence === si;
-                          const fullContent = ev.content || '';
+
+                          // A 'table_row' hit's own content is just the ONE
+                          // matched line item (e.g. "Line Item: Net sales |
+                          // FY2023: 14,694 | ..."). Show the full table(s) it
+                          // came from — pulled from parent_content — instead,
+                          // so the panel displays the complete table
+                          // structure rather than a single isolated row.
+                          //
+                          // isTable is ONLY true when extractMarkdownTableBlocks
+                          // found at least one genuine multi-line pipe block.
+                          // Every passage's content/parent_content ALSO starts
+                          // with a "Company: X | Document: Y | Page: Z |"
+                          // metadata prefix that itself contains '|' characters
+                          // as a plain field separator — a naive "does this
+                          // text contain any '|'" check would misfire on that
+                          // prefix and render a bogus one-column "table" out
+                          // of ordinary prose whenever real table detection
+                          // found nothing. If parent_content isn't a clean
+                          // Markdown table (e.g. an older ingestion path, or a
+                          // page whose table structure couldn't be recovered),
+                          // fall back to showing it as plain preformatted
+                          // text — still the full context, just not
+                          // rendered as a fabricated table.
+                          //
+                          // A real financial-statement page can legitimately
+                          // contain MORE than one distinct table (e.g. a
+                          // cash-flow statement's operating/investing/
+                          // financing sections, or a balance sheet plus a
+                          // supplemental notes table) — every block found is
+                          // kept and rendered on its own, not just the
+                          // largest one, so nothing parent_content actually
+                          // carries gets silently dropped from this panel.
+                          const tableCandidate = ev.chunk_type === 'table_row'
+                            ? (ev.parent_content || ev.content || '')
+                            : (ev.content || '');
+                          const fullTableBlocks = extractMarkdownTableBlocks(tableCandidate);
+                          const isTable = fullTableBlocks.length > 0;
+                          const fullContent = isTable
+                            ? fullTableBlocks.join('\n\n')
+                            : ((ev.chunk_type === 'table_row' ? (ev.parent_content || ev.content) : ev.content) || '');
+                          const matchedLineItem = ev.chunk_type === 'table_row'
+                            ? (ev.content || '').match(/Line Item:\s*([^|]+)/)?.[1]?.trim()
+                            : null;
+
+                          // Section colour coding
+                          const sectionColors = {
+                            income_statement: { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe' },
+                            balance_sheet:    { bg: '#f0fdf4', text: '#15803d', border: '#bbf7d0' },
+                            cash_flow:        { bg: '#fefce8', text: '#a16207', border: '#fde68a' },
+                            notes_general:    { bg: '#fdf4ff', text: '#7e22ce', border: '#e9d5ff' },
+                            mda:              { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa' },
+                          };
+                          const sc = sectionColors[ev.section] || { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0' };
+
                           return (
-                            <div key={si} style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#fafafa' }}>
+                            <div key={si} style={{ border: `1px solid ${sc.border}`, borderRadius: 10, background: '#fafafa' }}>
                               <button
                                 onClick={() => setExpandedEvidence(isExpanded ? null : si)}
                                 style={{
@@ -263,21 +491,106 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                                   padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: 8,
                                 }}
                               >
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  {/* Title row */}
                                   <span style={{ fontSize: 12, color: '#334155', fontWeight: 600 }}>
                                     [{ev.company || 'Company'}] {ev.table_name || 'Source chunk'}
                                   </span>
+
+                                  {/* Badge row: section + chunk_type */}
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                                    {ev.section && (
+                                      <span style={{
+                                        fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
+                                        padding: '1px 7px', borderRadius: 999,
+                                        background: sc.bg, color: sc.text, border: `1px solid ${sc.border}`,
+                                      }}>
+                                        {ev.section}
+                                      </span>
+                                    )}
+                                    {ev.chunk_type && (
+                                      <span style={{
+                                        fontSize: 10, fontFamily: 'monospace',
+                                        padding: '1px 7px', borderRadius: 999,
+                                        background: ev.chunk_type === 'table_row' ? '#fef9c3' : '#f1f5f9',
+                                        color: ev.chunk_type === 'table_row' ? '#854d0e' : '#475569',
+                                        border: `1px solid ${ev.chunk_type === 'table_row' ? '#fde68a' : '#e2e8f0'}`,
+                                      }}>
+                                        {ev.chunk_type === 'table_row' ? '📊 table_row' : '📝 ' + ev.chunk_type}
+                                      </span>
+                                    )}
+                                    {ev.period && (
+                                      <span style={{
+                                        fontSize: 10, fontFamily: 'monospace',
+                                        padding: '1px 7px', borderRadius: 999,
+                                        background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0',
+                                      }}>
+                                        {ev.period}
+                                      </span>
+                                    )}
+                                    <span style={{
+                                      fontSize: 10, fontFamily: 'monospace',
+                                      padding: '1px 7px', borderRadius: 999,
+                                      background: '#f8fafc', color: '#94a3b8', border: '1px solid #e2e8f0',
+                                    }}>
+                                      score: {(ev.relevance_score || 0).toFixed(3)}
+                                    </span>
+                                  </div>
+
+                                  {/* Sub-question label */}
                                   {ev.sub_question && (
                                     <span style={{ fontSize: 10, color: '#6366f1', fontFamily: 'monospace' }}>
-                                      ↳ 檢索子問題: {ev.sub_question}
+                                      ↳ 検索子問題: {ev.sub_question}
                                     </span>
                                   )}
                                 </div>
                                 <span style={{ fontSize: 11, color: '#6366f1', flexShrink: 0 }}>{isExpanded ? 'Collapse' : 'View content'}</span>
                               </button>
                               {isExpanded && (
-                                <div style={{ padding: '0 12px 12px', fontSize: 12, lineHeight: 1.65, color: '#475569', whiteSpace: 'pre-wrap' }}>
-                                  {fullContent ? fullContent : 'No chunk content available'}
+                                <div style={{ padding: '0 12px 14px' }}>
+                                  {isTable && matchedLineItem && (
+                                    <p style={{ fontSize: 11, color: '#854d0e', marginBottom: 6 }}>
+                                      Matched row: <strong>{matchedLineItem}</strong> (full table{fullTableBlocks.length > 1 ? 's' : ''} shown below)
+                                    </p>
+                                  )}
+                                  {isTable && (
+                                    <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                                      {['markdown', 'table'].map((mode) => (
+                                        <button
+                                          key={mode}
+                                          onClick={() => setEvidenceViewMode((prev) => ({ ...prev, [si]: mode }))}
+                                          style={{
+                                            fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+                                            padding: '2px 9px', borderRadius: 999,
+                                            border: `1px solid ${(evidenceViewMode[si] || 'markdown') === mode ? '#6366f1' : '#e2e8f0'}`,
+                                            background: (evidenceViewMode[si] || 'markdown') === mode ? '#eef2ff' : '#fff',
+                                            color: (evidenceViewMode[si] || 'markdown') === mode ? '#4338ca' : '#94a3b8',
+                                          }}
+                                        >
+                                          {mode === 'table' ? '表格 Table' : '對齊 Markdown'}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {isTable
+                                    ? (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {fullTableBlocks.map((block, bi) => (
+                                          <div key={bi}>
+                                            {fullTableBlocks.length > 1 && (
+                                              <p style={{ fontSize: 10, color: '#94a3b8', margin: '0 0 4px', fontFamily: 'monospace' }}>
+                                                Table {bi + 1} of {fullTableBlocks.length}
+                                              </p>
+                                            )}
+                                            {(evidenceViewMode[si] || 'markdown') === 'markdown'
+                                              ? <pre style={{ whiteSpace: 'pre', overflowX: 'auto', fontSize: 12, lineHeight: 1.6, color: '#334155', margin: 0, fontFamily: 'monospace', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: 10 }}>{formatAlignedMarkdownTable(block)}</pre>
+                                              : <MarkdownTable text={block} />}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )
+                                    : <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: '#475569', margin: 0, fontFamily: 'monospace' }}>{fullContent || 'No chunk content available'}</pre>
+                                  }
                                 </div>
                               )}
                             </div>

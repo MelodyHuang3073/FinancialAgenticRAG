@@ -32,10 +32,14 @@ class ASTSecurityChecker(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def execute_pot_code(code_str: str, timeout_sec: float = 5.0) -> Tuple[bool, Any, str]:
+def execute_pot_code(code_str: str, timeout_sec: float = 5.0) -> Tuple[bool, Any, str, Dict[str, Any]]:
     """
     Executes Program-of-Thought Python code safely.
-    Returns: (success: bool, result_value: Any, stdout_or_error: str)
+    Returns: (success: bool, result_value: Any, stdout_or_error: str, locals: Dict[str, Any])
+    `locals` is the full sandbox local namespace after execution (empty dict
+    on failure) — lets a caller pull out named intermediate variables (e.g.
+    a multi-year comparison's per-year values) beyond just the single
+    `result` value, without widening the sandbox's own contract further.
     """
     # Clean code block backticks if present
     code_clean = code_str.strip()
@@ -52,11 +56,11 @@ def execute_pot_code(code_str: str, timeout_sec: float = 5.0) -> Tuple[bool, Any
         checker = ASTSecurityChecker()
         checker.visit(parsed_ast)
     except SyntaxError as se:
-        return False, None, f"SyntaxError in PoT code: {se}"
+        return False, None, f"SyntaxError in PoT code: {se}", {}
     except SafeSandboxError as sse:
-        return False, None, str(sse)
+        return False, None, str(sse), {}
     except Exception as e:
-        return False, None, f"AST Parsing Error: {str(e)}"
+        return False, None, f"AST Parsing Error: {str(e)}", {}
 
     # Custom helper financial functions inside sandbox
     def cagr(v_begin: float, v_end: float, n_years: float) -> float:
@@ -118,9 +122,9 @@ def execute_pot_code(code_str: str, timeout_sec: float = 5.0) -> Tuple[bool, Any
             last_key = list(safe_locals.keys())[-1]
             res_val = safe_locals[last_key]
 
-        return True, res_val, output_str or (f"result = {res_val}" if res_val is not None else "Executed successfully.")
+        return True, res_val, output_str or (f"result = {res_val}" if res_val is not None else "Executed successfully."), safe_locals
     except Exception as e:
         err_msg = f"{type(e).__name__}: {str(e)}"
-        return False, None, err_msg
+        return False, None, err_msg, {}
     finally:
         sys.stdout = old_stdout

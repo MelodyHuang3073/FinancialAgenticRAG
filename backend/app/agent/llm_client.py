@@ -1,6 +1,8 @@
 import os
 from typing import Any, Dict, List, Optional
 
+from app.tools.table_parser import is_markdown_separator_row
+
 try:
     from dotenv import load_dotenv
 except Exception:  # pragma: no cover
@@ -11,6 +13,50 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 if load_dotenv is not None and os.path.exists(ENV_PATH):
     load_dotenv(ENV_PATH)
+
+
+def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_rows: int = 10) -> str:
+    """
+    Truncate one evidence item's content for the LLM prompt.
+
+    A plain character-count slice ([:max_chars]) can land in the middle of
+    a Markdown table row, corrupting it (e.g. cutting a '|---|---|'
+    separator or a data row in half) and confusing the LLM about which
+    number belongs to which column/period. So:
+      - If `content` contains a Markdown table (detected via a '|---|'
+        separator row), it is never character-truncated. Instead it's
+        row-truncated: the header row + separator row + up to
+        `max_table_rows` data rows are kept, with an
+        "...(more rows omitted)" marker appended if rows were dropped.
+        Anything before the header (e.g. a "Company: X | Report: Y |
+        Period: Z" metadata prefix) is preserved as-is.
+      - Otherwise (ordinary narrative text), the original [:max_chars]
+        behaviour is unchanged.
+    """
+    lines = content.split("\n")
+    sep_idx = next(
+        (i for i, l in enumerate(lines) if i > 0 and is_markdown_separator_row(l)),
+        None,
+    )
+    if sep_idx is None:
+        return content[:max_chars]
+
+    prefix_lines = lines[:sep_idx - 1]
+    header_line = lines[sep_idx - 1]
+    separator_line = lines[sep_idx]
+
+    data_lines: List[str] = []
+    for line in lines[sep_idx + 1:]:
+        stripped = line.strip()
+        if not stripped or "|" not in stripped:
+            break
+        data_lines.append(line)
+
+    kept_rows = data_lines[:max_table_rows]
+    result_lines = prefix_lines + [header_line, separator_line] + kept_rows
+    if len(data_lines) > max_table_rows:
+        result_lines.append("...(more rows omitted)")
+    return "\n".join(result_lines)
 
 
 class LLMAnswerGenerator:
@@ -66,16 +112,33 @@ class LLMAnswerGenerator:
             return None
 
         evidence_text = "\n".join(
-            f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] {item.get('content', '')[:600]}"
+            f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] "
+            f"{_truncate_evidence_content(item.get('content', ''))}"
             for item in evidence[:4]
         )
 
         pot_summary = ""
         if pot_res:
+            result_value = pot_res.get("result_value")
             pot_summary = (
-                f"\nPoT result: {pot_res.get('result_value')}\n"
+                f"\nPoT result: {result_value}\n"
                 f"Sandbox output: {pot_res.get('output_log', '')[:600]}"
             )
+            if result_value is not None:
+                pot_summary += (
+                    f"\n⚠️ CRITICAL: The PoT result above ({result_value}) was computed by a "
+                    "verified Python sandbox, NOT by you. You MUST quote this exact number "
+                    "(reformatted for units/rounding exactly as the question asks, but not "
+                    "recalculated) as your answer. Do NOT redo the arithmetic yourself from "
+                    "the raw evidence figures below -- independent re-derivation has produced "
+                    "wrong numbers before even when every input you cited was correct."
+                )
+            if pot_res.get("is_degraded_formula"):
+                pot_summary += (
+                    f"\n⚠️ CRITICAL: {pot_res.get('degraded_note', '')} "
+                    "You MUST explicitly state this limitation in your answer -- do not "
+                    "present the shown number as the exact metric the question asked for."
+                )
 
         verification_summary = ""
         if verification_res:

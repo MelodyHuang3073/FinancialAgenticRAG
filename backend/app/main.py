@@ -1,5 +1,4 @@
 import os
-import json
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -19,7 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SAMPLE_DATA_PATH = os.path.join(os.path.dirname(__file__), "sample_data", "sample_reports.json")
 vector_store = FinancialVectorStoreManager(load_sample_data=False)
 file_parser = FinancialFileParser()
 orchestrator = FinAgentRAGOrchestrator(vector_store=vector_store)
@@ -43,10 +41,6 @@ def health_check():
 
 @app.get("/api/sample-prompts")
 def get_sample_prompts():
-    return []
-
-@app.get("/api/sample-data")
-def get_sample_data():
     return []
 
 @app.get("/api/uploaded-files")
