@@ -85,6 +85,13 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Gross Margin",
         "unit": "%",
+        # Lets an "N-year average gross margin" question compute the
+        # ratio per year then average, same mechanism as capex_to_revenue
+        # below. pot_reasoner._gen_formula_code() only actually routes
+        # into that averaging codegen when the query itself says
+        # "average" — a 2-year "did gross margin improve" question still
+        # gets the explicit before/after comparison, not a blended mean.
+        "period_average": True,
     },
     "operating_margin": {
         "keywords_zh": ["營業利益率", "營業利潤率", "營業利益"],
@@ -96,6 +103,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Operating Margin",
         "unit": "%",
+        "period_average": True,
     },
     "net_margin": {
         "keywords_zh": ["淨利率", "淨利潤率", "純益率"],
@@ -107,6 +115,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Net Profit Margin",
         "unit": "%",
+        "period_average": True,
     },
     "ebitda_margin": {
         "keywords_zh": ["EBITDA 利潤率", "ebitda 利潤率"],
@@ -118,6 +127,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "EBITDA Margin",
         "unit": "%",
+        "period_average": True,
     },
 
     # ── Return Ratios ─────────────────────────────────────────────────────────
@@ -131,6 +141,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Return on Equity (ROE)",
         "unit": "%",
+        "period_average": True,
     },
     "roa": {
         "keywords_zh": ["資產報酬率", "roa"],
@@ -142,6 +153,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Return on Assets (ROA)",
         "unit": "%",
+        "period_average": True,
     },
     "roic": {
         "keywords_zh": ["投入資本報酬率", "roic"],
@@ -153,6 +165,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Return on Invested Capital (ROIC)",
         "unit": "%",
+        "period_average": True,
     },
 
     # ── Leverage / Solvency ───────────────────────────────────────────────────

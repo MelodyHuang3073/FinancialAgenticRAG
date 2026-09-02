@@ -877,6 +877,26 @@ def _extract_formula_guided(
             existing = best_by_year.get(yr)
             if existing is None or priority > existing[3]:
                 best_by_year[yr] = (val, score, source, priority, ev_idx, line_item_label)
+            elif priority == existing[3] and abs(val) > abs(existing[0]):
+                # A genuine tie on (is_primary, score) — prefer the
+                # larger-magnitude candidate. Confirmed real case: Best
+                # Buy's "Selected Financial Data" table reuses the label
+                # "Net earnings (loss) from continuing operations" for
+                # BOTH the real dollar figure (1,207) AND, a few rows
+                # later, its own per-share (EPS) figure (3.74) — both
+                # score identically as substring matches on "net
+                # earnings", so without a tie-break the one scanned
+                # second could silently win. A dollar-scale statement
+                # line is essentially always far larger in magnitude than
+                # a per-share/ratio figure that happens to share its
+                # label, so this is a safe general tie-break — unlike an
+                # absolute "small value = EPS" threshold (tried and
+                # reverted: it wrongly rejected a real net income of
+                # 567.8 in one test fixture), this only ever compares
+                # candidates that are ALREADY tied, so a value with no
+                # competing candidate for that (placeholder, year) is
+                # never touched.
+                best_by_year[yr] = (val, score, source, priority, ev_idx, line_item_label)
         # A supplementary-schedule match is NEVER actually used, even as
         # a last resort with nothing else available for that year — real
         # data for the WRONG reporting entity is worse than no data at
@@ -1389,6 +1409,7 @@ def _gen_period_average_code(
     unit: str,
     expr: str,
     resolved_series: Dict[str, List[Tuple[float, str]]],
+    query_years: Optional[List[str]] = None,
 ) -> List[str]:
     """
     Build code that computes `expr` separately for EVERY year common to
@@ -1397,12 +1418,23 @@ def _gen_period_average_code(
     the equivalent of:
         capex_by_year = {"2017": ..., "2018": ..., "2019": ...}
         revenue_by_year = {"2017": ..., "2018": ..., "2019": ...}
-        _years = sorted(set(capex_by_year) & set(revenue_by_year) & ...)
+        _years = sorted(set(capex_by_year) & set(revenue_by_year) & ... & {query years})
         _ratios = [capex_by_year[y] / revenue_by_year[y] for y in _years]
         result = round(sum(_ratios) / len(_ratios) * 100, 2)
     Generic over placeholder count/names (whatever `expr` references), so
     this isn't specific to capex_to_revenue — any future "N-year average
     ratio" formula reuses it by setting period_average=True.
+
+    When query_years names specific years, the average is restricted to
+    exactly those — never silently widened to whatever extra years the
+    retrieved evidence happens to also cover. Confirmed real case: a
+    "FY2017-FY2019 3-year average" question for a company with TWO
+    filings loaded in the same corpus (its FY2017 and FY2019 10-Ks) got
+    answered from a 4-year mix of 2014/2015/2016/2017 — years the query
+    never asked about — because the FY2017 filing's own "Selected
+    Financial Data" 5-year table intersected with the required
+    placeholders too, and nothing constrained the average to the years
+    actually requested.
     """
     if not resolved_series or not expr:
         return []
@@ -1427,6 +1459,9 @@ def _gen_period_average_code(
     # ZeroDivisionError (a real, silent Python operator behaviour, not a
     # name lookup), which the caller's repair loop already handles.
     intersection_expr = " & ".join(f"set({n})" for n in by_year_names)
+    distinct_query_years = sorted(set(query_years)) if query_years else []
+    if len(distinct_query_years) >= 2:
+        intersection_expr += f" & {set(distinct_query_years)!r}"
     lines.append(f"_years = list({intersection_expr})")
     lines.append("_ratios = []")
     lines.append("for _y in _years:")
@@ -1474,10 +1509,24 @@ def _gen_formula_code(
     unit = formula_entry.get("unit", "")
     expr = formula_entry.get("formula_expr", "")
     is_multi_year = formula_entry.get("multi_year", False)
-    is_period_average = formula_entry.get("period_average", False)
+    # A formula being CAPABLE of an N-year average (period_average=True)
+    # doesn't mean every question asking about it across 2+ years wants
+    # that average — "did gross margin improve between FY2022 and
+    # FY2023" wants an explicit before/after comparison with a direction,
+    # not a single blended number, even though it's the same formula and
+    # even spans the same 2 years as an "average" question might. Only
+    # route into the N-year-average codegen when the query actually says
+    # so; otherwise fall through to the multi-year TREND comparison below
+    # (confirmed real case: registering net_margin/gross_margin as
+    # period_average to fix "3-year average net profit margin" questions
+    # must not silently turn a 2-year "improved or declined" question
+    # into a flat average instead of the delta/direction it asked for).
+    is_period_average = formula_entry.get("period_average", False) and any(
+        kw in q_lower for kw in ("average", "avg", "平均")
+    )
 
     if is_period_average:
-        return _gen_period_average_code(fk, label, unit, expr, resolved_series or {})
+        return _gen_period_average_code(fk, label, unit, expr, resolved_series or {}, query_years)
 
     if not resolved:
         return []

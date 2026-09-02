@@ -180,11 +180,28 @@ class FinAgentRAGOrchestrator:
                             })
                             continue
 
+                        # A single query-level statement_type_hint is wrong for
+                        # composite ratios whose sub-questions genuinely need
+                        # DIFFERENT statements (e.g. inventory_turnover =
+                        # cogs[income statement] / inventory[balance sheet] —
+                        # the overall question's hint votes 100% balance_sheet
+                        # since "inventory" is the only metric visible in the
+                        # WHOLE question text, wrongly applying that hint to
+                        # the cogs sub-query too and boosting a balance-sheet
+                        # note page over the real income-statement row).
+                        # Re-classify each sub-question's OWN text so its hint
+                        # reflects what THAT retrieval actually needs; fall
+                        # back to the query-level hint when the sub-question's
+                        # own text yields nothing.
+                        sub_metrics = self.classifier._extract_target_metrics(step_query.lower())
+                        sub_hint = self.classifier._infer_statement_type_hint(sub_metrics)
+                        effective_hint = sub_hint if sub_hint != "unknown" else statement_type_hint
+
                         hits = self.vector_store.search(
                             step_query, top_k=self.RETRIEVAL_TOP_K,
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
-                            statement_type_hint=statement_type_hint,
+                            statement_type_hint=effective_hint,
                         )
                         hits = self._deduplicate_hits(hits)
 
