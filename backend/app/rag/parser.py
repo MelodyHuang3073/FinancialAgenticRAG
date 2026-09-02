@@ -1096,6 +1096,27 @@ class FinancialFileParser:
                 rows: list = []
                 for t in group:
                     rows.extend(self._compact_row_cells(r) for r in t.extract())
+                # pdfplumber's own grid detection can find a table's OUTER
+                # boundary via ruled/shaded lines while finding NO internal
+                # vertical separators at all — every row then comes back
+                # as ONE glued cell (e.g. "Total revenue 17,606 15,785
+                # 12,868" as a single string, confirmed real case: Adobe's
+                # borderless FY2022 income statement page). Downstream,
+                # _inject_missing_year_header() still happily synthesizes
+                # a real "2022 | 2021 | 2020" header from nearby text,
+                # producing a convincing-looking table whose every value
+                # cell is actually blank — the numbers never left the
+                # label. Requiring most rows to already have a REAL 2nd
+                # cell (a genuine column split, before any header
+                # synthesis) catches this before it's masked; when it
+                # isn't met, this group is left for Tier 2's word-
+                # coordinate reconstruction below instead, which doesn't
+                # depend on pdfplumber's own column detection at all.
+                real_rows = [r for r in rows if r and r[0] and str(r[0]).strip()]
+                split_rows = [r for r in real_rows if len(r) >= 2]
+                well_split = bool(real_rows) and len(split_rows) >= max(1, len(real_rows) // 2)
+                if not well_split:
+                    continue
                 rows = self._inject_missing_year_header(rows, page, group[0].bbox[1])
                 md = self._table_to_markdown(rows)
             except Exception:
