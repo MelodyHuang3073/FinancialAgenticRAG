@@ -249,6 +249,29 @@ class FinancialFileParser:
     _VALUE_TOKEN = r'(?:\$\s{0,3})?[\(\-]?\d[\d,\.]*\)?%?|[—–-]'
     _LAYOUT_VALUE_RE = re.compile(_VALUE_TOKEN)
 
+    # Digit-only variant of _VALUE_TOKEN, excluding the bare dash/
+    # placeholder alternative — used wherever a token needs to count as
+    # POSITIVE evidence of where a real value column sits (anchor
+    # discovery), as opposed to merely being recognized as a value once a
+    # column position is already established. A bare "—"/"–"/"-" is just
+    # as likely to be a mid-label typographic dash (e.g. "Authorized
+    # shares — 5,000") as a genuine blank-value placeholder, so letting it
+    # seed or vote for an anchor position can pull the whole cluster off
+    # the real column — confirmed real case: Amazon's balance sheet
+    # "Issued and outstanding shares — none — —" / "Authorized shares —
+    # 5,000" rows in the stockholders' equity section dragged
+    # _cluster_value_column_anchors's computed anchors away from the real
+    # value columns (x1≈508/588) to a bogus x1≈150/546, causing every
+    # real data row on the page — including "Accounts payable" — to fail
+    # is_data_row and be silently discarded as prose instead of recovered
+    # as a table row.
+    _LAYOUT_DIGIT_VALUE_RE = re.compile(r'(?:\$\s{0,3})?[\(\-]?\d[\d,\.]*\)?%?')
+
+    #: Words that mark a number as part of an inline narrative aside
+    #: ("477 and 484", "years 1 to 3") rather than a real value-column
+    #: entry — see _LAYOUT_DIGIT_VALUE_RE's docstring.
+    _NUMERIC_CONNECTOR_WORDS = {"and", "to", "or", "through"}
+
     # A "layout row" is a label followed by 2+ whitespace-only numeric-looking
     # tokens — this is how pdfplumber's extract_text(layout=True) renders a
     # table COLUMN whose boundary is only whitespace/background-shading,
@@ -594,7 +617,22 @@ class FinancialFileParser:
         """
         numeric_entries = []
         for row_idx, row in enumerate(rows):
-            row_numeric = [w for w in row if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())]
+            row_numeric = [
+                w for i, w in enumerate(row)
+                if self._LAYOUT_DIGIT_VALUE_RE.fullmatch(w["text"].strip())
+                # A number wrapped by an inline narrative connector ("...
+                # shares — 477 and 484", "years 1 to 3") is describing a
+                # count/range in running prose, not sitting in its own
+                # value column — including it as anchor evidence pulls
+                # the whole column cluster toward wherever that aside
+                # happens to fall (confirmed real case: Amazon's
+                # "Outstanding shares — 477 and 484" equity-section row
+                # dragged the balance sheet's real value-column anchors
+                # away from their true x1 positions). Real tabular values
+                # are never adjacent to a connector word within the row.
+                and not (i > 0 and row[i - 1]["text"].strip().lower() in self._NUMERIC_CONNECTOR_WORDS)
+                and not (i + 1 < len(row) and row[i + 1]["text"].strip().lower() in self._NUMERIC_CONNECTOR_WORDS)
+            ]
             if len(row_numeric) < 2:
                 continue
             numeric_entries.extend((row_idx, w["x1"]) for w in row_numeric)
@@ -715,11 +753,30 @@ class FinancialFileParser:
         if not rows:
             return [], ""
         rows = [self._merge_dollar_sign_tokens(row) for row in rows]
+
+        def _rows_as_prose() -> str:
+            return "\n".join(
+                " ".join(w["text"] for w in row).strip() for row in rows
+            ).strip()
+
+        # No real value-column structure found on this page at all (either
+        # no numeric tokens formed a column, or the ones that did don't
+        # dominate their rows) — genuinely a prose-only page, not a table
+        # with weak column alignment. The words themselves are still real
+        # content and must not be dropped; every row is returned as prose
+        # instead of silently discarding it. Confirmed real regression:
+        # a pure-MD&A page's five prose lines vanished entirely (both
+        # tables AND prose came back empty) once narrative-adjacent
+        # numbers ("2023 and into 2024") were correctly excluded from
+        # anchor-candidate voting elsewhere — removing that noise left
+        # zero anchors, and the old "anchors empty -> return ''" path
+        # threw the real prose away along with the (correctly rejected)
+        # phantom table.
         anchors, tolerance = self._cluster_value_column_anchors(rows)
         if not anchors:
-            return [], ""
+            return [], _rows_as_prose()
         if self._dominant_anchor_shape_fraction(rows, anchors, tolerance) < self._WORD_COL_MIN_SHAPE_CONFIDENCE:
-            return [], ""
+            return [], _rows_as_prose()
 
         tables: List[str] = []
         prose_lines: List[str] = []
@@ -760,6 +817,22 @@ class FinancialFileParser:
             cells: List[List[str]] = [[] for _ in range(len(anchors) + 1)]
             for w in row_words:
                 col = self._assign_to_value_anchor(w["x1"], anchors, tolerance)
+                # A standalone '$' too far from its own number to satisfy
+                # _WORD_DOLLAR_MERGE_GAP (some filings right-align the
+                # glyph at the LEFT edge of a wide value column, well
+                # over 20pt from the digits at the right edge) can still
+                # land within `tolerance` of the SAME value anchor as the
+                # real number. Keeping it there glues a stray "$" onto an
+                # otherwise-clean value ("25,309 $"), which then fails
+                # numeric parsing downstream and silently drops that
+                # year's value entirely — confirmed real case: Amazon's
+                # balance-sheet "Accounts payable" row lost its FY2016
+                # column this way, leaving DPO's ap_old/ap_new to both
+                # fall back to the FY2017 figure. The glyph adds no
+                # numeric information once a real column is assigned, so
+                # it's dropped here rather than carried into the cell.
+                if col is not None and w["text"].strip() == "$":
+                    continue
                 cells[0 if col is None else col + 1].append(w["text"])
             cell_texts = [" ".join(parts).strip() for parts in cells]
 

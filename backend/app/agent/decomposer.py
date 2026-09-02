@@ -47,6 +47,7 @@ _METRIC_NAMES: Dict[str, str] = {
     "current_liab":   "Current Liabilities 流動負債",
     "inventory":      "Inventory Inventories 存貨",
     "accounts_rec":   "Accounts Receivable 應收帳款 Receivables",
+    "accounts_payable": "Accounts Payable 應付帳款",
     "operating_cf":   "Operating Cash Flow Cash from Operations CFO",
     "investing_cf":   "Investing Activities Investing Cash Flow",
     "financing_cf":   "Financing Activities Financing Cash Flow",
@@ -74,6 +75,8 @@ _RATIO_COMPONENTS: Dict[str, List[str]] = {
     "capex_pct_revenue":  ["capex", "revenue"],
     "fixed_asset_turnover":    ["revenue", "ppe"],
     "operating_cash_flow_ratio": ["operating_cf", "current_liab"],
+    "inventory_turnover": ["cost_revenue", "inventory"],
+    "dpo":                ["accounts_payable", "cost_revenue", "inventory"],
 }
 
 
