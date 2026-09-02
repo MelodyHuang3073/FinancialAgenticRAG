@@ -62,7 +62,7 @@ def test_to_markdown_table_does_not_reformat_numbers():
 #    _extract_from_linearized_table()
 # ─────────────────────────────────────────────────────────────────────────
 
-def _tsmc_markdown_evidence():
+def _testco_markdown_evidence():
     md = to_markdown_table(
         headers=["Line Item", "FY2023", "FY2024"],
         rows=[
@@ -70,19 +70,19 @@ def _tsmc_markdown_evidence():
             ["Net Income", "567.8", "601.2"],
         ],
     )
-    content = "Company: TSMC | Report: Income Statement | Period: 2023-2024\n\n" + md
-    return [{"content": content, "company": "TSMC"}]
+    content = "Company: TESTCO | Report: Income Statement | Period: 2023-2024\n\n" + md
+    return [{"content": content, "company": "TESTCO"}]
 
 
 def test_markdown_table_extraction_gets_correct_revenue_values():
-    extracted = _extract_from_linearized_table(_tsmc_markdown_evidence())
+    extracted = _extract_from_linearized_table(_testco_markdown_evidence())
 
     revenue_vals = {v["year"]: v["val"] for v in extracted.values() if v["canonical"] == "revenue"}
     assert revenue_vals == {"2023": 2161.7, "2024": 2894.3}
 
 
 def test_markdown_table_extraction_does_not_mix_up_revenue_and_net_income():
-    extracted = _extract_from_linearized_table(_tsmc_markdown_evidence())
+    extracted = _extract_from_linearized_table(_testco_markdown_evidence())
 
     net_income_vals = {v["year"]: v["val"] for v in extracted.values() if v["canonical"] == "net_income"}
     assert net_income_vals == {"2023": 567.8, "2024": 601.2}
@@ -90,7 +90,7 @@ def test_markdown_table_extraction_does_not_mix_up_revenue_and_net_income():
     # The revenue-growth calculation must pick Revenue's pair, not Net
     # Income's — this is what "沒有抓錯科目" actually means end-to-end:
     # both rows get extracted correctly, but the query-relevant one wins.
-    old, new = _find_same_item_pair(list(extracted.values()), "tsmc revenue growth from 2023 to 2024")
+    old, new = _find_same_item_pair(list(extracted.values()), "testco revenue growth from 2023 to 2024")
     assert old is not None and new is not None
     assert old["canonical"] == "revenue" and new["canonical"] == "revenue"
     assert old["val"] == 2161.7
@@ -107,17 +107,17 @@ def test_legacy_single_line_pipe_format_still_works():
     evidence_list = [
         {
             "content": (
-                "Company: TSMC | Report: Income Statement | Period: 2023-2024 | "
+                "Company: TESTCO | Report: Income Statement | Period: 2023-2024 | "
                 "Line Item: Revenue | 2023: 2,161.7 | 2024: 2,894.3"
             ),
-            "company": "TSMC",
+            "company": "TESTCO",
         },
         {
             "content": (
-                "Company: TSMC | Report: Income Statement | Period: 2023-2024 | "
+                "Company: TESTCO | Report: Income Statement | Period: 2023-2024 | "
                 "Line Item: Net Income | 2023: 567.8 | 2024: 601.2"
             ),
-            "company": "TSMC",
+            "company": "TESTCO",
         },
     ]
     extracted = _extract_from_linearized_table(evidence_list)
@@ -134,12 +134,12 @@ def test_mixed_legacy_and_markdown_evidence_in_same_call():
     and merge into a single extracted dict without clobbering each other."""
     legacy_item = {
         "content": (
-            "Company: TSMC | Report: Balance Sheet | Period: 2024 | "
+            "Company: TESTCO | Report: Balance Sheet | Period: 2024 | "
             "Line Item: Total Assets | 2024: 5,000.0"
         ),
-        "company": "TSMC",
+        "company": "TESTCO",
     }
-    evidence_list = _tsmc_markdown_evidence() + [legacy_item]
+    evidence_list = _testco_markdown_evidence() + [legacy_item]
 
     extracted = _extract_from_linearized_table(evidence_list)
     canonicals = {v["canonical"] for v in extracted.values()}

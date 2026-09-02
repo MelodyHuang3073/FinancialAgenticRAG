@@ -11,6 +11,20 @@ class HybridFinancialRetriever:
         "total revenue", "cost of revenue", "ebitda", "free cash flow",
     ]
 
+    #: A row whose own Line Item label starts with "Total" (e.g. "Total
+    #: cost of sales", "Total current assets") is a genuine consolidated
+    #: total, not a sub-item/segment/note breakdown row — the SAME
+    #: total-row-priority principle already applied at the extraction
+    #: stage (_score_row_match() in pot_reasoner.py), needed here too
+    #: because a wrong sub-item row can outrank the real total on pure
+    #: BM25 score before extraction ever gets a chance to choose between
+    #: them (confirmed real case: AES Corporation's "Cost of Sales—Non-
+    #: Regulated" note row, and even a different page's own "Cost of
+    #: Sales" sub-row, both outscored the real "Total cost of sales" row
+    #: on the same page — the total row was retrieved, ranked 7th, and
+    #: never made the top-3 cutoff actually used).
+    _TOTAL_ROW_RE = re.compile(r'Line Item:\s*Total\b', re.IGNORECASE)
+
     def __init__(self, corpus: List[Dict[str, Any]]):
         self.corpus = corpus
 
@@ -154,6 +168,10 @@ class HybridFinancialRetriever:
 
             # ── Financial line item boost ──────────────────────────────────
             multiplier *= self._line_item_match_score(query, content)
+
+            # ── Total-row boost ──────────────────────────────────────────────
+            if self._TOTAL_ROW_RE.search(content):
+                multiplier *= 1.3
 
             # ── Year / quarter boost ───────────────────────────────────────
             doc_period = str(doc.get('period', '')) + " " + content
