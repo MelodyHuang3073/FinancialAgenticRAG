@@ -150,29 +150,48 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
     },
 
     # ── Return Ratios ─────────────────────────────────────────────────────────
+    # ROE/ROA's textbook definition divides a single year's net income by
+    # the AVERAGE of the balance-sheet item across its two endpoint years
+    # (e.g. "net income / average total assets between FY2016 and
+    # FY2017") -- this is a component-level 2-point average, structurally
+    # identical to DPO's average-accounts-payable pattern, NOT a "3-year
+    # average of the ratio itself" (that's what period_average is for).
+    # Confirmed real bug: with period_average previously set here, the
+    # mere presence of the word "average" in that textbook phrasing
+    # wrongly routed this into _gen_period_average_code(), which computed
+    # net_income[2016]/total_assets[2016] and net_income[2017]/
+    # total_assets[2017] separately and averaged the two RATIOS (4.48%)
+    # instead of net_income[2017] / avg(total_assets[2016,2017]) (the
+    # ~1.4% actually asked for). multi_year (the _old/_new suffix
+    # convention) embeds the averaging directly in formula_expr instead,
+    # so it no longer depends on guessing which sense of "average" the
+    # query means -- and degrades gracefully to a plain single-year ratio
+    # when only one year is named (old == new).
     "roe": {
         "keywords_zh": ["股東權益報酬率", "權益報酬率"],
         "keywords_en": ["return on equity", "roe"],
-        "formula_expr": "net_income / shareholders_equity",
+        "formula_expr": "net_income / ((shareholders_equity_old + shareholders_equity_new) / 2)",
         "required_vars": {
-            "net_income":          ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
-            "shareholders_equity": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
+            "net_income":              ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
+            "shareholders_equity_old": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
+            "shareholders_equity_new": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
         },
         "result_label": "Return on Equity (ROE)",
         "unit": "%",
-        "period_average": True,
+        "multi_year": True,
     },
     "roa": {
         "keywords_zh": ["資產報酬率"],
         "keywords_en": ["return on assets", "roa"],
-        "formula_expr": "net_income / total_assets",
+        "formula_expr": "net_income / ((total_assets_old + total_assets_new) / 2)",
         "required_vars": {
-            "net_income":   ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
-            "total_assets": ["總資產", "total assets", "assets"],
+            "net_income":       ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
+            "total_assets_old": ["總資產", "total assets", "assets"],
+            "total_assets_new": ["總資產", "total assets", "assets"],
         },
         "result_label": "Return on Assets (ROA)",
         "unit": "%",
-        "period_average": True,
+        "multi_year": True,
     },
     "roic": {
         "keywords_zh": ["投入資本報酬率"],
@@ -185,6 +204,47 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "result_label": "Return on Invested Capital (ROIC)",
         "unit": "%",
         "period_average": True,
+    },
+    "dividend_payout_ratio": {
+        "keywords_zh": ["股利發放率", "股息發放率", "配息率"],
+        "keywords_en": ["dividend payout ratio", "payout ratio"],
+        # abs() because a cash-flow-statement "Dividends" line is a
+        # financing-activities OUTFLOW, reported as a negative number --
+        # the ratio itself should read as a positive percentage of net
+        # income paid out, not a signed cash-flow value.
+        "formula_expr": "abs(dividends_paid) / net_income_attributable",
+        "required_vars": {
+            # Cash-flow-statement financing-activities line -- real 10-Ks
+            # commonly report this as the bare word "Dividends" (a
+            # negative/outflow value), not a longer descriptive phrase;
+            # confirmed real case: Coca-Cola's FY2022 statement of cash
+            # flows literally has a row labeled just "Dividends" with no
+            # other qualifier. The bare alias is safe here since nothing
+            # else on a cash-flow statement collides with it once
+            # negation-prefix checking is applied (e.g. "Equity (income)
+            # loss -- net of dividends" only substring-matches, scoring
+            # lower than an exact "Dividends" row).
+            "dividends_paid": ["股利", "現金股利", "支付股利", "dividends paid",
+                                "cash dividends paid", "dividends"],
+            # Deliberately NOT sharing the plain "net_income" canonical/
+            # alias pool: "net income attributable to shareowners/
+            # shareholders" and a bare "Consolidated Net Income" (which
+            # includes noncontrolling interests) are two DIFFERENT lines
+            # that commonly appear on the same statement, and the
+            # question asks specifically for the shareholders-attributable
+            # figure -- confirmed real case: Coca-Cola's FY2022 income
+            # statement has both "Consolidated Net Income" (9,571) and
+            # "Net Income Attributable to Shareowners of The Coca-Cola
+            # Company" (9,542) as separate rows.
+            "net_income_attributable": [
+                "歸屬於股東之淨利", "net income attributable to shareowners",
+                "net income attributable to shareholders",
+                "net income attributable to common shareholders",
+                "net income attributable to",
+            ],
+        },
+        "result_label": "Dividend Payout Ratio",
+        "unit": "%",
     },
 
     # ── Leverage / Solvency ───────────────────────────────────────────────────

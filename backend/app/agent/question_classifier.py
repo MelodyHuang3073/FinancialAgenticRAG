@@ -67,6 +67,11 @@ _METRIC_KEYWORDS = {
     "accounts_rec":     ["accounts receivable", "應收帳款", "receivables"],
     "accounts_payable": ["accounts payable", "應付帳款", "payables"],
     "dpo":              ["days payable outstanding", "dpo"],
+    "dividends_paid":   ["dividends paid", "cash dividends paid", "dividends", "股利", "現金股利"],
+    "net_income_attributable": ["net income attributable to shareowners",
+                                 "net income attributable to shareholders",
+                                 "net income attributable to"],
+    "dividend_payout_ratio": ["dividend payout ratio", "payout ratio", "股利發放率"],
     "net_debt":         ["net debt", "淨負債"],
     "debt":             ["debt", "long-term debt", "short-term debt", "借款", "負債"],
     "working_capital":  ["working capital", "營運資金"],
@@ -118,6 +123,9 @@ _STATEMENT_TYPE_MAP: Dict[str, str] = {
     "accounts_rec":     "balance_sheet",
     "accounts_payable": "balance_sheet",
     "dpo":              "balance_sheet",
+    "dividends_paid":   "cash_flow",
+    "net_income_attributable": "income_statement",
+    "dividend_payout_ratio":   "income_statement",
     "net_debt":         "balance_sheet",
     "debt":             "balance_sheet",
     "working_capital":  "balance_sheet",
@@ -248,12 +256,12 @@ class FinanceBenchClassifier:
 
         # ── Step 4: Determine retrieval_strategy ──
         retrieval_strategy = self._determine_retrieval_strategy(
-            question_type, cognitive_task, target_metrics, calc_type, has_explanation
+            question_type, cognitive_task, target_metrics, calc_type
         )
 
         # ── Step 5: Build optimized retrieval queries ──
         retrieval_queries = self._build_retrieval_queries(
-            query, entity, target_metrics, years, quarters, retrieval_strategy
+            query, entity, target_metrics, years, retrieval_strategy
         )
 
         # ── Step 6: Determine statement_type_hint (Step 3/4 Section Anchoring) ──
@@ -405,7 +413,7 @@ class FinanceBenchClassifier:
             'Company', 'Fiscal', 'Year', 'Period', 'Please', 'Tell',
             'Give', 'Calculate', 'Compute', 'Find', 'Show', 'State', 'Explain',
             'CAGR', 'YOY', 'EPS', 'ROE', 'ROA', 'CapEx', 'EBITDA', 'MD',
-            'Quick', 'Current', 'Ratio', 'Debt', 'Equity', 'Working', 'Capital',
+            'Quick', 'Current', 'Ratio', 'Debt', 'Working', 'Capital',
             'Inventory', 'Receivable', 'Liabilities', 'Assets', 'Interest',
         }
         # Only match single-token company-like words (no multi-word groups)
@@ -522,7 +530,7 @@ class FinanceBenchClassifier:
                 return p
         return next(iter(votes))  # fallback: any with best count
 
-    def _determine_retrieval_strategy(self, q_type, cog_task, metrics, calc_type, has_expl) -> str:
+    def _determine_retrieval_strategy(self, q_type, cog_task, metrics, calc_type) -> str:
         """
         Retrieval strategy determines HOW we search:
         - TARGETED_ROW: need a single specific line item from table
@@ -544,7 +552,7 @@ class FinanceBenchClassifier:
             return "TARGETED_ROW"
         return "HYBRID"
 
-    def _build_retrieval_queries(self, query, entity, metrics, years, quarters, strategy) -> List[str]:
+    def _build_retrieval_queries(self, query, entity, metrics, years, strategy) -> List[str]:
         """
         Build optimized retrieval queries based on classification.
         Returns a list of search queries that target the right evidence.

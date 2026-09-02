@@ -166,10 +166,32 @@ def _sanitize(name: str, maxlen: int = 24) -> str:
 
 
 def _to_float(s: str) -> Optional[float]:
+    """
+    Parse a table-cell numeric string, including the standard accounting
+    convention of wrapping a negative/outflow amount in parentheses
+    instead of a leading minus sign (e.g. "(7,616)" meaning -7,616, used
+    throughout cash-flow statements for every payment/outflow line).
+    Python's bare float() doesn't understand parens at all and just
+    raises, so every negative-in-parens value used to come back as None
+    and get silently dropped from extraction entirely -- confirmed real
+    case: Coca-Cola's FY2022 "Dividends" cash-flow row ((7,616), (7,252),
+    (7,047), all three years parenthesized) had every single value
+    vanish, along with "Purchases of stock for treasury", "Net Cash
+    Provided by (Used in) Financing Activities", and every other
+    outflow-only line on the same statement -- while entries that
+    happened to be positive that period survived untouched, making the
+    gap look like sporadic missing data rather than the systematic
+    parsing bug it actually was.
+    """
+    cleaned = str(s).strip().replace(",", "").replace("%", "").strip()
+    negative = cleaned.startswith("(") and cleaned.endswith(")")
+    if negative:
+        cleaned = cleaned[1:-1]
     try:
-        return float(str(s).replace(",", "").replace("%", "").strip())
+        val = float(cleaned)
     except (ValueError, AttributeError):
         return None
+    return -val if negative else val
 
 
 def _normalize_year(y: str) -> str:
@@ -1501,6 +1523,29 @@ def _gen_period_average_code(
     return lines
 
 
+def _extract_formula_placeholders(expr: str) -> set:
+    """
+    Identifier tokens in a formula_expr that are actual variable
+    placeholders needing a resolved value — NOT a builtin function being
+    CALLED within the expression (e.g. "abs(dividends_paid) /
+    net_income_attributable" must yield {"dividends_paid",
+    "net_income_attributable"}, never "abs"). A token immediately
+    followed by "(" is a call, not a placeholder — this covers any
+    builtin used in a formula_expr generically, rather than needing a
+    manually maintained exclusion list per function name. Confirmed real
+    case: dividend_payout_ratio's "abs(dividends_paid) /
+    net_income_attributable" had "abs" swept into the needed-placeholder
+    set, which then could never be found in `resolved` (it's a function,
+    not a line item), so the "any needed placeholder missing -> return
+    []" guard silently discarded a fully-resolved formula and fell back
+    to an unrelated legacy code path.
+    """
+    return {
+        m.group(0) for m in re.finditer(r"[a-z_][a-z0-9_]*", expr)
+        if expr[m.end():m.end() + 1] != "("
+    } - {"years", "math"}
+
+
 def _gen_formula_code(
     formula_entry: Dict[str, Any],
     resolved: Dict[str, float],
@@ -1568,7 +1613,7 @@ def _gen_formula_code(
     if not is_multi_year and resolved_series:
         trend_years = sorted(set(_with_implied_trend_year(query_years, q_lower)))
         if len(trend_years) >= 2:
-            needed_phs = set(re.findall(r"[a-z_][a-z0-9_]*", expr)) - {"years", "math"}
+            needed_phs = _extract_formula_placeholders(expr)
             per_year_vals: Dict[str, Dict[str, float]] = {}
             for yr in trend_years:
                 ph_vals = {}
@@ -1604,7 +1649,7 @@ def _gen_formula_code(
         lines.append(f"{ph} = {val}{comment}")
 
     # Check all needed placeholders are available
-    needed = set(re.findall(r"[a-z_][a-z0-9_]*", expr)) - {"years", "math"}
+    needed = _extract_formula_placeholders(expr)
     available = set(resolved.keys())
     missing = needed - available
     if missing:
@@ -1681,7 +1726,7 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["free cash flow", "fcf"],                             "fcf"),
     (["total assets", "資產"],                              "total_assets"),
     (["equity", "shareholders", "stockholders"],            "equity"),
-    (["cost of revenue", "cost of goods", "cost of sales"], "cost_of_revenue"),
+    (["cost of revenue", "cost of goods", "cost of sales", "cogs"], "cost_of_revenue"),
 ]
 
 
@@ -1866,7 +1911,8 @@ _MARGIN_MAP: List[Tuple[List[str], str, str, str]] = [
     (["sg&a", "sga", "推銷"],       "sga",           "revenue",    "SG&A % of Revenue"),
     (["d&a", "depreciation and amortization", "depreciation & amortization",
       "折舊攤銷佔"],                "depreciation",  "revenue",    "D&A % of Revenue"),
-    (["cost ratio", "cogs ratio"],  "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
+    (["cost ratio", "cogs ratio", "cogs margin", "cogs %", "cost of goods sold margin",
+      "cost of goods sold %"],      "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
     (["capex%", "capex ratio"],     "capex",          "revenue",   "CapEx % of Revenue"),
 ]
 
@@ -2102,13 +2148,19 @@ def _build_calculation_code(
                 return True
 
     # ── Direct lookup ─────────────────────────────────────────────────────────
-    # Pick the var that best matches the query intent
-    target_canonical = None
-    for canonical, _ in _ITEM_TAXONOMY:
-        aliases_str = " ".join(_a for _c, _als in _ITEM_TAXONOMY if _c == canonical for _a in _als)
-        if any(a in q_lower for a in aliases_str.split()):
-            target_canonical = canonical
-            break
+    # Pick the var that best matches the query intent. Uses the same
+    # whole-phrase, word-boundary-safe matcher as every other canonical
+    # inference in this module (_infer_target_canonical / _kw_match) —
+    # NOT a bespoke per-word substring check. The previous version split
+    # every canonical's full alias PHRASES into individual words and
+    # tested each word as a bare substring, so gross_profit's own alias
+    # "gross margin amount" contributed the standalone word "margin" —
+    # meaning any query merely containing "margin" (e.g. "COGS % margin",
+    # which should resolve to cost_of_revenue) silently matched
+    # gross_profit purely because it came first in _ITEM_TAXONOMY, before
+    # this fallback even got a chance to look at the metric actually
+    # being asked about.
+    target_canonical = _infer_target_canonical(q_lower)
 
     # No "fall back to whatever's first in extracted_table" beyond this —
     # that used to silently print an ENTIRELY UNRELATED line item as if
