@@ -130,6 +130,24 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "unit": "%",
         "period_average": True,
     },
+    "ebitda_unadjusted": {
+        # A plain "operating income + D&A" sum — distinct from ebitda_margin
+        # above (a ratio) and from a fully-adjusted EBITDA (which would add
+        # back other non-recurring items); this only covers the specific,
+        # simpler definition FinanceBench-style questions ask for by name.
+        "keywords_zh": ["未調整EBITDA", "未調整息稅折舊攤銷前利潤"],
+        "keywords_en": ["unadjusted ebitda", "operating income + depreciation",
+                         "operating income plus depreciation"],
+        "formula_expr": "op_income + depreciation",
+        "required_vars": {
+            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+                              "income from operations"],
+            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+                              "depreciation", "amortization", "d&a"],
+        },
+        "result_label": "Unadjusted EBITDA",
+        "unit": "",
+    },
 
     # ── Return Ratios ─────────────────────────────────────────────────────────
     "roe": {
@@ -268,6 +286,28 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Receivables Turnover",
         "unit": "x",
+    },
+    "dpo": {
+        # ap_old/ap_new share one alias list, distinguished purely by
+        # which year column matches (same convention as
+        # fixed_asset_turnover's ppe_old/ppe_new above); cogs and
+        # inv_new/inv_old are resolved the same way — is_multi_year picks
+        # the OLDEST query year for every "_old"-suffixed placeholder and
+        # the NEWEST for every "_new"-suffixed or bare placeholder, so
+        # bare "cogs" naturally resolves to the target (newest) year.
+        "keywords_zh": ["應付帳款天數", "應付帳款週轉天數"],
+        "keywords_en": ["days payable outstanding", "dpo"],
+        "formula_expr": "365 * ((ap_old + ap_new) / 2) / (cogs + (inv_new - inv_old))",
+        "required_vars": {
+            "ap_old": ["應付帳款", "accounts payable"],
+            "ap_new": ["應付帳款", "accounts payable"],
+            "cogs":   ["銷售成本", "cost of goods sold", "cogs", "cost of revenue", "cost of sales"],
+            "inv_old": ["存貨", "inventory", "inventories"],
+            "inv_new": ["存貨", "inventory", "inventories"],
+        },
+        "result_label": "Days Payable Outstanding (DPO)",
+        "unit": "",
+        "multi_year": True,
     },
 
     # ── Per Share ─────────────────────────────────────────────────────────────
