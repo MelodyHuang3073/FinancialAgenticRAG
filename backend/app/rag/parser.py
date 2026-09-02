@@ -939,6 +939,19 @@ class FinancialFileParser:
         discarding it. Expects rows already compacted by
         _compact_row_cells() so "how many years" and "how many value
         columns the widest data row has" agree without extra bookkeeping.
+
+        Some real 10-Ks split the header across TWO of pdfplumber's own
+        detected rows instead of one: a bare date-preposition line
+        ("December 31,") on its own, immediately followed by a
+        "(units caption)  2020  2019" row that carries the actual years
+        in its VALUE cells — confirmed real case: Corning's FY2020
+        balance sheet. rows[0] alone has no year, and nothing above the
+        table's bbox does either (the "December 31," line sits INSIDE
+        the detected table region, not above it), so the original
+        above-the-table search alone never finds it. Before giving up,
+        this also checks the next few rows for one whose own cells
+        contain a real year — if found, that row IS the header (not a
+        data row) and is consumed rather than kept.
         """
         if not rows:
             return rows
@@ -956,15 +969,60 @@ class FinancialFileParser:
             years = self._extract_year_headers(line)
             if years:
                 break
-        if not years:
-            return rows  # no candidate found anywhere above — leave as-is
 
-        n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
-        n_value_cols = max(n_value_cols, len(years))
-        synthesized = [rows[0][0] or "Line Item"] + [
-            years[i] if i < len(years) else f"Col{i + 1}" for i in range(n_value_cols)
-        ]
-        return [synthesized, rows[0]] + rows[1:]
+        if years:
+            n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
+            n_value_cols = max(n_value_cols, len(years))
+            synthesized = [rows[0][0] or "Line Item"] + [
+                years[i] if i < len(years) else f"Col{i + 1}" for i in range(n_value_cols)
+            ]
+            return [synthesized, rows[0]] + rows[1:]
+
+        # Nothing above the table either — check whether one of the next
+        # few rows is itself the real (split-out) header.
+        for i in range(1, min(4, len(rows))):
+            candidate_years = self._extract_year_headers(" ".join(c or "" for c in rows[i]))
+            if not candidate_years:
+                continue
+            n_value_cols = max((len(r) - 1 for r in rows[i + 1:]), default=len(candidate_years))
+            n_value_cols = max(n_value_cols, len(candidate_years))
+            synthesized = ["Line Item"] + [
+                candidate_years[j] if j < len(candidate_years) else f"Col{j + 1}"
+                for j in range(n_value_cols)
+            ]
+            return [synthesized] + rows[:i] + rows[i + 1:]
+
+        # Still nothing — for a small table recovered separately by Tier
+        # 2 (see _reinject_year_header_if_missing()), `table_top` is the
+        # PAGE's first ruled-line group's own top, not this fragment's
+        # position, and its own rows never contain the year at all (a
+        # genuine data-only orphan, e.g. Corning's "Cost of sales" /
+        # "Gross margin" pair, split out from the real statement purely
+        # by an unrelated pdfplumber row-detection artifact — see
+        # _ruled_line_tables_and_prose()). The real year header for a
+        # page's first/topmost table is reliably close by, just a little
+        # further down than "above the table" covers (it's often split
+        # across its own two or three short lines, per
+        # _inject_missing_year_header()'s main docstring) — so make one
+        # more attempt over a small window starting right at table_top.
+        try:
+            nearby = page.within_bbox(
+                (0, max(0, table_top), page.width, table_top + 60), relative=False
+            )
+            nearby_text = nearby.extract_text() or ""
+        except Exception:
+            nearby_text = ""
+        for line in nearby_text.split("\n"):
+            years = self._extract_year_headers(line)
+            if years:
+                n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
+                n_value_cols = max(n_value_cols, len(years))
+                synthesized = ["Line Item"] + [
+                    years[j] if j < len(years) else f"Col{j + 1}" for j in range(n_value_cols)
+                ]
+                return [synthesized] + rows
+
+        return rows  # no candidate found anywhere — leave as-is
 
     def _reinject_year_header_if_missing(self, md: str, page, table_top: float) -> str:
         """
@@ -1125,7 +1183,28 @@ class FinancialFileParser:
                 md_tables.append(md)
             for t in group:
                 try:
-                    filtered_page = filtered_page.outside_bbox(t.bbox)
+                    # outside_bbox() only keeps objects FULLY outside the
+                    # given box — a word whose bbox bleeds even a fraction
+                    # of a point into an adjacent detected table's edge
+                    # (ordinary line-height/descender spacing, not a real
+                    # overlap) gets treated as "inside" and silently
+                    # dropped, even though it belongs to a completely
+                    # different row. Confirmed real case: Corning's income
+                    # statement "Cost of sales" row sits in the ~12pt gap
+                    # between two adjacent detected table fragments, but
+                    # its own text bbox bottom edge (151.68) crept 0.3pt
+                    # past the next fragment's top edge (151.39) — enough
+                    # for outside_bbox() to discard the word entirely, and
+                    # neither Tier 1 (it was never inside any detected
+                    # table) nor Tier 2 (excluded here) ever recovered it.
+                    # Shrinking the excluded box inward by a small margin
+                    # keeps genuine table content safely excluded while
+                    # no longer eating a neighboring row over sub-point
+                    # bleed.
+                    x0, top, x1, bottom = t.bbox
+                    pad = 1.0
+                    shrunk_bbox = (x0, min(top + pad, bottom), x1, max(bottom - pad, top))
+                    filtered_page = filtered_page.outside_bbox(shrunk_bbox)
                 except Exception:
                     pass
 
