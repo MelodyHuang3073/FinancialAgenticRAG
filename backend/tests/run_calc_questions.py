@@ -60,6 +60,15 @@ CALC_QUESTIONS = [
      "defined as: cash from operations / total current liabilities. Round your answer to "
      "two decimal places. Please utilize information provided primarily within the balance "
      "sheet and the cash flow statement."),
+    # ── domain-relevant (folded in — asks for one specific ratio) ──
+    ("ADOBE_2022_10K",
+     "Does Adobe have an improving operating margin profile as of FY2022? If operating "
+     "margin is not a useful metric for a company like this, then state that and explain "
+     "why."),
+    ("AES_2022_10K",
+     "Roughly how many times has AES Corporation sold its inventory in FY2022? Calculate "
+     "inventory turnover ratio for the FY2022; if conventional inventory management is not "
+     "meaningful for the company then state that and explain why."),
     ("AES_2022_10K",
      "Based on the information provided primarily in the statement of financial position "
      "and the statement of income, what is AES's FY2022 return on assets (ROA)? ROA is "
@@ -75,6 +84,14 @@ CALC_QUESTIONS = [
      "What is Amazon's year-over-year change in revenue from FY2016 to FY2017 (in units of "
      "percents and round to one decimal place)? Calculate what was asked by utilizing the "
      "line items clearly shown in the statement of income."),
+    # ── domain-relevant (folded in — asks for one specific ratio) ──
+    ("AMCOR_2023_10K",
+     "Has AMCOR's quick ratio improved or declined between FY2023 and FY2022? If the quick "
+     "ratio is not something that a financial analyst would ask about a company like this, "
+     "then state that and explain why."),
+    ("AMCOR_2023_10K",
+     "Does AMCOR have an improving gross margin profile as of FY2023? If gross margin is "
+     "not a useful metric for a company like this, then state that and explain why."),
     ("AMD_2015_10K",
      "Answer the following question as if you are an equity research analyst and have lost "
      "internet connection so you do not have access to financial metric providers. "
@@ -89,6 +106,11 @@ CALC_QUESTIONS = [
      "Basing your judgments off of the cash flow statement and the income statement, what "
      "is American Water Works's FY2021 unadjusted operating income + depreciation and "
      "amortization from the cash flow statement (unadjusted EBITDA) in USD millions?"),
+    # ── domain-relevant (folded in — asks for one specific ratio) ──
+    ("AMERICANWATERWORKS_2022_10K",
+     "Does American Water Works have positive working capital based on FY2022 data? If "
+     "working capital is not a useful or relevant metric for this company, then please "
+     "state that and explain why."),
     ("BESTBUY_2017_10K",
      "In agreement with the information outlined in the income statement, what is the "
      "FY2015 - FY2017 3 year average net profit margin (as a %) for Best Buy? Answer in "
@@ -138,6 +160,9 @@ CALC_QUESTIONS = [
      "Taking into account the information outlined in the income statement, what is the "
      "FY2019 - FY2021 3 year average unadjusted operating income % margin for Corning? "
      "Answer in units of percents and round to one decimal place."),
+    # ── domain-relevant (folded in — asks for one specific ratio) ──
+    ("CORNING_2022_10K",
+     "How much has the effective tax rate of Corning changed between FY2021 and FY2022?"),
     ("CVSHEALTH_2018_10K",
      "What is the FY2018 fixed asset turnover ratio for CVS Health? Fixed asset turnover "
      "ratio is defined as: FY2018 revenue / (average PP&E between FY2017 and FY2018). "
@@ -167,33 +192,16 @@ CALC_QUESTIONS = [
      "question: what is the FY2022 retention ratio (using total cash dividends paid and "
      "net income attributable to shareholders) for General Mills? Round answer to two "
      "decimal places."),
+    # ── domain-relevant (folded in — asks for one specific ratio) ──
+    ("JOHNSON_JOHNSON_2022_10K",
+     "Roughly how many times has JnJ sold its inventory in FY2022? Calculate inventory "
+     "turnover ratio for FY2022; if conventional inventory management is not meaningful "
+     "for the company then state that and explain why."),
     ("KRAFTHEINZ_2019_10K",
      "What is Kraft Heinz's FY2019 inventory turnover ratio? Inventory turnover ratio is "
      "defined as: (FY2019 COGS) / (average inventory between FY2018 and FY2019). Round "
      "your answer to two decimal places. Please base your judgments on the information "
      "provided primarily in the balance sheet and the P&L statement."),
-    # ── domain-relevant, folded in because each asks for one specific ratio ──
-    ("AES_2022_10K",
-     "Roughly how many times has AES Corporation sold its inventory in FY2022? Calculate "
-     "inventory turnover ratio for the FY2022; if conventional inventory management is not "
-     "meaningful for the company then state that and explain why."),
-    ("AMCOR_2023_10K",
-     "Has AMCOR's quick ratio improved or declined between FY2023 and FY2022? If the quick "
-     "ratio is not something that a financial analyst would ask about a company like this, "
-     "then state that and explain why."),
-    ("AMCOR_2023_10K",
-     "Does AMCOR have an improving gross margin profile as of FY2023? If gross margin is "
-     "not a useful metric for a company like this, then state that and explain why."),
-    ("AMERICANWATERWORKS_2022_10K",
-     "Does American Water Works have positive working capital based on FY2022 data? If "
-     "working capital is not a useful or relevant metric for this company, then please "
-     "state that and explain why."),
-    ("CORNING_2022_10K",
-     "How much has the effective tax rate of Corning changed between FY2021 and FY2022?"),
-    ("JOHNSON_JOHNSON_2022_10K",
-     "Roughly how many times has JnJ sold its inventory in FY2022? Calculate inventory "
-     "turnover ratio for FY2022; if conventional inventory management is not meaningful "
-     "for the company then state that and explain why."),
 ]
 
 
