@@ -49,8 +49,9 @@ _METRIC_KEYWORDS = {
     # routed PP&E questions to the wrong statement and searched for the
     # wrong term — confirmed root cause of fixed_asset_turnover's PP&E
     # never being retrieved for a real Activision Blizzard question.
-    "ppe":           ["pp&e", "property, plant and equipment", "property and equipment",
-                       "fixed assets", "不動產、廠房及設備", "固定資產"],
+    "ppe":           ["pp&e", "property, plant and equipment", "property, plant, and equipment",
+                       "property and equipment", "fixed assets",
+                       "不動產、廠房及設備", "固定資產"],
     "depreciation":  ["折舊", "depreciation", "amortization"],
     "ebitda":        ["ebitda"],
     "roe":           ["roe", "return on equity"],
@@ -84,6 +85,7 @@ _METRIC_KEYWORDS = {
     "roce":             ["roce", "return on capital employed"],
     "roic":             ["roic", "return on invested capital"],
     "net_margin":       ["net margin", "net profit margin", "profit margin"],
+    "tax_rate":         ["effective tax rate", "tax rate"],
     # ── Cash flow metrics ─────────────────────────────────────────────
     "operating_cf":     ["operating cash flow", "cash from operations", "cfo",
                           "cash from operating", "cash provided by operating",
@@ -112,6 +114,7 @@ _STATEMENT_TYPE_MAP: Dict[str, str] = {
     "net_margin":       "income_statement",
     "roce":             "income_statement",
     "roic":             "income_statement",
+    "tax_rate":         "income_statement",
     # Balance Sheet metrics
     "total_assets":     "balance_sheet",
     "total_liab":       "balance_sheet",

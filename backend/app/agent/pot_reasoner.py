@@ -63,6 +63,9 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("accounts_rec",   ["accounts receivable", "trade receivables", "應收帳款"]),
     ("current_liab",   ["total current liabilities", "current liabilities", "流動負債"]),
     ("total_liab",     ["total liabilities", "總負債"]),
+    ("ppe",            ["property, plant and equipment", "property, plant, and equipment",
+                         "property and equipment", "net ppe", "pp&e", "fixed assets",
+                         "不動產、廠房及設備", "固定資產"]),
     ("equity",         ["total equity", "total shareholders equity",
                          "stockholders equity", "股東權益總額", "股東權益"]),
     # Cash flow
@@ -915,10 +918,43 @@ def _extract_formula_guided(
     # `resolved` (whose tuples must stay plain (value, year) — every
     # existing consumer of the return value unpacks exactly two fields).
     winner_meta: Dict[str, Dict[str, Tuple[int, str, int, str]]] = {}
+    # Cache of ev_idx -> the filing's OWN reporting year (e.g. "2020" for
+    # ".../CORNING_2020_10K.pdf..."), parsed once per evidence item.
+    filing_year_cache: Dict[int, Optional[str]] = {}
+
+    def _filing_year(ev_idx: int) -> Optional[str]:
+        if ev_idx not in filing_year_cache:
+            ev = evidence_list[ev_idx]
+            text = ev.get("parent_content") or ev.get("content", "") or ev.get("table_name", "")
+            m = re.search(r"_(\d{4})_10K", text)
+            filing_year_cache[ev_idx] = m.group(1) if m else None
+        return filing_year_cache[ev_idx]
+
     for placeholder in var_aliases:
-        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, int], int, str]] = {}
+        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, bool, int], int, str]] = {}
         for val, yr, score, source, is_primary, ev_idx, line_item_label in candidates[placeholder]:
-            priority = (is_primary, score)
+            # When a company has MULTIPLE 10-Ks indexed together, a later
+            # filing's comparative/historical column for an earlier year
+            # can carry a bare, exact-matching label from an unrelated
+            # footnote table (e.g. a segment or note breakdown) that
+            # outscores the real statement row from that year's OWN
+            # filing purely on label exactness — confirmed real case:
+            # Corning's FY2020 inventory came from CORNING_2020_10K's
+            # real "Inventories, net (Note 6)" row (a substring match,
+            # score 1) being beaten by CORNING_2021_10K's footnote
+            # "Inventory" row (an exact match, score 2, but from a
+            # completely different note table, value 503 vs the real
+            # 2,438), because the reduction only compared score. A row
+            # whose OWN filing's reporting year matches the data year
+            # being extracted is inherently more trustworthy than the
+            # same year appearing as a historical column in a DIFFERENT
+            # filing, so that match now outranks label exactness — but
+            # only as a tie-break ABOVE score, never overriding
+            # is_primary (a real primary-statement row from another
+            # year's filing still beats a supplementary-schedule row from
+            # the "right" filing).
+            year_matches_filing = _filing_year(ev_idx) == yr
+            priority = (is_primary, year_matches_filing, score)
             existing = best_by_year.get(yr)
             if existing is None or priority > existing[3]:
                 best_by_year[yr] = (val, score, source, priority, ev_idx, line_item_label)
@@ -1726,6 +1762,9 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["free cash flow", "fcf"],                             "fcf"),
     (["total assets", "資產"],                              "total_assets"),
     (["equity", "shareholders", "stockholders"],            "equity"),
+    (["property, plant and equipment", "property, plant, and equipment",
+      "property and equipment", "pp&e", "net ppe", "fixed assets",
+      "不動產、廠房及設備", "固定資產"],                     "ppe"),
     (["cost of revenue", "cost of goods", "cost of sales", "cogs"], "cost_of_revenue"),
 ]
 
