@@ -34,8 +34,23 @@ class HybridFinancialRetriever:
 
     def _tokenize(self, text: str) -> List[str]:
         text_lower = text.lower()
-        # Split Chinese chars individually; keep alphanumeric words and decimal numbers
-        tokens = re.findall(r'[\u4e00-\u9fff]|[a-z0-9]+(?:\.\d+)?|\d+[,.]?\d*', text_lower)
+        # Split Chinese chars individually; keep alphanumeric words and decimal numbers.
+        # Comma-grouped numbers (e.g. "7,772") MUST be matched as one token before the
+        # plain [a-z0-9]+ alternative, which stops at the comma \u2014 otherwise "7,772"
+        # becomes two tokens ("7","772") while an unrelated same-row value like "13"
+        # stays one token, artificially inflating doc_len (and thus penalising BM25
+        # score) for every row that happens to have 4-digit accounting figures.
+        # Confirmed real case: Corning's real "Cost of sales" row (7,772/7,468/6,829)
+        # scored BELOW an unrelated footnote row with tiny 2-digit values (13/11/13)
+        # purely because of this length-normalisation artifact, not any real relevance
+        # difference.
+        tokens = re.findall(
+            r'[\u4e00-\u9fff]'
+            r'|\d{1,3}(?:,\d{3})+(?:\.\d+)?'
+            r'|[a-z0-9]+(?:\.\d+)?'
+            r'|\d+[,.]?\d*',
+            text_lower,
+        )
         # Also add multi-char financial terms as atomic tokens for better matching
         for term in self.FINANCIAL_TERMS:
             if term in text_lower:

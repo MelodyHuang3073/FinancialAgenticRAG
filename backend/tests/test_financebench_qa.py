@@ -168,15 +168,29 @@ def _build_indexed_store() -> FinancialVectorStoreManager:
     skipped by the test, not treated as a fatal setup error."""
     vs = FinancialVectorStoreManager()
     parser = FinancialFileParser()
-    for doc_name, (filename, company) in DOC_TO_FILE.items():
+    for doc_name, (filename, _label) in DOC_TO_FILE.items():
         path = os.path.join(FIXTURES_DIR, filename)
         if not os.path.exists(path):
             continue
         with open(path, "rb") as f:
             content = f.read()
-        result = parser._parse_pdf(filename, content, company)
-        vs.add_parsed_passages(filename, company, result["passages"])
-        print(f"  indexed {filename} ({company}): {len(result['passages'])} passages"
+        # Use the PUBLIC parse_file() entry point exactly as /api/upload-file
+        # does, not the internal _parse_pdf() with a hand-picked "company"
+        # label — the two are NOT equivalent. parse_file() derives
+        # company_name from the raw filename stem (e.g. "CORNING_2020_10K"),
+        # which then gets baked into every passage's own "company" field and
+        # is what real retrieval/extraction actually runs against in
+        # production. Confirmed real case: with a clean label like "Corning"
+        # standing in for company_name, Corning's real FY2020 "Cost of
+        # sales" (7,772) beat an unrelated AOCI-reclassification footnote's
+        # coincidentally-labeled "Cost of sales" (13) in retrieval — but
+        # with the actual filename-stem company_name production uses, the
+        # footnote row won instead, giving a wildly wrong DPO. A test using
+        # the label shortcut would never have caught this.
+        result = parser.parse_file(filename, content)
+        company_name = os.path.splitext(filename)[0]
+        vs.add_parsed_passages(filename, company_name, result["passages"])
+        print(f"  indexed {filename} ({company_name}): {len(result['passages'])} passages"
               + (f"  [WARNING: {result['warning']}]" if result["warning"] else ""))
     return vs
 
