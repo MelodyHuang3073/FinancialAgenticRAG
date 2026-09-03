@@ -96,7 +96,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
     },
     "operating_margin": {
         "keywords_zh": ["營業利益率", "營業利潤率", "營業利益"],
-        "keywords_en": ["operating margin", "operating profit margin", "ebit margin", "operating income margin"],
+        "keywords_en": ["operating margin", "operating profit margin", "ebit margin",
+                         "operating income margin", "operating income % margin",
+                         "unadjusted operating income % margin", "unadjusted operating margin"],
         "formula_expr": "operating_income / revenue",
         "required_vars": {
             "operating_income": ["營業利益", "operating income", "operating profit", "ebit", "income from operations"],
