@@ -144,20 +144,34 @@ def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
     return hits >= max(1, len(gold_nums) // 2)  # at least half the gold numbers must surface
 
 
+def _available_doc_names() -> set:
+    """doc_names from DOC_TO_FILE whose PDF actually exists in
+    tests/financebench_pdfs/. financebench_qa_subset.json mirrors the FULL
+    150-question official dataset (see this module's docstring), which
+    covers far more doc_names/companies than this project ships PDF
+    fixtures for — a question whose doc_name has no available PDF can't be
+    run at all and is skipped (see test_financebench_question below)
+    rather than the whole suite failing to collect."""
+    return {
+        doc_name for doc_name, (filename, _) in DOC_TO_FILE.items()
+        if os.path.exists(os.path.join(FIXTURES_DIR, filename))
+    }
+
+
 def _build_indexed_store() -> FinancialVectorStoreManager:
-    """Parse all 4 real 10-K PDFs with the project's actual parser and index
-    them exactly the way the real upload flow does (FinancialFileParser ->
+    """Parse every real 10-K PDF this project ships a fixture for (per
+    DOC_TO_FILE) with the project's actual parser and index them exactly
+    the way the real upload flow does (FinancialFileParser ->
     add_parsed_passages), so this test exercises the real ingestion path,
-    not a shortcut."""
+    not a shortcut. doc_names with no matching PDF are silently skipped
+    here (see _available_doc_names) — their questions are individually
+    skipped by the test, not treated as a fatal setup error."""
     vs = FinancialVectorStoreManager()
     parser = FinancialFileParser()
     for doc_name, (filename, company) in DOC_TO_FILE.items():
         path = os.path.join(FIXTURES_DIR, filename)
         if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"Missing fixture PDF: {path}\n"
-                f"Copy the 4 real 10-K PDFs into tests/financebench_pdfs/ first."
-            )
+            continue
         with open(path, "rb") as f:
             content = f.read()
         result = parser._parse_pdf(filename, content, company)
@@ -180,11 +194,23 @@ def run_financebench_subset(verbose: bool = True):
     vs = _build_indexed_store()
     orchestrator = FinAgentRAGOrchestrator(vector_store=vs)
 
+    available_docs = _available_doc_names()
     results = []
     for i, qa in enumerate(qa_pairs, 1):
         question = qa["question"]
         gold = qa["answer"]
         doc_name = qa["doc_name"]
+
+        if doc_name not in available_docs:
+            results.append({
+                "doc_name": doc_name, "question": question, "gold": gold,
+                "model_answer": "", "passed": None,
+                "check_kind": "no PDF fixture available", "error": None,
+            })
+            if verbose:
+                print(f"\n[{i}/{len(qa_pairs)}] ⏭️  SKIP  (no PDF fixture)  [{doc_name}]")
+                print(f"  Q: {question}")
+            continue
 
         try:
             res = orchestrator.process_query(question)
@@ -253,6 +279,8 @@ import pytest
 
 @pytest.mark.parametrize("qa", _QA_PAIRS, ids=[f"{q['doc_name']}::{q['question'][:40]}" for q in _QA_PAIRS])
 def test_financebench_question(qa):
+    if qa["doc_name"] not in _available_doc_names():
+        pytest.skip(f"no PDF fixture for {qa['doc_name']} in tests/financebench_pdfs/")
     vs = _get_shared_store()
     orchestrator = FinAgentRAGOrchestrator(vector_store=vs)
     res = orchestrator.process_query(qa["question"])
