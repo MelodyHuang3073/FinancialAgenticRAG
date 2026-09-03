@@ -388,9 +388,28 @@ class FinanceBenchClassifier:
             "twitter": "Twitter/X",
             "spotify": "Spotify",
             "pinterest": "Pinterest",
+            "american water works": "American Water Works", "awk": "American Water Works",
+            "kraft heinz": "Kraft Heinz",
+            "jnj": "Johnson & Johnson",
+            "cvs health": "CVS Health", "cvs": "CVS Health",
+            "general mills": "General Mills",
+            "aes corporation": "AES Corporation",
+            "best buy": "Best Buy",
+            "corning": "Corning",
+            "amcor": "Amcor",
         }
+        # Plain "if keyword in q" substring matching lets a short key match
+        # INSIDE an unrelated word — confirmed real case: the "ge" key
+        # (General Electric) matched inside "avera-ge- inventory" and
+        # "mana-ge-ment", silently misclassifying entirely unrelated
+        # Kraft Heinz / JnJ questions as being about General Electric,
+        # which then made retrieval search for the wrong company's
+        # documents entirely. Real word-boundary matching (not just the
+        # left-boundary-only _kw_match used elsewhere for keyword STEMS
+        # like "improv") is correct here since a company name is always
+        # referenced as a whole word/phrase, never as a deliberate prefix.
         for keyword, name in known.items():
-            if keyword in q:
+            if re.search(r'\b' + re.escape(keyword) + r'\b', q):
                 return name
 
         # ── 2. Dynamic: extract individual capitalized tokens from original query ────
