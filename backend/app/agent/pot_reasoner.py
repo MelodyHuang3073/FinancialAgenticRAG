@@ -96,6 +96,32 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
 
 _NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+)$')
 
+# A generic "X attributable to " alias (e.g. "net income attributable to",
+# "net earnings attributable to") matches EVERY row of that shape
+# regardless of who the income is attributable TO — including carve-outs
+# for redeemable/noncontrolling/minority interests, which are a fraction
+# of the real total, not the parent company's own figure. Checked against
+# the text immediately AFTER a match (a suffix check, unlike
+# _NEGATION_PREFIX_RE's prefix check) since the disqualifying word always
+# comes after "attributable to " here. Confirmed real case: General
+# Mills' real "Net earnings attributable to General Mills" (2,707.3) lost
+# to its own "Net earnings attributable to redeemable and noncontrolling
+# interests" row (6.2) on a tied substring score, because nothing
+# distinguished "attributable to General Mills" from "attributable to
+# [[a minority carve-out]]".
+_ATTRIBUTABLE_TO_CARVEOUT_RE = re.compile(
+    r'^\s*(the\s+)?(redeemable|noncontrolling|non-controlling|minority)\b'
+)
+
+
+def _is_carveout_attribution_match(item_lower: str, match_start: int, match_len: int) -> bool:
+    """True if an alias match ending in "...attributable to" is
+    immediately followed by a redeemable/noncontrolling/minority-interest
+    carve-out rather than the reporting company's own figure."""
+    if not item_lower[:match_start + match_len].rstrip().endswith("attributable to"):
+        return False
+    return bool(_ATTRIBUTABLE_TO_CARVEOUT_RE.match(item_lower[match_start + match_len:]))
+
 
 def _is_negated_match(item_lower: str, match_start: int) -> bool:
     """
@@ -192,8 +218,18 @@ def _to_float(s: str) -> Optional[float]:
     happened to be positive that period survived untouched, making the
     gap look like sporadic missing data rather than the systematic
     parsing bug it actually was.
+
+    Also strips a leading/embedded "$" -- a table's first data column (or
+    every column, depending on the filer's formatting) routinely carries
+    its own currency symbol (e.g. "$2,707.3"), which bare float() rejects
+    outright. Confirmed real case: General Mills' own "Net earnings
+    attributable to General Mills" row ("$2,707.3 | $2,339.8 | $2,181.2")
+    silently produced zero usable values -- every single column -- while
+    an unrelated row a few lines above it, with no "$" prefix, parsed
+    fine, so retention_ratio fell through to a same-page fallback that
+    grabbed a completely different company's data instead.
     """
-    cleaned = str(s).strip().replace(",", "").replace("%", "").strip()
+    cleaned = str(s).strip().replace(",", "").replace("%", "").replace("$", "").strip()
     negative = cleaned.startswith("(") and cleaned.endswith(")")
     if negative:
         cleaned = cleaned[1:-1]
@@ -653,6 +689,8 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
         idx = label_norm.find(a)
         if idx == -1 or _is_negated_match(label_norm, idx):
             continue
+        if _is_carveout_attribution_match(label_norm, idx, len(a)):
+            continue
         if label_norm == a or label_norm == f"total {a}":
             return 2
         return 1
@@ -760,10 +798,37 @@ def _resolve_composite_item(
     return by_year
 
 
+def _entity_words(name: str) -> set:
+    r"""Lowercase, year/underscore/extension-stripped word set for a company
+    name or a raw corpus company field (e.g. "ACTIVISIONBLIZZARD_2019_10K"
+    -> {"activisionblizzard"}, "Activision Blizzard" -> {"activision",
+    "blizzard"}). Used only for the cheap entity-match check below — not a
+    full re-implementation of hybrid_retriever._company_match_score.
+    Excludes "10k"/"10-k": every company's raw filename-stem field ends in
+    this same filing-type suffix, so leaving it in would make ANY two
+    companies "overlap" on that one generic word alone (confirmed real
+    case: this alone made "ACTIVISIONBLIZZARD_2019_10K" and
+    "BESTBUY_2017_10K" register as a match).
+
+    Year-stripping uses (?<!\d)...(?!\d) rather than \b: \b never fires
+    between "_" and a digit (both count as word characters to regex), so
+    a naive \b-bounded pattern silently fails to strip the year out of
+    "GENERALMILLS_2022_10K" at all — leaving "2022" behind as a "word"
+    that then makes ANY two same-year companies register as a match via
+    the intersection check below (confirmed real case: this alone made
+    "GENERALMILLS_2022_10K" and "AMERICANWATERWORKS_2022_10K" match on
+    their shared "2022"). See orchestrator._match_entity_to_corpus for
+    the same bug, fixed the same way, in a different function."""
+    n = re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', name)
+    n = re.sub(r'[_\-]+', ' ', n)
+    return {w for w in n.lower().split() if len(w) >= 2 and w != "10k"}
+
+
 def _extract_formula_guided(
     evidence_list: List[Dict[str, Any]],
     formula_entry: Dict[str, Any],
     query_years: List[str],
+    entity: str = "",
 ) -> Tuple[Dict[str, float], Dict[str, List[Tuple[float, str]]], Dict[str, Dict[str, Any]]]:
     """
     For each required variable in formula_entry, search evidence for a chunk whose
@@ -937,8 +1002,37 @@ def _extract_formula_guided(
             filing_year_cache[ev_idx] = m.group(1) if m else None
         return filing_year_cache[ev_idx]
 
+    # Cache of ev_idx -> whether this evidence item's own `company` field
+    # actually matches the target entity. Retrieval's _company_match_score
+    # is a SOFT multiplier (a 0.15x mismatch penalty, not a hard filter),
+    # so a wrong company's row can and does still end up in evidence_list
+    # — and once there, nothing before this check ever verified WHICH
+    # company a candidate came from: is_primary only guards against a
+    # supplementary/guarantor schedule within the SAME filing, and
+    # year_matches_filing only compares reporting years, not identity.
+    # Confirmed real case: Activision Blizzard's FY2017 capex resolved to
+    # Best Buy's own "Total capital expenditures" row (582) instead of
+    # Activision's own "Capital expenditures" row (155) — Best Buy's row
+    # scored an exact "Total {alias}" match (score 2, tied with
+    # Activision's own exact match) purely on label text, with nothing in
+    # the priority tuple aware the two rows came from different companies.
+    entity_target_words = _entity_words(entity) if entity and entity.lower() not in ("company", "unknown", "") else None
+    entity_match_cache: Dict[int, bool] = {}
+
+    def _entity_matches(ev_idx: int) -> bool:
+        if entity_target_words is None:
+            return True
+        if ev_idx not in entity_match_cache:
+            doc_company = evidence_list[ev_idx].get("company", "") or ""
+            doc_words = _entity_words(doc_company)
+            entity_match_cache[ev_idx] = bool(entity_target_words) and (
+                entity_target_words <= doc_words or doc_words <= entity_target_words
+                or bool(entity_target_words & doc_words)
+            )
+        return entity_match_cache[ev_idx]
+
     for placeholder in var_aliases:
-        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, bool, int], int, str]] = {}
+        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, bool, bool, int], int, str]] = {}
         for val, yr, score, source, is_primary, ev_idx, line_item_label in candidates[placeholder]:
             # When a company has MULTIPLE 10-Ks indexed together, a later
             # filing's comparative/historical column for an earlier year
@@ -961,7 +1055,10 @@ def _extract_formula_guided(
             # year's filing still beats a supplementary-schedule row from
             # the "right" filing).
             year_matches_filing = _filing_year(ev_idx) == yr
-            priority = (is_primary, year_matches_filing, score)
+            # entity_matches leads the tuple: identity correctness beats
+            # every other signal — a right-company partial/sub-item match
+            # must always outrank a wrong-company "Total X" exact match.
+            priority = (_entity_matches(ev_idx), is_primary, year_matches_filing, score)
             existing = best_by_year.get(yr)
             if existing is None or priority > existing[3]:
                 best_by_year[yr] = (val, score, source, priority, ev_idx, line_item_label)
@@ -1021,25 +1118,56 @@ def _extract_formula_guided(
     # reported as several sub-items, never one line (see
     # _COMPOSITE_ITEM_ALIASES). Tried BEFORE the free-text fallback —
     # summing genuinely structured sub-item rows is more reliable than
-    # narrative-text keyword proximity. Never overrides a year that
-    # already has a real direct match.
+    # narrative-text keyword proximity.
+    #
+    # Runs whenever the placeholder is composite-eligible at all, not just
+    # when _needs_ft_fallback says a year is missing outright — a WEAK
+    # (score-1, substring-only) direct match can and does exist for a
+    # year alongside the real composite breakdown, and that weak match
+    # must not silently block the composite sum from ever being tried.
+    # Confirmed real case: Amcor's balance sheet header row "Inventories,
+    # net" carries no value of its own (split into "Raw materials and
+    # supplies" + "Work in process and finished goods" sub-rows below
+    # it) — genuinely needing the composite path — but an unrelated small
+    # segment-note table elsewhere in the same filing, also just labeled
+    # "Inventories", scored a substring match too (60 / 71, versus the
+    # real ~2,213 / ~2,439), and because THAT made resolved["inventory"]
+    # non-empty, the composite fallback never even ran. A composite sum
+    # only ever REPLACES a year whose existing winner was a weak
+    # (score < 2) match — an exact "Total {alias}" match (score 2) is
+    # always trusted over a reconstructed sum.
     for placeholder in var_aliases:
         if placeholder not in _COMPOSITE_ITEM_ALIASES:
-            continue
-        if not _needs_ft_fallback(placeholder, resolved[placeholder]):
             continue
         composite_by_year = _resolve_composite_item(
             evidence_list, _COMPOSITE_ITEM_ALIASES[placeholder]
         )
-        existing_years = {y for _, y in resolved[placeholder]}
+        if not composite_by_year:
+            continue
+        ph_meta = winner_meta.setdefault(placeholder, {})
+        existing_val_by_year = {y: v for v, y in resolved[placeholder]}
         for yr, (total_val, labels) in composite_by_year.items():
-            if yr in existing_years:
+            # An exact-label match (score 2) isn't automatically more
+            # trustworthy here: the SAME simple noun ("Inventories") can
+            # legitimately label both the real consolidated concept AND
+            # an unrelated small segment/note table elsewhere in the same
+            # filing, so a bare score comparison can't tell them apart.
+            # What generalizes is magnitude — a genuinely composite item
+            # (summed from real structural sub-items) is essentially
+            # always the LARGEST plausible candidate for that concept, so
+            # prefer whichever is bigger rather than trusting score alone.
+            # Confirmed real case: Amcor's real consolidated inventory
+            # (992+1,221=2,213) lost to an unrelated small note table
+            # exactly labeled "Inventories" (60) purely because the note
+            # table's bare label was an EXACT match (score 2) while the
+            # real balance-sheet header row carries no value of its own
+            # at all (split into sub-items below it).
+            existing_val = existing_val_by_year.get(yr)
+            if existing_val is not None and abs(existing_val) >= abs(total_val):
                 continue
+            resolved[placeholder] = [(v, y) for v, y in resolved[placeholder] if y != yr]
             resolved[placeholder].append((total_val, yr))
-            winner_meta.setdefault(placeholder, {})[yr] = (
-                1, "composite", -1, " + ".join(labels)
-            )
-            existing_years.add(yr)
+            ph_meta[yr] = (1, "composite", -1, " + ".join(labels))
 
     any_needs_fallback = any(_needs_ft_fallback(ph, v) for ph, v in resolved.items())
     if any_needs_fallback and query_years:
@@ -1256,8 +1384,14 @@ def _extract_raw_numbers(evidence_list: List[Dict[str, Any]]) -> Dict[str, Dict]
 # Bug 2 fix: added "net sales", "net revenues", "cost of goods sold", etc.
 _TEXT_PATTERNS: List[Tuple[List[str], str, str]] = [
     # Revenue — all common SEC/10-K wordings
+    # Bare "sales" removed: it substring-matches unrelated lines like a
+    # cash-flow-statement "Sales of investments" row, silently misreading
+    # investing-activities proceeds as revenue (confirmed real case:
+    # Activision Blizzard's capex-to-revenue calc picked up Best Buy's own
+    # "Sales of investments" figure as FY2017 "revenue" once both
+    # companies' filings were loaded in the same corpus).
     (["net sales", "net revenues", "total net revenue",
-      "revenue", "net revenue", "total revenue", "sales",
+      "revenue", "net revenue", "total revenue",
       "\u71df\u696d\u6536\u5165", "\u71df\u6536"],
      "revenue", "Revenue"),
     (["gross profit", "\u71df\u696d\u7e6a\u5229", "\u6bdb\u5229"],
@@ -1700,6 +1834,21 @@ def _gen_formula_code(
         for ph in list(missing):
             for k, v in extracted_table.items():
                 if ph in k or ph.replace("_new", "") in v.get("canonical", ""):
+                    # This is a bare substring match on a sanitized
+                    # variable name/canonical tag — none of
+                    # _score_row_match()'s carve-out awareness applies
+                    # here, so a redeemable/noncontrolling/minority-
+                    # interest carve-out (a fraction of the real total,
+                    # not the parent company's own figure) matches just as
+                    # readily as the real row. Confirmed real case: a
+                    # "net_income_attributable" placeholder grabbed
+                    # Corning's own "Net income attributable to non-
+                    # controlling interest" (-70) here, in a run where the
+                    # primary extraction path had already correctly
+                    # rejected that same row.
+                    if re.search(r'\b(redeemable|noncontrolling|non-controlling|minority)\b',
+                                 v.get("item", "").lower()):
+                        continue
                     lines.append(f"{ph} = {v['val']}  # from table fallback")
                     available.add(ph)
                     break
@@ -2268,7 +2417,7 @@ class ProgramOfThoughtReasoner:
     """
 
     def generate_and_execute(
-        self, query: str, evidence_list: List[Dict[str, Any]]
+        self, query: str, evidence_list: List[Dict[str, Any]], entity: str = ""
     ) -> Dict[str, Any]:
         q_lower = query.lower()
         query_years = _extract_query_years(query)
@@ -2287,7 +2436,7 @@ class ProgramOfThoughtReasoner:
         duplicate_warnings: List[str] = []
         if formula_entry:
             resolved_formula, resolved_formula_series, resolved_formula_meta = _extract_formula_guided(
-                evidence_list, formula_entry, query_years
+                evidence_list, formula_entry, query_years, entity
             )
             duplicate_warnings = _detect_and_strip_duplicate_values(
                 resolved_formula, resolved_formula_series, resolved_formula_meta
