@@ -918,6 +918,30 @@ class FinancialFileParser:
             else:
                 merged.append(rest[i])
                 i += 1
+
+        # A line-item label that wraps across two physical PDF lines (e.g.
+        # "Property and equipment," on one line, "net $" on the next) can
+        # land in pdfplumber's cell grid with the SECOND line's fragment as
+        # row[0] (the label) and the FIRST line's fragment pushed into what
+        # looks like the first value column — a non-numeric string sitting
+        # where a dollar figure should be. Reclaim any such leading
+        # non-numeric "value" cells back into the label (prepended, since
+        # they came from the line ABOVE the fragment that ended up as
+        # row[0]) rather than leaving them to either masquerade as data or
+        # silently break the row's column-index alignment with the header.
+        # Confirmed real case: CVS Health's "Property and equipment, net"
+        # balance-sheet row parsed as label="net $" with "Property and
+        # equipment," sitting in the first value slot — no alias for
+        # "property and equipment, net" could ever match a label of just
+        # "net $", so fixed-asset-turnover fell back to guessing.
+        _numeric_cell_re = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.?\d*\)?%?$')
+        while (
+            merged
+            and merged[0].strip() not in ("—", "-", "–")
+            and not _numeric_cell_re.match(merged[0].strip())
+        ):
+            label = f"{merged.pop(0).strip()} {label}".strip()
+
         return [label] + merged
 
     def _inject_missing_year_header(self, rows: list, page, table_top: float) -> list:
