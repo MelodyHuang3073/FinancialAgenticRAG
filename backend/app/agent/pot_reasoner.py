@@ -94,7 +94,7 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
         _ALIAS_TO_CANONICAL[_a.lower()] = _canonical
 
 
-_NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+)$')
+_NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+|change(?:s|d)?\s+in\s+)$')
 
 # A generic "X attributable to " alias (e.g. "net income attributable to",
 # "net earnings attributable to") matches EVERY row of that shape
@@ -134,8 +134,16 @@ def _is_negated_match(item_lower: str, match_start: int) -> bool:
     matching inside "deferred revenues" (a contract-liability line, not
     income; confirmed real case: Activision Blizzard's balance sheet
     "Deferred revenues" row was picked as FY2019 revenue for a fixed-
-    asset-turnover calculation). Generic across every canonical/alias
-    pair, not specific to any one company or metric.
+    asset-turnover calculation) — or a period-delta qualifier ("change
+    in ", "changes in ") that turns a balance-sheet STOCK concept into a
+    cash-flow-statement FLOW/delta for the same period — e.g. bare
+    "inventories" matching inside a cash-flow reconciliation's "Change in
+    Inventories" row (confirmed real case: Corning's FY2020 DPO used the
+    cash-flow statement's period-over-period inventory CHANGE, 423, as
+    if it were the FY2020 inventory BALANCE, 2,438 — see
+    _extract_from_markdown_table_block()'s "Change in " prefix injection
+    for where this label form comes from). Generic across every
+    canonical/alias pair, not specific to any one company or metric.
     """
     return bool(_NEGATION_PREFIX_RE.search(item_lower[:match_start]))
 
@@ -373,6 +381,27 @@ def _extract_from_markdown_table_block(content: str, ev_company: str = "") -> Di
         period_headers = header_cells[1:]
 
         j = sep_idx + 1
+        # Every 10-K cash-flow statement has a "changes in operating
+        # assets and liabilities" section reconciling net income to
+        # operating cash flow, and its sub-rows are routinely labeled
+        # with nothing but the bare balance-sheet noun itself — "
+        # Inventories", "Accounts payable" — no "change in" qualifier at
+        # all. That bare label is a PERIOD DELTA, not the point-in-time
+        # balance a formula's "inventory"/"accounts_payable" placeholder
+        # actually wants, but it can still register an EXACT alias match
+        # (score 2) and beat the real, correctly-qualified balance-sheet
+        # row (a same-page "Inventories, net (Note 6)" style label, only
+        # ever a substring match). Confirmed real case: Corning's FY2020
+        # DPO used this cash-flow delta row (423) as its FY2020 inventory
+        # balance instead of the real 2,438, because the delta row's bare
+        # "Inventories" label scored an exact match while the real
+        # balance-sheet row only substring-matched.
+        # Detected by the section header row ("Changes in ... working
+        # capital items:" / "Changes in operating assets and
+        # liabilities:") and cleared at the section's own reliable
+        # terminator ("Net cash provided by/used in operating
+        # activities"), which every such section ends with.
+        in_wc_changes_section = False
         while j < len(lines):
             stripped = lines[j].strip()
             if not stripped or "|" not in stripped:
@@ -383,6 +412,16 @@ def _extract_from_markdown_table_block(content: str, ev_company: str = "") -> Di
                 j += 1
                 continue
             line_item_name = cells[0]
+
+            _label_lower = line_item_name.lower()
+            if "change" in _label_lower and "working capital" in _label_lower:
+                in_wc_changes_section = True
+            elif "change" in _label_lower and "operating assets" in _label_lower:
+                in_wc_changes_section = True
+            elif "net cash" in _label_lower:
+                in_wc_changes_section = False
+            elif in_wc_changes_section:
+                line_item_name = f"Change in {line_item_name}"
 
             canonical = _get_canonical(line_item_name, company_name=ev_company)
             sanitized = _sanitize(line_item_name)
@@ -2046,16 +2085,19 @@ def _pick_best_in_group(
     total/subtotal line rather than an arbitrary sub-component — using the
     same total-row-priority scoring _extract_formula_guided() already uses
     (_score_row_match: 2 = genuine total row, 1 = sub-item substring match).
-    Ties broken by matching preferred_year, then by first occurrence.
+    Ties broken by matching preferred_year, then by shorter label (closer
+    to the alias itself rather than a footnote elaboration padded with
+    extra qualifying text — see _find_pair_for_margin's pair_key for the
+    confirmed real case this guards against), then by first occurrence.
     """
     if not items:
         return None
     aliases = _CANONICAL_TO_ALIASES.get(canonical, [canonical])
 
-    def sort_key(x: Dict) -> Tuple[int, int]:
+    def sort_key(x: Dict) -> Tuple[int, int, int]:
         score = _score_row_match(x["item"], aliases)
         year_match = 1 if preferred_year and x["year"] == preferred_year else 0
-        return (score, year_match)
+        return (score, year_match, -len(x["item"]))
 
     return max(items, key=sort_key)
 
@@ -2082,11 +2124,27 @@ def _find_pair_for_margin(
 
     same_year_pairs = [(n, d) for n in nums for d in dens if n["year"] == d["year"]]
     if same_year_pairs:
-        def pair_key(pair: Tuple[Dict, Dict]) -> Tuple[int, int]:
+        def pair_key(pair: Tuple[Dict, Dict]) -> Tuple[int, int, int]:
             n, d = pair
             year_match = 1 if preferred_year and n["year"] == preferred_year else 0
             score = _score_row_match(n["item"], num_aliases) + _score_row_match(d["item"], den_aliases)
-            return (year_match, score)
+            # Tie-break on label length (shorter = better) when score ties:
+            # _score_row_match's substring tier (score 1) can't distinguish
+            # a genuine close match ("Net Operating Revenues" vs alias
+            # "revenue") from one where the alias is a tiny fragment of a
+            # much longer, unrelated label ("Net operating revenues
+            # Foreign currency contracts", a derivatives-hedging footnote
+            # row) — both just register as "substring present". A shorter
+            # label is far more likely to be the real statement line, not
+            # a footnote elaboration diluted by extra qualifying text.
+            # Confirmed real case: Coca-Cola's FY2021 COGS % margin paired
+            # the real "Cost of goods sold" (15,357) with a hedging
+            # footnote's "Net operating revenues Foreign currency
+            # contracts" (77) instead of the real "Net Operating Revenues"
+            # (38,655) — both revenue candidates tied at score 1, and the
+            # footnote one happened to be discovered first.
+            neg_len = -(len(n["item"]) + len(d["item"]))
+            return (year_match, score, neg_len)
         return max(same_year_pairs, key=pair_key)
 
     # Fallback: no shared year — best candidate for each side independently
