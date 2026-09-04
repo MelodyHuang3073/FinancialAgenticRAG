@@ -844,7 +844,7 @@ function InputBar({ value, onChange, onSubmit, onFileClick, uploading, disabled 
         <button
           onClick={onFileClick}
           disabled={uploading}
-          title="上傳財報 PDF / CSV / TXT / JSON"
+          title="上傳財報 PDF"
           style={{
             display: 'flex', alignItems: 'center', gap: 5,
             padding: '4px 10px', borderRadius: 999,
@@ -908,7 +908,7 @@ function WelcomeScreen({ uploadedFiles, onFileClick, uploading }) {
         >
           <Paperclip size={16} color="#555" />
           <span style={{ fontSize: 14, color: '#333', fontWeight: 500 }}>
-            {uploading ? '解析向量中...' : '上傳財報 PDF / CSV / TXT / JSON'}
+            {uploading ? '解析向量中...' : '上傳財報 PDF'}
           </span>
         </button>
       </div>
@@ -981,7 +981,7 @@ export default function ChatTerminal({
       
       {/* Hidden file input */}
       <input type="file" ref={fileInputRef} onChange={handleFileChange}
-        accept=".pdf,.csv,.txt,.md,.json" style={{ display: 'none' }} />
+        accept=".pdf" style={{ display: 'none' }} />
 
       {/* Upload notification banner */}
       {uploadMsg && (
