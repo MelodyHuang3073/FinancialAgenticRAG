@@ -10,7 +10,7 @@ FinAgent-RAG Orchestrator
   6. LLM 回答綜合（llm_client）
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from app.rag.vector_store import FinancialVectorStoreManager
 from app.agent.question_classifier import FinanceBenchClassifier
@@ -24,7 +24,18 @@ from app.agent.financial_formula_library import detect_formula, get_variable_ali
 
 class FinAgentRAGOrchestrator:
     RETRIEVAL_TOP_K = 3          # chunks per sub-question (was 5)
-    RETRIEVAL_MAX_TOTAL = 15     # hard ceiling on total evidence buffer size
+    # Hard ceiling on total evidence buffer size. Must comfortably fit every
+    # sub-query a single formula's own required_vars can generate (top_k=3
+    # each) — a composite formula like cash_conversion_cycle needs 8
+    # placeholders (cogs, revenue, inv_old/new, ar_old/new, ap_old/new), so
+    # 8*3=24 sub-results. The old value of 15 silently cut off mid-formula,
+    # dropping ap_old/ap_new before they were ever retrieved (confirmed
+    # real case: General Mills FY2019 CCC — accounts payable never entered
+    # the evidence buffer at all, and the whole computation fell back to a
+    # generic, ungrounded LLM guess). Sized with headroom above today's
+    # largest formula rather than pinned to exactly 24, so the next
+    # formula with one or two more placeholders doesn't repeat this.
+    RETRIEVAL_MAX_TOTAL = 30
     CONTEXT_CHUNK_LIMIT = 8
 
     def __init__(self, vector_store: FinancialVectorStoreManager):
@@ -77,7 +88,27 @@ class FinAgentRAGOrchestrator:
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
 
-        # Entity alignment: match entity against actual corpus company names
+        # Entity alignment: match entity against actual corpus company names.
+        # The classifier's OWN clean entity ("General Mills") is kept
+        # separately as `clean_entity` for embedding in retrieval QUERY
+        # TEXT — production's raw filename-stem company field (e.g.
+        # "GENERALMILLS_2022_10K") is what classification["entity"] becomes
+        # below, and that's the right form for the entity= soft-filter
+        # parameter passed to search() (_company_match_score compares it
+        # against doc_company), but a poor form to paste into the query
+        # string itself: many FinanceBench filenames glue multi-word
+        # company names together with no separator ("GENERALMILLS",
+        # "BESTBUY", "KRAFTHEINZ", "AMERICANWATERWORKS"...), so the
+        # tokenizer produces one fused token that can never match the two
+        # separate words ("general", "mills") the filing's own text
+        # actually uses — silently losing all of that token's BM25
+        # contribution. Confirmed real case: General Mills' FY2022
+        # "Net earnings attributable to General Mills" row scored far
+        # lower against a query built from "GENERALMILLS_2022_10K" than
+        # the identical query built from "General Mills", pushing an
+        # unrelated row into the retrieval results the formula extraction
+        # then had to guess from.
+        clean_entity = classification["entity"]
         classification["entity"] = self._match_entity_to_corpus(
             classification["entity"], query
         )
@@ -118,8 +149,9 @@ class FinAgentRAGOrchestrator:
         # exactly what extraction will later look for, deterministically.
         formula_entry = detect_formula(query) if answer_mode == "NUMERIC" else None
         if formula_entry:
+            query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
             sub_questions = self._build_formula_subquestions(
-                formula_entry, classification["entity"], classification["years"]
+                formula_entry, query_entity, classification["years"]
             )
         elif answer_mode == "NUMERIC":
             sub_questions = self.decomposer.decompose(
@@ -129,7 +161,9 @@ class FinAgentRAGOrchestrator:
                 entity=classification["entity"],
             )
         else:
-            sub_questions = self._build_non_numeric_subquestions(query, answer_mode)
+            sub_questions = self._build_non_numeric_subquestions(
+                query, answer_mode, classification.get("target_metrics")
+            )
 
         trace_steps.append({
             "step_name": "Query Decomposition",
@@ -334,7 +368,29 @@ class FinAgentRAGOrchestrator:
                 "verification": {}
             }
 
-            search_queries = classification["retrieval_queries"]
+            # If the target metric happens to match a registered formula
+            # (e.g. "working_capital" = current_assets - current_liabilities),
+            # search for its OWN required_vars instead of the classifier's
+            # generic retrieval_queries — those are often just the raw
+            # question text plus a fixed boilerplate suffix ("operating
+            # margin cost structure segment" for every EXPLANATION
+            # question), which can score near zero against a filing that
+            # never literally prints the derived metric's own name.
+            # Confirmed real case: "Does American Water Works have
+            # positive working capital..." searched for "Working Capital"
+            # itself, which appears nowhere as a real line item, and
+            # retrieved unrelated debt-exhibit boilerplate instead of
+            # "Total current assets"/"Total current liabilities" (both of
+            # which retrieve cleanly on their own).
+            non_numeric_formula = detect_formula(query)
+            if non_numeric_formula:
+                formula_query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
+                search_queries = [
+                    step["query"] for step in
+                    self._build_formula_subquestions(non_numeric_formula, formula_query_entity, classification["years"])
+                ]
+            else:
+                search_queries = classification["retrieval_queries"]
             new_hits = []
             for sq in search_queries:
                 new_hits.extend(self.vector_store.search(
@@ -422,12 +478,30 @@ class FinAgentRAGOrchestrator:
         norm_classifier = _normalise(classifier_entity)
         best_company = None
         best_score = 0
+        best_year: Optional[str] = None
+
+        # Years the query itself mentions — used only to break ties between
+        # multiple filings of the SAME company (see below), since
+        # _normalise() deliberately strips year tokens before scoring so
+        # "Corning" can match either "CORNING_2021_10K" or
+        # "CORNING_2022_10K" equally well in the first place.
+        #
+        # Uses (?<!\d)...(?!\d) rather than \b: \b only fires at a
+        # word/non-word transition, and both "_" and digits count as word
+        # characters to regex — so \b2021\b never matches inside
+        # "CORNING_2021_10K" (underscore before) or "FY2021" (letter
+        # before, no separator) at all, silently defeating year detection
+        # in exactly the two places years actually show up here.
+        _YEAR_RE = r'(?<!\d)(?:20|19)\d{2}(?!\d)'
+        query_years = set(_re.findall(_YEAR_RE, query))
 
         for uf in self.vector_store.uploaded_files:
             corpus_company = uf.get("company", "")
             if not corpus_company:
                 continue
             norm_corpus = _normalise(corpus_company)
+            corpus_year_match = _re.search(_YEAR_RE, corpus_company)
+            corpus_year = corpus_year_match.group(0) if corpus_year_match else None
 
             score = 0
             # Score 1: corpus company words appear in query
@@ -445,9 +519,28 @@ class FinAgentRAGOrchestrator:
                 if norm_classifier in norm_corpus or norm_corpus in norm_classifier:
                     score += 5
 
-            if score > best_score:
+            if score > best_score or (
+                # Tie-break between multiple filings of the SAME company
+                # (identical score, since the company-name portion is
+                # identical once years are stripped): prefer whichever
+                # filing's OWN year is the one the query actually asks
+                # about, falling back to the most recent filing — never an
+                # arbitrary "whichever was uploaded first". Confirmed real
+                # case: a "how did Corning's tax rate change between
+                # FY2021 and FY2022" question, with both CORNING_2021_10K
+                # and CORNING_2022_10K loaded, tied at the same score and
+                # picked CORNING_2021_10K purely by upload order — a
+                # filing that structurally CANNOT contain FY2022 figures
+                # at all, since it predates that fiscal year.
+                score > 0 and score == best_score and corpus_year and (
+                    (corpus_year in query_years and best_year not in query_years)
+                    or (corpus_year in query_years and best_year in query_years and corpus_year > best_year)
+                    or (not query_years and (best_year is None or corpus_year > best_year))
+                )
+            ):
                 best_score = score
                 best_company = corpus_company
+                best_year = corpus_year
 
         if best_company and best_score > 0:
             return best_company
@@ -510,11 +603,26 @@ class FinAgentRAGOrchestrator:
             # an all-English 10-K for Chinese text, retrieving nothing
             # relevant (confirmed real case: DPO's own retrieval queries
             # came out as "Amazon 應付帳款 2016" etc., matching zero real
-            # content in the English filing). Prefer the first ASCII/
-            # Latin-alphabet alias — every formula in the library also
-            # lists an English variant — falling back to aliases[0] only
-            # if none exists.
-            primary_alias = next((a for a in aliases if a.isascii()), aliases[0] if aliases else placeholder)
+            # content in the English filing). Prefer ASCII/Latin-alphabet
+            # aliases — every formula in the library also lists an English
+            # variant — falling back to aliases[0] only if none exists.
+            #
+            # Uses up to the first TWO distinct ASCII aliases, not just
+            # one: different companies genuinely use different phrasings
+            # for the same line item (e.g. "net income attributable to
+            # shareowners" vs. "net earnings attributable to <company>"),
+            # and picking only the single first alias means the query only
+            # ever matches ONE company's convention. Confirmed real case:
+            # General Mills' "Net earnings attributable to General Mills"
+            # row scored below an unrelated NCI row when the query only
+            # contained "net income attributable to shareowners" (Coca-
+            # Cola's own phrasing) — combining both alias variants into one
+            # query correctly ranks the right row #1 for EITHER company's
+            # wording, without needing a second retrieval round-trip.
+            ascii_aliases = [a for a in aliases if a.isascii()]
+            primary_alias = " ".join(dict.fromkeys(ascii_aliases[:2])) if ascii_aliases else (
+                aliases[0] if aliases else placeholder
+            )
             if is_period_average and sorted_years:
                 target_years = sorted_years
             elif is_multi_year and len(sorted_years) >= 2:
@@ -535,18 +643,40 @@ class FinAgentRAGOrchestrator:
                 })
         return steps
 
-    def _build_non_numeric_subquestions(self, query: str, answer_mode: str) -> List[Dict[str, str]]:
+    def _build_non_numeric_subquestions(
+        self, query: str, answer_mode: str, target_metrics: Optional[List[str]] = None,
+    ) -> List[Dict[str, str]]:
+        # The retrieval suffix for each template used to be a fixed phrase
+        # ("operating margin cost structure segment" for EVERY EXPLANATION
+        # question, regardless of what the question actually asked about),
+        # which only coincidentally overlaps with what a given question
+        # needs. When the classifier already identified specific
+        # target_metrics, search for THOSE instead — a general improvement
+        # for any qualitative question, not just this one. Confirmed real
+        # case: "Does American Water Works have positive working capital"
+        # (target_metrics=['working_capital']) retrieved evidence about
+        # operating margin and cost structure instead of current assets/
+        # liabilities, so the model's answer never stated the actual
+        # -$1,561M figure at all — just a generic non-answer.
+        metric_terms = " ".join(m.replace("_", " ") for m in (target_metrics or []))
+        fallback_suffix = {
+            "ASSESSMENT": "capital expenditure assets depreciation",
+            "EXCLUSION": "segment revenue organic growth acquisition",
+            "EXPLANATION": "operating margin cost structure segment",
+        }.get(answer_mode, "")
+        retrieval_query = f"{query} {metric_terms or fallback_suffix}".strip()
+
         templates = {
             "ASSESSMENT": [
-                {"step": 1, "type": "retrieval", "query": f"{query} capital expenditure assets depreciation"},
+                {"step": 1, "type": "retrieval", "query": retrieval_query},
                 {"step": 2, "type": "analysis", "query": "Assess the metric's suitability"},
             ],
             "EXCLUSION": [
-                {"step": 1, "type": "retrieval", "query": f"{query} segment revenue organic growth acquisition"},
+                {"step": 1, "type": "retrieval", "query": retrieval_query},
                 {"step": 2, "type": "analysis", "query": "Isolate organic vs M&A impact"},
             ],
             "EXPLANATION": [
-                {"step": 1, "type": "retrieval", "query": f"{query} operating margin cost structure segment"},
+                {"step": 1, "type": "retrieval", "query": retrieval_query},
                 {"step": 2, "type": "analysis", "query": "Identify key drivers"},
             ],
         }

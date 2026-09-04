@@ -1,0 +1,352 @@
+[
+  {
+    "doc_name": "ACTIVISIONBLIZZARD_2019_10K",
+    "question": "What is the FY2019 fixed asset turnover ratio for Activision Blizzard? Fixed asset turnover ratio is defined as: FY2019 revenue / (average PP&E between FY2018 and FY2019). Round your answer to two decimal places. Base your judgments on the information provided primarily in the statement of income and the statement of financial position.",
+    "gold": "24.26",
+    "model_answer": "The FY2019 fixed asset turnover ratio for Activision Blizzard is **24.26**. This ratio is calculated using the FY2019 revenue of **$6,489 million** and the average property, plant, and equipment (PP&E) of **$268 million** (average of **$282 million** in FY2018 and **$253 million** in FY2019).",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 23.343204975128174
+  },
+  {
+    "doc_name": "ACTIVISIONBLIZZARD_2019_10K",
+    "question": "What is the FY2017 - FY2019 3 year average of capex as a % of revenue for Activision Blizzard? Answer in units of percents and round to one decimal place. Calculate (or extract) the answer from the statement of income and the cash flow statement.",
+    "gold": "1.9%",
+    "model_answer": "The FY2017 - FY2019 three-year average of capital expenditures as a percentage of revenue for Activision Blizzard is **13.3%**. This figure reflects the company's investment in capital expenditures relative to its revenue during that period.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 19.284539461135864
+  },
+  {
+    "doc_name": "ADOBE_2015_10K",
+    "question": "You are an investment banker and your only resource(s) to answer the following question is (are): the statement of financial position and the cash flow statement. Here's the question: what is the FY2015 operating cash flow ratio for Adobe? Operating cash flow ratio is defined as: cash from operations / total current liabilities. Round your answer to two decimal places.",
+    "gold": "0.66",
+    "model_answer": "The FY2015 operating cash flow ratio for Adobe is **0.66**. This is calculated using cash from operations of **$1,469,502** and total current liabilities of **$2,213,556**.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.784600257873535
+  },
+  {
+    "doc_name": "ADOBE_2016_10K",
+    "question": "What is Adobe's year-over-year change in unadjusted operating income from FY2015 to FY2016 (in units of percents and round to one decimal place)? Give a solution to the question by using the income statement.",
+    "gold": "65.4%",
+    "model_answer": "Adobe's year-over-year change in unadjusted operating income from FY2015 to FY2016 is **65.4%**. The operating income increased from **$903,095** in 2015 to **$1,493,602** in 2016, reflecting significant growth in the company's profitability.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 15.821048021316528
+  },
+  {
+    "doc_name": "ADOBE_2017_10K",
+    "question": "What is the FY2017 operating cash flow ratio for Adobe? Operating cash flow ratio is defined as: cash from operations / total current liabilities. Round your answer to two decimal places. Please utilize information provided primarily within the balance sheet and the cash flow statement.",
+    "gold": "0.83",
+    "model_answer": "The FY2017 operating cash flow ratio for Adobe is **0.83**. This is calculated using cash from operations of **$2,912,853** and total current liabilities of **$3,527,457**.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.384435415267944
+  },
+  {
+    "doc_name": "ADOBE_2022_10K",
+    "question": "Does Adobe have an improving operating margin profile as of FY2022? If operating margin is not a useful metric for a company like this, then state that and explain why.",
+    "gold": "No the operating margins of Adobe have recently declined from 36.8% in FY 2021 to 34.6% in FY2022. A drop by 2.2% in a year.",
+    "model_answer": "Adobe does not have an improving operating margin profile as of FY2022. The operating margin decreased from **36.76% in 2021** to **34.64% in 2022**, reflecting a decline of **2.12%**. \n\nWhile operating margin is a useful metric for many companies, it may not fully capture Adobe's financial health due to its significant investment in research and development, which can temporarily depress margins. Additionally, the subscription-based model may lead to fluctuations in operating income that do not reflect long-term profitability trends.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 5.679590940475464
+  },
+  {
+    "doc_name": "AES_2022_10K",
+    "question": "Roughly how many times has AES Corporation sold its inventory in FY2022? Calculate inventory turnover ratio for the FY2022; if conventional inventory management is not meaningful for the company then state that and explain why.",
+    "gold": "AES has converted inventory 9.5 times in FY 2022.",
+    "model_answer": "AES Corporation sold its inventory approximately **9.54 times** in FY2022, as indicated by the inventory turnover ratio. \n\nGiven the nature of AES Corporation's business in the energy sector, conventional inventory management may not be meaningful. This is because the company primarily deals with long-term assets and infrastructure rather than traditional inventory items, which can skew typical inventory turnover metrics.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 10.223039627075195
+  },
+  {
+    "doc_name": "AES_2022_10K",
+    "question": "Based on the information provided primarily in the statement of financial position and the statement of income, what is AES's FY2022 return on assets (ROA)? ROA is defined as: FY2022 net income / (average total assets between FY2021 and FY2022). Round your answer to two decimal places.",
+    "gold": "-0.02",
+    "model_answer": "AES's FY2022 return on assets (ROA) is **-1.53%**. This figure is derived from the net income of **-546** and the average total assets of **38,363** for FY2022 and **32,963** for FY2021.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 13.841820478439331
+  },
+  {
+    "doc_name": "AMAZON_2017_10K",
+    "question": "What is Amazon's FY2017 days payable outstanding (DPO)? DPO is defined as: 365 * (average accounts payable between FY2016 and FY2017) / (FY2017 COGS + change in inventory between FY2016 and FY2017). Round your answer to two decimal places. Address the question by using the line items and information shown within the balance sheet and the P&L statement.",
+    "gold": "93.86",
+    "model_answer": "Amazon's FY2017 Days Payable Outstanding (DPO) is **93.86**. This figure is calculated using the average accounts payable and the cost of goods sold along with the change in inventory from FY2016 to FY2017.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 22.252651691436768
+  },
+  {
+    "doc_name": "AMAZON_2017_10K",
+    "question": "What is Amazon's year-over-year change in revenue from FY2016 to FY2017 (in units of percents and round to one decimal place)? Calculate what was asked by utilizing the line items clearly shown in the statement of income.",
+    "gold": "30.8%",
+    "model_answer": "Amazon's year-over-year change in revenue from FY2016 to FY2017 is **30.8%**. This growth reflects an increase in total net sales from **$135,987 million** in 2016 to **$177,866 million** in 2017.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 12.02342963218689
+  },
+  {
+    "doc_name": "AMCOR_2023_10K",
+    "question": "Has AMCOR's quick ratio improved or declined between FY2023 and FY2022? If the quick ratio is not something that a financial analyst would ask about a company like this, then state that and explain why.",
+    "gold": "The quick ratio has slightly improved from 0.67 times to 0.69 times between FY 2023 and FY 2022.(3.4% jump)",
+    "model_answer": "AMCOR's quick ratio has **increased** from **0.669x** in FY2022 to **0.6915x** in FY2023, indicating an improvement in its short-term liquidity position. This change reflects a positive trend in the company's ability to cover its current liabilities with its most liquid assets.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 14.192654132843018
+  },
+  {
+    "doc_name": "AMCOR_2023_10K",
+    "question": "Does AMCOR have an improving gross margin profile as of FY2023? If gross margin is not a useful metric for a company like this, then state that and explain why.",
+    "gold": "No. For AMCOR there has been a slight decline in gross margins by 0.8%.",
+    "model_answer": "AMCOR's gross margin profile is not improving as of FY2023. The gross margin decreased to **18.545%** in 2023 from **19.3894%** in 2022, reflecting a decline of **0.8444%**. This suggests a downward trend in profitability relative to sales. \n\nGross margin can be a useful metric for AMCOR, but it may not fully capture the company's performance due to the nature of its operations, which involve significant costs related to materials and production. Therefore, while gross margin provides insights, it should be considered alongside other metrics for a comprehensive analysis.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 10.542025804519653
+  },
+  {
+    "doc_name": "AMD_2015_10K",
+    "question": "Answer the following question as if you are an equity research analyst and have lost internet connection so you do not have access to financial metric providers. According to the details clearly outlined within the P&L statement and the statement of cash flows, what is the FY2015 depreciation and amortization (D&A from cash flow statement) % margin for AMD?",
+    "gold": "4.2%",
+    "model_answer": "The FY2015 depreciation and amortization (D&A) margin for AMD is **0.01%**. This figure is derived from the total D&A of **$167 million** relative to the company's total revenue for the year.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.461253643035889
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2020_10K",
+    "question": "How much (in USD billions) did American Water Works pay out in cash dividends for FY2020? Compute or extract the answer by primarily using the details outlined in the statement of cash flows.",
+    "gold": "$0.40",
+    "model_answer": "American Water Works paid out **$389 million** in cash dividends for FY2020. This figure is derived from the statement of cash flows, specifically under the line item for dividends paid.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.678094148635864
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2021_10K",
+    "question": "Basing your judgments off of the cash flow statement and the income statement, what is American Water Works's FY2021 unadjusted operating income + depreciation and amortization from the cash flow statement (unadjusted EBITDA) in USD millions?",
+    "gold": "$1832.00",
+    "model_answer": "American Water Works's FY2021 unadjusted operating income plus depreciation and amortization (unadjusted EBITDA) is **$1,832 million**. This figure combines the operating income of **$1,196 million** and depreciation and amortization of **$636 million**.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.631480693817139
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2022_10K",
+    "question": "Does American Water Works have positive working capital based on FY2022 data? If working capital is not a useful or relevant metric for this company, then please state that and explain why.",
+    "gold": "No, American Water Works had negative working capital of -$1561M in FY 2022.",
+    "model_answer": "American Water Works does not have positive working capital based on FY2022 data. The total current assets amount to **$1,250 million**, while total current liabilities are **$2,811 million**, resulting in a working capital of **-$1,561 million**.\n\nWorking capital may not be a relevant metric for American Water Works due to its nature as a utility company, which typically has stable cash flows and long-term assets. This industry often relies more on cash flow analysis and long-term financial health rather than short-term liquidity measures like working capital.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 11.303427457809448
+  },
+  {
+    "doc_name": "BESTBUY_2017_10K",
+    "question": "In agreement with the information outlined in the income statement, what is the FY2015 - FY2017 3 year average net profit margin (as a %) for Best Buy? Answer in units of percents and round to one decimal place.",
+    "gold": "2.8%",
+    "model_answer": "The FY2015 - FY2017 3-year average net profit margin for Best Buy is **6.2%**. This figure is derived from the net earnings attributable to shareholders over the specified years.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.79203200340271
+  },
+  {
+    "doc_name": "BESTBUY_2019_10K",
+    "question": "What is the year end FY2019 total amount of inventories for Best Buy? Answer in USD millions. Base your judgments on the information provided primarily in the balance sheet.",
+    "gold": "$5409.00",
+    "model_answer": "The total amount of inventories for Best Buy at the end of FY2019 is **$5,409 million**. This figure reflects the company's merchandise inventories as reported in their financial statements.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 6.864004135131836
+  },
+  {
+    "doc_name": "BLOCK_2016_10K",
+    "question": "Considering the data in the balance sheet, what is Block's (formerly known as Square) FY2016 working capital ratio? Define working capital ratio as total current assets divided by total current liabilities. Round your answer to two decimal places.",
+    "gold": "1.73",
+    "model_answer": "Block's FY2016 working capital ratio is **1.73**. This ratio is calculated by dividing total current assets of **$1,001,425** by total current liabilities of **$577,464**.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 7.064701557159424
+  },
+  {
+    "doc_name": "BLOCK_2020_10K",
+    "question": "What is the FY2019 - FY2020 total revenue growth rate for Block (formerly known as Square)? Answer in units of percents and round to one decimal place. Approach the question asked by assuming the standpoint of an investment banking analyst who only has access to the statement of income.",
+    "gold": "101.5%",
+    "model_answer": "The total revenue growth rate for Block (formerly known as Square) from FY2019 to FY2020 is **101.5%**. This significant increase reflects the company's strong performance during that period.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.80289101600647
+  },
+  {
+    "doc_name": "BLOCK_2020_10K",
+    "question": "Using the cash flow statement, answer the following question to the best of your abilities: how much did Block (formerly known as Square) generate in cash flow from operating activities in FY2020? Answer in USD millions.",
+    "gold": "$382.00",
+    "model_answer": "Block (formerly known as Square) generated **$381.6 million** in cash flow from operating activities in FY2020. This figure reflects the company's operational efficiency and ability to generate cash from its core business activities during that fiscal year.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 6.682875156402588
+  },
+  {
+    "doc_name": "BOEING_2018_10K",
+    "question": "We need to calculate a financial metric by using information only provided within the balance sheet. Please answer the following question: what is Boeing's year end FY2018 net property, plant, and equipment (in USD millions)?",
+    "gold": "$12645.00",
+    "model_answer": "Boeing's year-end FY2018 net property, plant, and equipment is **$12,645 million**. This figure reflects the company's investments in physical assets at the end of the fiscal year.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 6.168154954910278
+  },
+  {
+    "doc_name": "COCACOLA_2017_10K",
+    "question": "What is the FY2017 return on assets (ROA) for Coca Cola? ROA is defined as: FY2017 net income / (average total assets between FY2016 and FY2017). Round your answer to two decimal places. Give a response to the question by relying on the details shown in the balance sheet and the P&L statement.",
+    "gold": "0.01",
+    "model_answer": "The FY2017 return on assets (ROA) for Coca-Cola is **1.46%**. This is calculated using the net income of **$1,248 million** and the average total assets of **$87,583 million** (the average of **$87,896 million** for 2017 and **$87,270 million** for 2016).",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 15.360955715179443
+  },
+  {
+    "doc_name": "COCACOLA_2021_10K",
+    "question": "What is Coca Cola's FY2021 COGS % margin? Calculate what was asked by utilizing the line items clearly shown in the income statement.",
+    "gold": "39.7%",
+    "model_answer": "Coca-Cola's FY2021 Cost of Goods Sold (COGS) margin is **39.73%**. This percentage is derived from the total net operating revenues of **$38,655 million** and the cost of goods sold amounting to **$15,357 million**.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 10.869990110397339
+  },
+  {
+    "doc_name": "COCACOLA_2022_10K",
+    "question": "What is Coca Cola's FY2022 dividend payout ratio (using total cash dividends paid and net income attributable to shareholders)? Round answer to two decimal places. Answer the question asked by assuming you only have access to information clearly displayed in the cash flow statement and the income statement.",
+    "gold": "0.8",
+    "model_answer": "Coca-Cola's FY2022 dividend payout ratio is **79.82%**. This ratio is calculated using total cash dividends paid of **$7,616 million** and net income attributable to shareholders of **$9,542 million**.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 11.546675443649292
+  },
+  {
+    "doc_name": "CORNING_2020_10K",
+    "question": "Based on the information provided primarily in the balance sheet and the statement of income, what is FY2020 days payable outstanding (DPO) for Corning? DPO is defined as: 365 * (average accounts payable between FY2019 and FY2020) / (FY2020 COGS + change in inventory between FY2019 and FY2020). Round your answer to two decimal places.",
+    "gold": "63.86",
+    "model_answer": "The Days Payable Outstanding (DPO) for Corning in FY2020 is **63.86** days. This figure is calculated based on the average accounts payable and the cost of goods sold adjusted for inventory changes between FY2019 and FY2020.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 23.827935218811035
+  },
+  {
+    "doc_name": "CORNING_2021_10K",
+    "question": "Taking into account the information outlined in the income statement, what is the FY2019 - FY2021 3 year average unadjusted operating income % margin for Corning? Answer in units of percents and round to one decimal place.",
+    "gold": "10.3%",
+    "model_answer": "The FY2019 - FY2021 3-year average unadjusted operating income % margin for Corning is **10.3%**. This figure is derived from the operating income and net sales reported for the respective years.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 14.379287242889404
+  },
+  {
+    "doc_name": "CORNING_2022_10K",
+    "question": "How much has the effective tax rate of Corning changed between FY2021 and FY2022?",
+    "gold": "The effective tax rate of Corning has changed from 20% in FY2021 to 23% in FY 2022.",
+    "model_answer": "The effective tax rate of Corning changed from **20.2% in FY2021** to **22.9% in FY2022**, resulting in an increase of **2.7 percentage points**. This indicates a rise in the tax burden relative to income before taxes over the two fiscal years.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 10.744184970855713
+  },
+  {
+    "doc_name": "CVSHEALTH_2018_10K",
+    "question": "What is the FY2018 fixed asset turnover ratio for CVS Health? Fixed asset turnover ratio is defined as: FY2018 revenue / (average PP&E between FY2017 and FY2018). Round your answer to two decimal places. Calculate what was asked by utilizing the line items clearly shown in the P&L statement and the balance sheet.",
+    "gold": "17.98",
+    "model_answer": "The FY2018 fixed asset turnover ratio for CVS Health is **6.46**. This ratio is calculated using the total revenues of **$194,579 million** and the average property, plant, and equipment (PP&E) of **$10,820.5 million** for the fiscal years 2017 and 2018.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 15.799423217773438
+  },
+  {
+    "doc_name": "GENERALMILLS_2019_10K",
+    "question": "What is the FY2019 cash conversion cycle (CCC) for General Mills? CCC is defined as: DIO + DSO - DPO. DIO is defined as: 365 * (average inventory between FY2018 and FY2019) / (FY2019 COGS). DSO is defined as: 365 * (average accounts receivable between FY2018 and FY2019) / (FY2019 Revenue). DPO is defined as: 365 * (average accounts payable between FY2018 and FY2019) / (FY2019 COGS + change in inventory between FY2018 and FY2019). Round your answer to two decimal places. Address the question by using the line items and information shown within the income statement and the balance sheet.",
+    "gold": "-3.7",
+    "model_answer": "The FY2019 cash conversion cycle (CCC) for General Mills is **-3.7** days. This figure indicates that the company is able to convert its investments in inventory and receivables into cash more quickly than it needs to pay its suppliers.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 36.212886810302734
+  },
+  {
+    "doc_name": "GENERALMILLS_2020_10K",
+    "question": "By drawing conclusions from the information stated only in the statement of financial position, what is General Mills's FY2020 working capital ratio? Define working capital ratio as total current assets divided by total current liabilities. Round your answer to two decimal places.",
+    "gold": "0.68",
+    "model_answer": "General Mills's FY2020 working capital ratio is **0.68**. This ratio is calculated by dividing total current assets of **5,121.3** by total current liabilities of **7,491.5**, resulting in a ratio of **0.6836**, which rounds to **0.68** when expressed to two decimal places.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 9.161630392074585
+  },
+  {
+    "doc_name": "GENERALMILLS_2020_10K",
+    "question": "According to the information provided in the statement of cash flows, what is the FY2020 free cash flow (FCF) for General Mills? FCF here is defined as: (cash from operations - capex). Answer in USD millions.",
+    "gold": "$3215.00",
+    "model_answer": "The free cash flow (FCF) for General Mills in FY2020 is **3,215.4 million USD**. This figure is derived from the net cash provided by operating activities minus capital expenditures.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 23.890313386917114
+  },
+  {
+    "doc_name": "GENERALMILLS_2022_10K",
+    "question": "We want to calculate a financial metric. Please help us compute it by basing your answers off of the cash flow statement and the income statement. Here's the question: what is the FY2022 retention ratio (using total cash dividends paid and net income attributable to shareholders) for General Mills? Round answer to two decimal places.",
+    "gold": "0.54",
+    "model_answer": "The FY2022 retention ratio for General Mills is **-199.73**. This ratio is calculated using total cash dividends paid of **$1,244.5 million** and net income attributable to shareholders of **$2,707.3 million**.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 13.87282395362854
+  },
+  {
+    "doc_name": "JOHNSON_JOHNSON_2022_10K",
+    "question": "Roughly how many times has JnJ sold its inventory in FY2022? Calculate inventory turnover ratio for FY2022; if conventional inventory management is not meaningful for the company then state that and explain why.",
+    "gold": "JnJ sold its inventory 2.7 times in FY2022.",
+    "model_answer": "Johnson & Johnson's inventory turnover ratio for FY2022 is **2.4905 times**. This indicates that the company sold and replaced its inventory approximately 2.49 times during the year.\n\nGiven the nature of Johnson & Johnson's business, which includes pharmaceuticals and medical devices, conventional inventory management metrics like turnover may not be as meaningful. This is due to the long product life cycles and regulatory considerations that can affect inventory levels and sales patterns, making traditional turnover analysis less applicable.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 9.88299298286438
+  },
+  {
+    "doc_name": "KRAFTHEINZ_2019_10K",
+    "question": "What is Kraft Heinz's FY2019 inventory turnover ratio? Inventory turnover ratio is defined as: (FY2019 COGS) / (average inventory between FY2018 and FY2019). Round your answer to two decimal places. Please base your judgments on the information provided primarily in the balance sheet and the P&L statement.",
+    "gold": "6.25",
+    "model_answer": "The inventory turnover ratio for Kraft Heinz in FY2019 is **0.00**. This result indicates that the necessary data to calculate the ratio, specifically the average inventory for FY2018 and FY2019, was not available in the provided evidence.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 13.644882440567017
+  }
+]

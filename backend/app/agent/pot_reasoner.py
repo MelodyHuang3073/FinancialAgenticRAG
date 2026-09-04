@@ -60,7 +60,7 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("total_assets",   ["total assets", "總資產"]),
     ("current_assets", ["total current assets", "current assets", "流動資產"]),
     ("inventory",      ["inventory", "inventories", "存貨"]),
-    ("accounts_rec",   ["accounts receivable", "trade receivables", "應收帳款"]),
+    ("accounts_rec",   ["accounts receivable", "trade receivables", "receivables", "receivable", "應收帳款"]),
     ("current_liab",   ["total current liabilities", "current liabilities", "流動負債"]),
     ("total_liab",     ["total liabilities", "總負債"]),
     ("ppe",            ["property, plant and equipment", "property, plant, and equipment",
@@ -76,6 +76,13 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("depreciation",   ["depreciation and amortization", "depreciation & amortization",
                          "depreciation", "amortization", "d&a", "折舊"]),
     ("fcf",            ["free cash flow", "fcf", "自由現金流"]),
+    # Was entirely missing — same class of gap as ppe/inventory above.
+    # Confirmed real case: "How much did American Water Works pay out in
+    # cash dividends for FY2020?" had the correct "Dividends paid" row
+    # (-389) sitting right in the extracted evidence, but no canonical tag
+    # existed to route a direct-lookup answer to it, so the sandbox fell
+    # back to a generic dump with result=0.0.
+    ("dividends_paid", ["dividends paid", "cash dividends paid", "dividends", "股利"]),
     # Misc
     ("data_center_rev",["data center revenue", "data center"]),
 ]
@@ -1760,12 +1767,37 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["capex", "capital expenditure"],                      "capex"),
     (["r&d", "research and development", "研發"],           "rd_expense"),
     (["free cash flow", "fcf"],                             "fcf"),
+    # Same gap class as the others below: a direct "how much cash flow
+    # from operating activities did X generate" question had no hint to
+    # route to operating_cf's own canonical (already registered in
+    # _ITEM_TAXONOMY, just never wired up here). Confirmed real case:
+    # Block (Square) FY2020 operating cash flow fell back to a generic
+    # dump and answered $0.0 despite "Net cash provided by operating
+    # activities" (381,603) sitting right in the retrieved evidence.
+    (["cash flow from operating activities", "cash from operations",
+      "operating cash flow", "cash provided by operating"],  "operating_cf"),
     (["total assets", "資產"],                              "total_assets"),
     (["equity", "shareholders", "stockholders"],            "equity"),
     (["property, plant and equipment", "property, plant, and equipment",
       "property and equipment", "pp&e", "net ppe", "fixed assets",
       "不動產、廠房及設備", "固定資產"],                     "ppe"),
     (["cost of revenue", "cost of goods", "cost of sales", "cogs"], "cost_of_revenue"),
+    # Missing entirely — same class of gap as the ppe entry above. Confirmed
+    # real case: "What is the year end FY2019 total amount of inventories
+    # for Best Buy?" had target_metrics=['inventory'] from the classifier,
+    # but _infer_target_canonical() returned None (no "inventory" hint
+    # existed here), so the direct-lookup fallback in
+    # _build_calculation_code() never fired — the correct "Merchandise
+    # inventories" value (5,409) sat right there in the extracted evidence,
+    # but with no canonical target to pick it, the whole thing fell
+    # through to the generic evidence-dump fallback, and the LLM
+    # eventually grabbed an unrelated "Total" row (129) instead.
+    (["inventory", "inventories", "存貨"],                    "inventory"),
+    # Same gap class again: "how much did X pay out in cash dividends"
+    # had no canonical hint to route the direct-lookup to the correct
+    # "Dividends paid" cash-flow-statement row (confirmed real case:
+    # American Water Works FY2020 cash dividends).
+    (["dividends paid", "cash dividends", "dividends"],       "dividends_paid"),
 ]
 
 
