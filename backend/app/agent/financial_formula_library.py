@@ -119,7 +119,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "gross_profit / revenue",
         "required_vars": {
             "gross_profit": ["毛利", "gross profit", "gross income"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "Gross Margin",
         "unit": "%",
@@ -139,7 +139,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "operating_income / revenue",
         "required_vars": {
             "operating_income": ["營業利益", "operating income", "operating profit", "ebit", "income from operations"],
-            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "Operating Margin",
         "unit": "%",
@@ -151,7 +151,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "net_income / revenue",
         "required_vars": {
             "net_income": ["本期淨利", "淨利", "net income", "net profit", "profit after tax", "net earnings"],
-            "revenue":    ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue":    ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "Net Profit Margin",
         "unit": "%",
@@ -176,7 +176,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "required_vars": {
             "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
                              "depreciation"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "D&A Margin",
         "unit": "%",
@@ -226,7 +226,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "ebitda / revenue",
         "required_vars": {
             "ebitda":  ["ebitda", "稅息折舊及攤銷前利潤"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "EBITDA Margin",
         "unit": "%",
@@ -452,7 +452,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "ppe turnover", "property plant and equipment turnover"],
         "formula_expr": "revenue / ((ppe_old + ppe_new) / 2)",
         "required_vars": {
-            "revenue":  ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue":  ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
             # Same alias list for both — distinguished purely by which
             # year column matches, same convention as revenue_yoy's
             # revenue_new/revenue_old below.
@@ -472,7 +472,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["asset turnover", "total asset turnover"],
         "formula_expr": "revenue / total_assets",
         "required_vars": {
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
             "total_assets": ["總資產", "total assets", "assets"],
         },
         "result_label": "Asset Turnover",
@@ -500,9 +500,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             " - 365 * ((ap_old + ap_new) / 2) / (abs(cogs) + (inv_new - inv_old))"
         ),
         "required_vars": {
-            "cogs":    ["銷售成本", "cost of goods sold", "cogs", "cost of revenue", "cost of sales",
-                        "cost of products sold"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "cogs":    ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
             "inv_old": ["存貨", "inventory", "inventories"],
             "inv_new": ["存貨", "inventory", "inventories"],
             # Bare "receivables"/"receivable" — General Mills' balance
@@ -537,8 +536,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # rationale (same formula, just averaged inventory).
         "formula_expr": "abs(cogs) / ((inventory_old + inventory_new) / 2)",
         "required_vars": {
-            "cogs":      ["銷售成本", "cost of goods sold", "cogs", "cost of revenue", "cost of sales",
-                          "cost of products sold"],
+            "cogs":      ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
             "inventory_old": ["存貨", "inventory", "inventories"],
             "inventory_new": ["存貨", "inventory", "inventories"],
         },
@@ -566,8 +564,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             # COGS row never matched any alias at all and the formula fell
             # through to the generic evidence-dump fallback instead of a
             # targeted calculation.
-            "cogs":      ["銷售成本", "cost of goods sold", "cogs", "cost of revenue", "cost of sales",
-                          "cost of products sold"],
+            "cogs":      ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
             "inventory": ["存貨", "inventory", "inventories"],
         },
         "result_label": "Inventory Turnover",
@@ -578,7 +575,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["receivables turnover", "accounts receivable turnover"],
         "formula_expr": "revenue / accounts_receivable",
         "required_vars": {
-            "revenue":             ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue":             ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
             "accounts_receivable": ["應收帳款", "accounts receivable", "trade receivables", "receivables", "receivable"],
         },
         "result_label": "Receivables Turnover",
@@ -601,8 +598,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "required_vars": {
             "ap_old": ["應付帳款", "accounts payable"],
             "ap_new": ["應付帳款", "accounts payable"],
-            "cogs":   ["銷售成本", "cost of goods sold", "cogs", "cost of revenue", "cost of sales",
-                       "cost of products sold"],
+            "cogs":   ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
             "inv_old": ["存貨", "inventory", "inventories"],
             "inv_new": ["存貨", "inventory", "inventories"],
         },
@@ -663,8 +659,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "change in revenue", "change in total revenue"],
         "formula_expr": "(revenue_new - revenue_old) / revenue_old * 100",
         "required_vars": {
-            "revenue_new": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
-            "revenue_old": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue_new": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue_old": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "Revenue YoY Growth",
         "unit": "%",
@@ -730,7 +726,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "capex":   ["capital expenditures", "capital expenditure", "purchases of property",
                         "purchases of property and equipment", "purchases of property, plant and equipment",
                         "資本支出"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "CapEx to Revenue (period average)",
         "unit": "%",

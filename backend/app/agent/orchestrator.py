@@ -36,7 +36,19 @@ class FinAgentRAGOrchestrator:
     # largest formula rather than pinned to exactly 24, so the next
     # formula with one or two more placeholders doesn't repeat this.
     RETRIEVAL_MAX_TOTAL = 30
-    CONTEXT_CHUNK_LIMIT = 8
+    # A SECOND, separate cap applied right before evidence reaches PoT/the
+    # LLM (sorted by relevance_score, top N kept) — raising
+    # RETRIEVAL_MAX_TOTAL alone isn't enough if this one stays tight,
+    # since it can still truncate a lower-but-still-correct-scoring row
+    # out of the final window even though it survived the earlier cap.
+    # Confirmed real case: General Mills' own real "Net earnings
+    # attributable to General Mills" row (score ~43) ranked #3 for its
+    # own retrieval query — comfortably inside RETRIEVAL_MAX_TOTAL=30 —
+    # but still got squeezed out of the final CONTEXT_CHUNK_LIMIT=8 window
+    # by higher-scoring prose chunks from OTHER sub-queries in the same
+    # evidence_buffer, leaving retention_ratio's net_income_attributable
+    # placeholder unresolved and falling back to an ungrounded guess.
+    CONTEXT_CHUNK_LIMIT = 20
 
     def __init__(self, vector_store: FinancialVectorStoreManager):
         self.vector_store = vector_store
@@ -332,7 +344,9 @@ class FinAgentRAGOrchestrator:
                     if parent_id and not ev_enriched.get("parent_content"):
                         ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
                     context_window.append(ev_enriched)
-                pot_res = self.pot_reasoner.generate_and_execute(query, context_window)
+                pot_res = self.pot_reasoner.generate_and_execute(
+                    query, context_window, entity=classification["entity"]
+                )
                 iter_trace["pot_code"] = pot_res["code"]
                 iter_trace["sandbox_output"] = pot_res["output_log"]
                 iter_trace["result_value"] = pot_res["result_value"]
@@ -607,7 +621,7 @@ class FinAgentRAGOrchestrator:
             # aliases — every formula in the library also lists an English
             # variant — falling back to aliases[0] only if none exists.
             #
-            # Uses up to the first TWO distinct ASCII aliases, not just
+            # Uses up to the first THREE distinct ASCII aliases, not just
             # one: different companies genuinely use different phrasings
             # for the same line item (e.g. "net income attributable to
             # shareowners" vs. "net earnings attributable to <company>"),
@@ -616,11 +630,20 @@ class FinAgentRAGOrchestrator:
             # General Mills' "Net earnings attributable to General Mills"
             # row scored below an unrelated NCI row when the query only
             # contained "net income attributable to shareowners" (Coca-
-            # Cola's own phrasing) — combining both alias variants into one
+            # Cola's own phrasing) — combining alias variants into one
             # query correctly ranks the right row #1 for EITHER company's
             # wording, without needing a second retrieval round-trip.
+            # Bumped from 2 to 3: cogs alone has FOUR genuinely common
+            # phrasings across real 10-Ks ("cost of goods sold", "cost of
+            # sales", "cost of revenue", "cost of products sold"), and
+            # with only 2 covered, a company using the 3rd/4th variant
+            # (Kraft Heinz: "Cost of products sold") got literally zero
+            # _line_item_match_score credit for its own real row while an
+            # unrelated OTHER company's row using one of the covered
+            # phrasings scored an exact match and outranked it even after
+            # the entity-mismatch penalty.
             ascii_aliases = [a for a in aliases if a.isascii()]
-            primary_alias = " ".join(dict.fromkeys(ascii_aliases[:2])) if ascii_aliases else (
+            primary_alias = " ".join(dict.fromkeys(ascii_aliases[:3])) if ascii_aliases else (
                 aliases[0] if aliases else placeholder
             )
             if is_period_average and sorted_years:
