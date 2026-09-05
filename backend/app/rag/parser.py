@@ -898,12 +898,28 @@ class FinancialFileParser:
         its digits when pdfplumber's cell-splitting has put them in two
         adjacent cells ('(116' + ')' -> '(116)') — otherwise that single
         value eats two column slots instead of one, throwing off every
-        later column's index-based year match on that row.
+        later column's index-based year match on that row. The same
+        splitting artifact happens to a trailing '%' just as often — a
+        percentage value like '23%' or a negative one like '(11%)' comes
+        back from pdfplumber's grid as two separate cells ('23' + '%', or
+        '(11' + '%)') whenever some OTHER row in the same ruled-line table
+        has its own column boundary fall between the digits and the sign
+        (e.g. a "$" or ")" cell elsewhere in the table shifts the shared
+        grid's gutter). Left unmerged, every percentage-only row (a
+        margin, an effective tax rate, a "% of net sales" row) reports
+        twice its real column count, which then desyncs its values from
+        the year header by however many stray '%' cells preceded them.
+        Confirmed real case: Corning's "Effective tax rate 23% 20%" row
+        compacted to 4 cells (23, %, 20, %) instead of 2 (23%, 20%),
+        pushing the year-header injection logic to treat "2022 2021 22
+        vs. 21" as belonging to a *different*, wider row shape and
+        synthesize bogus "2023"/"Col2"/"Col3"/"Col4" headers instead.
         """
         if not row:
             return row
         label = row[0]
         rest = [c for c in row[1:] if c and c.strip() not in ("", "$")]
+        _NUMERIC_NO_PCT_RE = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.?\d*\)?$')
         merged: list = []
         i = 0
         while i < len(rest):
@@ -911,9 +927,16 @@ class FinancialFileParser:
             if (
                 i + 1 < len(rest)
                 and re.match(r'^\(\s*[\d,.]+$', cell)
-                and rest[i + 1].strip() == ')'
+                and rest[i + 1].strip() in (')', '%)')
             ):
-                merged.append(cell + ')')
+                merged.append(cell + rest[i + 1].strip())
+                i += 2
+            elif (
+                i + 1 < len(rest)
+                and _NUMERIC_NO_PCT_RE.match(cell)
+                and rest[i + 1].strip() == '%'
+            ):
+                merged.append(cell + '%')
                 i += 2
             else:
                 merged.append(rest[i])
@@ -983,6 +1006,27 @@ class FinancialFileParser:
         if self._extract_year_headers(header_text):
             return rows  # already has a real year header — nothing to fix
 
+        # A comparative 10-K table is essentially never headed by a SINGLE
+        # year — even a one-column "current period only" table still pairs
+        # it with a caption, and every real header text this function has
+        # ever synthesized correctly (balance sheet, income highlights)
+        # carries 2+ years side by side. A lone year is much more likely to
+        # be incidental narrative prose a few lines above the table (a
+        # forward-looking "2023 Corporate Outlook" heading, a "for fiscal
+        # 2021" aside) than an actual column header, and accepting it
+        # anyway leaves every OTHER value column unlabeled ("Col2", "Col3",
+        # ...). Confirmed real case: Corning's page-24 "RESULTS OF
+        # OPERATIONS" table (headed by "2022 2021 22 vs. 21", 3 real value
+        # columns) sat right below a "2023 Corporate Outlook" paragraph —
+        # the nearest line above the table bearing ANY year was "For the
+        # first quarter 2023, we anticipate...", a single stray "2023"
+        # that got accepted as the whole header, mislabeling every column.
+        # Requiring 2+ years here makes the search keep climbing past that
+        # kind of noise to the genuine multi-year line (or the "next rows"
+        # fallback below, which finds it directly inside the table).
+        n_value_cols = max((len(r) - 1 for r in rows[1:]), default=0)
+        min_years_needed = min(2, n_value_cols) if n_value_cols else 2
+
         try:
             above = page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
             above_text = above.extract_text() or ""
@@ -990,8 +1034,9 @@ class FinancialFileParser:
             above_text = ""
         years: list = []
         for line in reversed(above_text.split("\n")):
-            years = self._extract_year_headers(line)
-            if years:
+            candidate = self._extract_year_headers(line)
+            if len(candidate) >= min_years_needed:
+                years = candidate
                 break
 
         if years:

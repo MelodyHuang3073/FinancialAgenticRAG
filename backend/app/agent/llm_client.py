@@ -120,8 +120,26 @@ class LLMAnswerGenerator:
         pot_summary = ""
         if pot_res:
             result_value = pot_res.get("result_value")
+            # The sandbox's own variable assignments (e.g. "net_income =
+            # 1182.0  # table-partial <- evidence[9] Line Item ...") are
+            # the ONLY authoritative record of which specific number among
+            # several same-labeled candidates the calculation actually
+            # used. Without this, the model has no way to tell which
+            # figure was used when it writes supporting prose ("this
+            # figure is derived from net income of $X million") and ends
+            # up re-picking a plausible-looking but DIFFERENT number
+            # straight out of the raw evidence text below instead —
+            # confirmed real case: a ROA answer's headline result (1.35%)
+            # was correctly computed from net_income=1182 (quoted
+            # verbatim per the instruction below), but the SAME answer's
+            # supporting sentence separately cited "$1,248 million" as
+            # the net income, because only the final ratio, never the
+            # inputs that produced it, was ever shown to the model.
+            pot_code_text = pot_res.get("code", "") or ""
             pot_summary = (
                 f"\nPoT result: {result_value}\n"
+                f"PoT calculation code (these are the EXACT input values actually used):\n"
+                f"{pot_code_text[:1200]}\n"
                 f"Sandbox output: {pot_res.get('output_log', '')[:600]}"
             )
             if result_value is not None:
@@ -131,7 +149,13 @@ class LLMAnswerGenerator:
                     "(reformatted for units/rounding exactly as the question asks, but not "
                     "recalculated) as your answer. Do NOT redo the arithmetic yourself from "
                     "the raw evidence figures below -- independent re-derivation has produced "
-                    "wrong numbers before even when every input you cited was correct."
+                    "wrong numbers before even when every input you cited was correct. When "
+                    "citing ANY supporting figure (e.g. \"net income of $X million\"), you MUST "
+                    "quote the exact value assigned to that variable in the PoT calculation "
+                    "code above -- NOT a different number for the same line item that appears "
+                    "in the raw evidence below, even if that other number looks equally "
+                    "plausible. The code's variables are ground truth for what was used; the "
+                    "raw evidence may contain other same-labeled figures that were NOT used."
                 )
             if pot_res.get("is_degraded_formula"):
                 pot_summary += (

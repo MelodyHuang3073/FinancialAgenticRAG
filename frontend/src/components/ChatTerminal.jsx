@@ -222,7 +222,7 @@ function formatResultValue(value) {
   return String(value);
 }
 
-function ResultSummaryCard({ value, series, delta, direction, label = '最終計算結果' }) {
+function ResultSummaryCard({ value, series, delta, direction, unit = '', label = '最終計算結果' }) {
   // A question asking "did X improve/decline between year A and year B" is
   // answered by the CHANGE, not a single year's snapshot — when the
   // backend computed a year-over-year comparison (series has both years),
@@ -248,7 +248,7 @@ function ResultSummaryCard({ value, series, delta, direction, label = '最終計
             <span key={pt.year} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
               {i > 0 && <span style={{ fontSize: 20, color: '#6ee7b7' }}>→</span>}
               <span style={{ fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-                {formatResultValue(pt.value)}
+                {formatResultValue(pt.value)}{unit}
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#059669', marginLeft: 4 }}>
                   ({pt.year})
                 </span>
@@ -258,13 +258,13 @@ function ResultSummaryCard({ value, series, delta, direction, label = '最終計
         </div>
       ) : (
         <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-          {formatResultValue(value)}
+          {formatResultValue(value)}{unit}
         </div>
       )}
       {hasSeries && delta !== null && delta !== undefined && (
         <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: '#047857' }}>
           {direction === 'increased' ? '↑' : direction === 'decreased' ? '↓' : '—'}{' '}
-          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}
+          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}{unit}
         </div>
       )}
       <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
@@ -389,6 +389,7 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
             series={msg.result.result_series}
             delta={msg.result.result_delta}
             direction={msg.result.result_direction}
+            unit={msg.result.result_unit}
           />
 
           {summaryText && (
@@ -844,7 +845,7 @@ function InputBar({ value, onChange, onSubmit, onFileClick, uploading, disabled 
         <button
           onClick={onFileClick}
           disabled={uploading}
-          title="上傳財報 PDF"
+          title="上傳財報 PDF（可一次選多個檔案）"
           style={{
             display: 'flex', alignItems: 'center', gap: 5,
             padding: '4px 10px', borderRadius: 999,
@@ -939,39 +940,64 @@ export default function ChatTerminal({
     setInputQuery('');
   };
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setUploadMsg(null);
-
+  const uploadOneFile = async (file) => {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('company', file.name.split('.')[0]);
 
-    try {
-      const res  = await fetch('http://localhost:8000/api/upload-file', { method: 'POST', body: fd });
-      const data = await res.json();
+    const res  = await fetch('http://localhost:8000/api/upload-file', { method: 'POST', body: fd });
+    const data = await res.json();
 
-      if (!res.ok) {
-        // HTTP error (4xx / 5xx)
-        setUploadMsg({ ok: false, warn: false, text: `❌ 上傳失敗: ${data.detail || '未知錯誤'}` });
-      } else if (data.passages_added === 0) {
-        // Parsed but 0 chunks — likely scanned PDF or empty file
-        const warnText = data.warning ||
-          `⚠️ "${file.name}" 解析完成，但新增 0 個 Chunk。請上傳可搜尋的 PDF、CSV 或 TXT 檔案。`;
-        setUploadMsg({ ok: false, warn: true, text: warnText });
-      } else {
-        // Success
-        setUploadMsg({ ok: true, warn: false, text: `✅ "${file.name}" 已解析成功，新增 ${data.passages_added} 個 Chunk！` });
-        onFileUploadSuccess?.();
-      }
-    } catch (err) {
-      setUploadMsg({ ok: false, warn: false, text: `❌ 連線錯誤: ${err.message}` });
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!res.ok) {
+      return { ok: false, warn: false, name: file.name, text: data.detail || '未知錯誤' };
     }
+    if (data.passages_added === 0) {
+      return {
+        ok: false, warn: true, name: file.name,
+        text: data.warning || `解析完成，但新增 0 個 Chunk（可能是掃描檔或空白檔案）`,
+      };
+    }
+    return { ok: true, warn: false, name: file.name, passages: data.passages_added };
+  };
+
+  const handleFileChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploading(true);
+    setUploadMsg(null);
+
+    // Upload sequentially — the backend endpoint takes one file per
+    // request, and sequencing keeps per-file progress/error attribution
+    // clear instead of racing several parses against the same corpus.
+    const results = [];
+    for (const file of files) {
+      try {
+        results.push(await uploadOneFile(file));
+      } catch (err) {
+        results.push({ ok: false, warn: false, name: file.name, text: `連線錯誤: ${err.message}` });
+      }
+    }
+
+    const succeeded = results.filter(r => r.ok);
+    const failed    = results.filter(r => !r.ok);
+    const totalPassages = succeeded.reduce((sum, r) => sum + (r.passages || 0), 0);
+
+    if (files.length === 1) {
+      const r = results[0];
+      setUploadMsg(r.ok
+        ? { ok: true, warn: false, text: `✅ "${r.name}" 已解析成功，新增 ${r.passages} 個 Chunk！` }
+        : { ok: false, warn: r.warn, text: `${r.warn ? '⚠️' : '❌'} "${r.name}": ${r.text}` });
+    } else {
+      const lines = [`✅ 成功 ${succeeded.length}/${files.length} 個檔案，共新增 ${totalPassages} 個 Chunk`];
+      if (failed.length > 0) {
+        lines.push(...failed.map(r => `${r.warn ? '⚠️' : '❌'} "${r.name}": ${r.text}`));
+      }
+      setUploadMsg({ ok: failed.length === 0, warn: failed.length > 0 && succeeded.length > 0, text: lines.join('\n') });
+    }
+
+    if (succeeded.length > 0) onFileUploadSuccess?.();
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const showWelcome = messages.length === 0 && !isLoading;
@@ -981,7 +1007,7 @@ export default function ChatTerminal({
       
       {/* Hidden file input */}
       <input type="file" ref={fileInputRef} onChange={handleFileChange}
-        accept=".pdf" style={{ display: 'none' }} />
+        accept=".pdf" multiple style={{ display: 'none' }} />
 
       {/* Upload notification banner */}
       {uploadMsg && (
@@ -995,7 +1021,7 @@ export default function ChatTerminal({
           color: uploadMsg.ok ? '#166534' : uploadMsg.warn ? '#92400e' : '#991b1b',
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10,
         }}>
-          <span style={{ flex: 1 }}>{uploadMsg.text}</span>
+          <span style={{ flex: 1, whiteSpace: 'pre-line' }}>{uploadMsg.text}</span>
           <button onClick={() => setUploadMsg(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888', padding: 2 }}>
             <X size={14} />
           </button>

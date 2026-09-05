@@ -23,19 +23,30 @@ from app.agent.financial_formula_library import detect_formula, get_variable_ali
 
 
 class FinAgentRAGOrchestrator:
-    RETRIEVAL_TOP_K = 3          # chunks per sub-question (was 5)
+    # Chunks per sub-question. Raised from 3 back toward the original 5:
+    # a bare alias like "net income" can legitimately match several
+    # differently-scoped rows on the SAME income statement ("Net income
+    # from continuing operations", "Consolidated net income", "Net income
+    # attributable to shareowners of ..."), and the one GAAP convention
+    # actually wants can rank #4-#5 for a generic query even though it's
+    # sitting cleanly in a real evidence chunk — confirmed real case:
+    # Coca-Cola FY2017 net income for ROA, where top_k=3 never retrieved
+    # any of the pages carrying the correctly-labeled "attributable to
+    # shareowners" row at all, leaving only mis-scoped rows to choose
+    # from no matter how good the downstream tie-break logic is.
+    RETRIEVAL_TOP_K = 5
     # Hard ceiling on total evidence buffer size. Must comfortably fit every
-    # sub-query a single formula's own required_vars can generate (top_k=3
+    # sub-query a single formula's own required_vars can generate (top_k=5
     # each) — a composite formula like cash_conversion_cycle needs 8
     # placeholders (cogs, revenue, inv_old/new, ar_old/new, ap_old/new), so
-    # 8*3=24 sub-results. The old value of 15 silently cut off mid-formula,
+    # 8*5=40 sub-results. The old value of 15 silently cut off mid-formula,
     # dropping ap_old/ap_new before they were ever retrieved (confirmed
     # real case: General Mills FY2019 CCC — accounts payable never entered
     # the evidence buffer at all, and the whole computation fell back to a
     # generic, ungrounded LLM guess). Sized with headroom above today's
-    # largest formula rather than pinned to exactly 24, so the next
+    # largest formula rather than pinned to exactly 40, so the next
     # formula with one or two more placeholders doesn't repeat this.
-    RETRIEVAL_MAX_TOTAL = 30
+    RETRIEVAL_MAX_TOTAL = 45
     # A SECOND, separate cap applied right before evidence reaches PoT/the
     # LLM (sorted by relevance_score, top N kept) — raising
     # RETRIEVAL_MAX_TOTAL alone isn't enough if this one stays tight,
@@ -48,7 +59,7 @@ class FinAgentRAGOrchestrator:
     # by higher-scoring prose chunks from OTHER sub-queries in the same
     # evidence_buffer, leaving retention_ratio's net_income_attributable
     # placeholder unresolved and falling back to an ungrounded guess.
-    CONTEXT_CHUNK_LIMIT = 20
+    CONTEXT_CHUNK_LIMIT = 30
 
     def __init__(self, vector_store: FinancialVectorStoreManager):
         self.vector_store = vector_store
@@ -421,11 +432,43 @@ class FinAgentRAGOrchestrator:
                 iter_trace["retrieved_passages"].append(info)
                 evidence_meta.append(info)
 
-            pot_res = {
-                "code": "", "success": True, "result_value": None,
-                "output_log": "", "extracted_variables": {},
-                "answer_mode": answer_mode,
-            }
+            # An EXPLANATION/ASSESSMENT question ("does X have positive
+            # working capital", "did Y's margin improve") still turns on a
+            # real number comparison whenever it matches a registered
+            # formula — it just ALSO needs qualitative framing in the
+            # final text. This used to always return a stub pot_res with
+            # no code and result_value=None, meaning the LLM derived
+            # every number itself straight from raw evidence text with
+            # zero sandbox grounding — exactly the failure mode the
+            # "trust the sandbox" instruction in llm_client.py exists to
+            # prevent elsewhere, just never reached here at all. Confirmed
+            # real case: American Water Works' FY2022 working-capital
+            # question got the right numbers this time purely by LLM
+            # luck, with no Python trace to show for it or to have caught
+            # it if the LLM had been wrong.
+            context_window = []
+            for ev in sorted(evidence_buffer, key=lambda x: x.get("relevance_score", 0.0), reverse=True)[:self.CONTEXT_CHUNK_LIMIT]:
+                ev_enriched = dict(ev)
+                parent_id = ev.get("parent_id")
+                if parent_id and not ev_enriched.get("parent_content"):
+                    ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
+                context_window.append(ev_enriched)
+
+            if non_numeric_formula:
+                pot_res = self.pot_reasoner.generate_and_execute(
+                    query, context_window, entity=classification["entity"]
+                )
+            else:
+                pot_res = {
+                    "code": "", "success": True, "result_value": None,
+                    "output_log": "", "extracted_variables": {},
+                    "answer_mode": answer_mode,
+                }
+            pot_res["answer_mode"] = answer_mode
+            iter_trace["pot_code"] = pot_res.get("code", "")
+            iter_trace["sandbox_output"] = pot_res.get("output_log", "")
+            iter_trace["result_value"] = pot_res.get("result_value")
+
             verification_res = self.verifier.verify(query, evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:], pot_res)
             iter_trace["verification"] = verification_res
             trace_steps.append({
@@ -459,6 +502,7 @@ class FinAgentRAGOrchestrator:
             "result_series": pot_res.get("result_series", []) if pot_res else [],
             "result_delta": pot_res.get("result_delta") if pot_res else None,
             "result_direction": pot_res.get("result_direction") if pot_res else None,
+            "result_unit": pot_res.get("result_unit", "") if pot_res else "",
             # Return ALL evidence items (with sub_question tag) so the frontend
             # can display every data point that contributed to the calculation
             "evidence_sources": evidence_meta if evidence_meta else [

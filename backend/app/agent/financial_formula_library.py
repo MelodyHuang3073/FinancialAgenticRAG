@@ -201,7 +201,26 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # Corning's "Provision for income taxes" is literally "(411)"),
         # same sign convention as cogs/capex above.
         "formula_expr": "abs(income_tax) / pretax_income",
+        # Many filers ALSO disclose "Effective tax rate" as its own labeled
+        # line item (an MD&A highlights table, or the statutory-rate
+        # reconciliation note) right next to the two rows above — that
+        # filer-reported number is authoritative and should be preferred
+        # over recomputing it from income_tax/pretax_income whenever it's
+        # actually present in the evidence. Named so it never collides
+        # with formula_expr's own identifiers (formula_expr doesn't
+        # reference it at all, so pot_reasoner's _gen_formula_code never
+        # treats it as REQUIRED — this placeholder is purely opt-in extra
+        # data, extracted through the exact same alias/candidate/tie-break
+        # pipeline as income_tax/pretax_income above). See
+        # "direct_lookup_var" below and _gen_formula_code's "Direct lookup
+        # of the filing's OWN stated value" block. Confirmed real case:
+        # Corning's page-24 highlights table states "Effective tax rate
+        # 23% 20%" directly — computing it from income_tax/pretax_income
+        # instead risks the exact same cross-row collisions that formula
+        # already has dedicated comments about above.
+        "direct_lookup_var": "effective_tax_rate_direct",
         "required_vars": {
+            "effective_tax_rate_direct": ["effective tax rate", "有效稅率", "實質稅率"],
             # "provision for income taxes" leads — same reasoning as
             # cash_from_operations above: the retrieval query is built
             # from the FIRST ASCII alias, and a too-generic "income tax"
@@ -210,9 +229,19 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             # the real income-statement provision line. Confirmed real
             # case: Corning's actual "Provision for income taxes" row
             # never made the top_k=3 cutoff under the old ordering.
+            # Deliberately NO bare "income tax"/"income taxes" alias: both
+            # substring-match "Income before income taxes" (a completely
+            # different concept — pretax earnings, not the tax expense
+            # itself), and with that wrong row usually being the larger
+            # number, the reduction's larger-magnitude tie-break let it
+            # win over the real "Provision for income taxes" row.
+            # Confirmed real case: Corning's effective tax rate trend
+            # computed income_tax=1797 (=pretax_income's own value) for
+            # every year, making numerator == denominator and silently
+            # emptying resolved_series's usefulness for the trend
+            # comparison entirely.
             "income_tax":    ["provision for income taxes", "income tax provision", "income tax expense",
-                              "provision for taxes on income", "income taxes", "income tax",
-                              "所得稅費用"],
+                              "provision for taxes on income", "所得稅費用"],
             "pretax_income": ["稅前淨利", "income before income tax", "income before income taxes",
                               "income before provision for income taxes",
                               "earnings before income taxes", "pretax income", "income before taxes"],
