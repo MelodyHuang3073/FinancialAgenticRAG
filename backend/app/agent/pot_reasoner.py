@@ -63,7 +63,24 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("accounts_rec",   ["accounts receivable", "trade receivables", "receivables", "receivable", "應收帳款"]),
     ("current_liab",   ["total current liabilities", "current liabilities", "流動負債"]),
     ("total_liab",     ["total liabilities", "總負債"]),
-    ("ppe",            ["property, plant and equipment", "property, plant, and equipment",
+    # ", net" variants lead the list so a real balance-sheet PP&E row gets
+    # an EXACT match (score 2) via _score_row_match's alias iteration,
+    # which returns on the FIRST alias that matches — without these, both
+    # the real row ("Property, plant and equipment, net") and an unrelated
+    # footnote row that also happens to contain the bare phrase (e.g. a
+    # lease-equipment reconciliation table's own "Property, plant and
+    # equipment (2)" line) only ever reach the bare alias, tying at score
+    # 1 apiece and leaving a pure label-length tie-break to decide between
+    # them — which is pure chance once both labels are close in length.
+    # Confirmed real case: Boeing's FY2018 net PP&E direct-lookup answer
+    # (result_value shown to the user) resolved to 44 (a "Property, plant
+    # and equipment (2)" line from an unrelated operating-lease-equipment
+    # footnote table) instead of the real balance-sheet value 12,645,
+    # because "(2)" (2 chars) made that footnote row marginally SHORTER
+    # than the real ", net" (5 chars) suffix.
+    ("ppe",            ["property, plant and equipment, net", "property, plant, and equipment, net",
+                         "property and equipment, net",
+                         "property, plant and equipment", "property, plant, and equipment",
                          "property and equipment", "net ppe", "pp&e", "fixed assets",
                          "不動產、廠房及設備", "固定資產"]),
     ("equity",         ["total equity", "total shareholders equity",
@@ -121,6 +138,50 @@ def _is_carveout_attribution_match(item_lower: str, match_start: int, match_len:
     if not item_lower[:match_start + match_len].rstrip().endswith("attributable to"):
         return False
     return bool(_ATTRIBUTABLE_TO_CARVEOUT_RE.match(item_lower[match_start + match_len:]))
+
+
+# Generic terms for "the reporting company's own equity holders" — used
+# alongside the reporting entity's own name (see
+# _is_attributable_to_reporting_entity below) to recognize a row like
+# "Net income (loss) attributable to The AES Corporation" as the real
+# parent-level headline figure, not just another carve-out variant.
+_GENERIC_PARENT_ATTRIBUTION_RE = re.compile(
+    r'^\s*(the\s+)?(shareowners|shareholders|stockholders|'
+    r'common stockholders|common shareholders|the company)\b'
+)
+
+
+def _is_attributable_to_reporting_entity(text_after: str, ev_company: str) -> bool:
+    """True if the text right after "attributable to" names either a
+    generic parent-equity term (shareowners/shareholders/stockholders/
+    the company) or the reporting entity's own name — i.e. this is
+    genuinely the parent-level "attributable to us" figure, not an
+    unrelated "attributable to [some segment/subsidiary/other party]"
+    row that merely happens to share the same phrase structure. Reuses
+    _entity_words' normalization so "AES Corporation" matches "The AES
+    Corporation" the same way entity-identity matching already does
+    elsewhere in this module.
+
+    Matches on a punctuation/whitespace-STRIPPED substring rather than a
+    word-set intersection, because this project's `company` identifiers
+    are routinely a single mashed-together word taken straight from the
+    filename (e.g. "bestbuy" from "BESTBUY_2017_10K", after
+    _entity_words() strips the year) while the real company name in
+    filing prose is naturally spaced/punctuated ("Best Buy Co., Inc.") —
+    comparing word-for-word would never match "bestbuy" against "best"
+    and "buy" as two separate tokens. Confirmed real case: Best Buy's own
+    "Net earnings attributable to Best Buy Co., Inc. shareholders" (1,233,
+    the real headline figure for FY2015) lost a tie to "Net earnings from
+    continuing operations" (1,246) because the word-set check above never
+    recognized "Best Buy" (two words in the text) as the same entity as
+    "bestbuy" (one mashed word from the filename)."""
+    if _GENERIC_PARENT_ATTRIBUTION_RE.match(text_after):
+        return True
+    text_core = re.sub(r'[^a-z0-9]', '', text_after.lower())
+    for w in _entity_words(ev_company):
+        if len(w) >= 3 and w in text_core:
+            return True
+    return False
 
 
 # The check above only catches a carve-out when the ALIAS ITSELF ends
@@ -1160,8 +1221,40 @@ def _extract_formula_guided(
             summary_table_cache[ev_idx] = _is_summary_reference_table(content)
         return summary_table_cache[ev_idx]
 
+    def _is_attributable_row(label: str, ev_idx: int) -> bool:
+        ll = label.lower()
+        idx = ll.find("attributable to")
+        if idx == -1:
+            return False
+        after = ll[idx + len("attributable to"):]
+        if _ATTRIBUTABLE_TO_CARVEOUT_RE.match(after):
+            return False
+        return _is_attributable_to_reporting_entity(after, evidence_list[ev_idx].get("company", "") or "")
+
     for placeholder in var_aliases:
         query_year_set = set(query_years or [])
+
+        # A multi-step income statement with noncontrolling interests
+        # discloses BOTH a pre-split subtotal ("Net income (loss)") and
+        # the actual parent-level headline figure ("Net income (loss)
+        # attributable to The AES Corporation") — the pre-split row is an
+        # EXACT match to a bare "net income" alias (score 2) while the
+        # real headline figure is only a substring match (score 1), so
+        # score alone picks the wrong one even though nothing else in the
+        # priority tuple can tell them apart. When a same-year sibling
+        # candidate unambiguously attributable to the reporting entity
+        # itself exists, a bare exact-match candidate is capped at score 1
+        # so the two compete on equal footing (frequency/magnitude/label
+        # heuristics below) instead of the pre-split subtotal winning
+        # purely by exact-label technicality. Confirmed real case: AES
+        # FY2022 ROA used "NET INCOME (LOSS)" (-505, pre-split) instead of
+        # "NET INCOME (LOSS) ATTRIBUTABLE TO THE AES CORPORATION" (-546,
+        # the real headline figure — also the more frequently repeated
+        # one across the filing once both compete fairly).
+        attributable_sibling_year: set = {
+            _yr for _val, _yr, _score, _source, _is_primary, _ev_idx, _label in candidates[placeholder]
+            if _is_attributable_row(_label, _ev_idx)
+        }
 
         # Two-pass reduction. Pass 1: compute each candidate's priority
         # tuple and bucket by year. Pass 2 (below): among a year's
@@ -1206,8 +1299,14 @@ def _extract_formula_guided(
             # must run AFTER the magnitude-outlier filter rather than
             # before it (a short label like "Basic net income" is an EPS
             # figure, not automatically the better match).
+            effective_score = score
+            if (
+                score == 2 and yr in attributable_sibling_year
+                and not _is_attributable_row(line_item_label, ev_idx)
+            ):
+                effective_score = 1
             priority = (
-                _entity_matches(ev_idx), is_primary, year_matches_filing, score,
+                _entity_matches(ev_idx), is_primary, year_matches_filing, effective_score,
                 _is_summary_table(ev_idx),
             )
             by_year.setdefault(yr, []).append((priority, val, score, source, ev_idx, line_item_label))
@@ -1329,27 +1428,43 @@ def _extract_formula_guided(
                         priority, val, score, source, ev_idx, line_item_label = biggest
                     else:
                         # Still tied on both frequency AND magnitude —
-                        # last resort, prefer the SHORTER label (same
+                        # last resort. First prefer a candidate explicitly
+                        # "attributable to [the reporting entity itself]"
+                        # over a BARE pre-split subtotal — a multi-step
+                        # income statement with noncontrolling interests
+                        # discloses both, and the post-split figure is the
+                        # real parent-level headline number (same
+                        # accounting convention as this module's is_summary_
+                        # table/attributable-sibling handling elsewhere;
+                        # this is the same signal applied as the LAST
+                        # resort here because it must never override
+                        # is_summary_table at the outer priority level —
+                        # confirmed real case: AES FY2022 net income —
+                        # "NET INCOME (LOSS)" (-505, bare, 18 chars) and
+                        # "NET INCOME (LOSS) ATTRIBUTABLE TO THE AES
+                        # CORPORATION" (-546, the real headline figure, 54
+                        # chars) tie on frequency and magnitude alike, and
+                        # a pure length comparison picks the bare one just
+                        # because it's shorter). Only once attributable-
+                        # ness ALSO ties (neither candidate qualifies, or
+                        # both do — e.g. two "attributable to X" rows with
+                        # different wording) does shorter-label win, same
                         # philosophy as _find_pair_for_margin /
-                        # _pick_best_in_group's own length tie-break): a
+                        # _pick_best_in_group's own length tie-break: a
                         # longer label is more likely a further-qualified
-                        # sub-concept ("... attributable to shareowners of
-                        # The Coca-Cola Company") stacked onto the base
-                        # term, while the filer's own concise headline
-                        # figure in a summary table ("Net income from
-                        # continuing operations") tends to be shorter.
-                        # This only runs AFTER the magnitude-outlier
-                        # filter above already dropped any EPS/per-share
-                        # candidates, so a short label can't win just by
-                        # being a tiny scalar. Confirmed real case:
-                        # Coca-Cola FY2017 net income — once "Basic net
-                        # income" ($0.29 EPS) is filtered out by magnitude,
-                        # "Net income from continuing operations" (1,182,
-                        # 37 chars) is shorter than "Net income
-                        # attributable to shareowners of The Coca-Cola
-                        # Company" (1,248, 66 chars); per user correction
-                        # the former is the one actually expected.
-                        by_freq.sort(key=lambda c: len(c[5]))
+                        # sub-concept ("...attributable to shareowners of
+                        # The Coca-Cola Company") stacked onto the filer's
+                        # own more concise headline wording elsewhere
+                        # (confirmed real case: Coca-Cola FY2017 net
+                        # income's "Net income from continuing operations"
+                        # vs "Net income attributable to shareowners of
+                        # The Coca-Cola Company" — resolved by
+                        # is_summary_table at the outer tuple level before
+                        # ever reaching this branch, since neither is
+                        # "attributable to [Coca-Cola itself]" specifically).
+                        by_freq.sort(key=lambda c: (
+                            not _is_attributable_row(c[5], c[4]), len(c[5]),
+                        ))
                         priority, val, score, source, ev_idx, line_item_label = by_freq[0]
             best_by_year[yr] = (val, score, source, priority, ev_idx, line_item_label)
         # A supplementary-schedule match is NEVER actually used, even as
