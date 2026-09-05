@@ -866,7 +866,30 @@ class FinancialFileParser:
                 current_col_shape[0] = col_shape
             else:
                 _flush()
-                line_text = " ".join(c for c in cell_texts if c).strip()
+                # Built from row_words' own natural left-to-right order
+                # (already sorted by x0 — see _cluster_words_into_rows),
+                # NOT from cell_texts (anchor-bucketed). Anchor bucketing
+                # is tuned for separating DATA VALUES into columns and
+                # relies on a tolerance that adapts to whatever numeric
+                # spacing dominates the page; a header/prose line's own
+                # words can legitimately sit at slightly different x
+                # positions than the data rows below (e.g. a "2015 2016
+                # 2017" year header isn't always exactly right-aligned to
+                # the same edge as the dollar values under it), and once
+                # a word falls outside that adaptive tolerance it gets
+                # shoved into the leftover "label" bucket instead of its
+                # own column — silently reordering the line when cells
+                # are rejoined by bucket index. Reading the words back in
+                # their own original order sidesteps that entirely.
+                # Confirmed real case: Amazon's FY2017 "Cost of sales"
+                # table header read as raw words "2015 2016 2017" (correct
+                # order) but reassembled via cell_texts as "2016 2017
+                # 2015" (2016/2017 fell outside the page's — tightened by
+                # many nearby percentage-row numbers — anchor tolerance
+                # and got bucketed as leftover text ahead of 2015), which
+                # then fed _extract_year_headers a scrambled year sequence
+                # and mislabeled every value in the table by one year.
+                line_text = " ".join(w["text"] for w in row_words).strip()
                 if line_text:
                     prose_lines.append(line_text)
                     if self._extract_year_headers(line_text) or not header_candidate[0]:
