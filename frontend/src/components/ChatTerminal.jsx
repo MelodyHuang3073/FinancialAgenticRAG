@@ -229,6 +229,12 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
   // show that comparison as the headline instead of just the latest value.
   const hasSeries = Array.isArray(series) && series.length >= 2;
   if (!hasSeries && (value === null || value === undefined || value === '')) return null;
+  // "%" reads naturally appended right after a number ("23%"); the
+  // backend's other unit label, "x" (a ratio/multiple, e.g. "17.98x"),
+  // looks like a typo or stray variable when glued directly onto a
+  // number in a large headline font instead of read as "times" — only
+  // show the unit suffix for the case that's actually unambiguous.
+  const displayUnit = unit === '%' ? unit : '';
 
   return (
     <div style={{
@@ -248,7 +254,7 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
             <span key={pt.year} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
               {i > 0 && <span style={{ fontSize: 20, color: '#6ee7b7' }}>→</span>}
               <span style={{ fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-                {formatResultValue(pt.value)}{unit}
+                {formatResultValue(pt.value)}{displayUnit}
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#059669', marginLeft: 4 }}>
                   ({pt.year})
                 </span>
@@ -258,13 +264,13 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
         </div>
       ) : (
         <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-          {formatResultValue(value)}{unit}
+          {formatResultValue(value)}{displayUnit}
         </div>
       )}
       {hasSeries && delta !== null && delta !== undefined && (
         <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: '#047857' }}>
           {direction === 'increased' ? '↑' : direction === 'decreased' ? '↓' : '—'}{' '}
-          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}{unit}
+          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}{displayUnit}
         </div>
       )}
       <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
