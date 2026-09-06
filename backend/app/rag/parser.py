@@ -866,7 +866,30 @@ class FinancialFileParser:
                 current_col_shape[0] = col_shape
             else:
                 _flush()
-                line_text = " ".join(c for c in cell_texts if c).strip()
+                # Built from row_words' own natural left-to-right order
+                # (already sorted by x0 — see _cluster_words_into_rows),
+                # NOT from cell_texts (anchor-bucketed). Anchor bucketing
+                # is tuned for separating DATA VALUES into columns and
+                # relies on a tolerance that adapts to whatever numeric
+                # spacing dominates the page; a header/prose line's own
+                # words can legitimately sit at slightly different x
+                # positions than the data rows below (e.g. a "2015 2016
+                # 2017" year header isn't always exactly right-aligned to
+                # the same edge as the dollar values under it), and once
+                # a word falls outside that adaptive tolerance it gets
+                # shoved into the leftover "label" bucket instead of its
+                # own column — silently reordering the line when cells
+                # are rejoined by bucket index. Reading the words back in
+                # their own original order sidesteps that entirely.
+                # Confirmed real case: Amazon's FY2017 "Cost of sales"
+                # table header read as raw words "2015 2016 2017" (correct
+                # order) but reassembled via cell_texts as "2016 2017
+                # 2015" (2016/2017 fell outside the page's — tightened by
+                # many nearby percentage-row numbers — anchor tolerance
+                # and got bucketed as leftover text ahead of 2015), which
+                # then fed _extract_year_headers a scrambled year sequence
+                # and mislabeled every value in the table by one year.
+                line_text = " ".join(w["text"] for w in row_words).strip()
                 if line_text:
                     prose_lines.append(line_text)
                     if self._extract_year_headers(line_text) or not header_candidate[0]:
@@ -898,12 +921,28 @@ class FinancialFileParser:
         its digits when pdfplumber's cell-splitting has put them in two
         adjacent cells ('(116' + ')' -> '(116)') — otherwise that single
         value eats two column slots instead of one, throwing off every
-        later column's index-based year match on that row.
+        later column's index-based year match on that row. The same
+        splitting artifact happens to a trailing '%' just as often — a
+        percentage value like '23%' or a negative one like '(11%)' comes
+        back from pdfplumber's grid as two separate cells ('23' + '%', or
+        '(11' + '%)') whenever some OTHER row in the same ruled-line table
+        has its own column boundary fall between the digits and the sign
+        (e.g. a "$" or ")" cell elsewhere in the table shifts the shared
+        grid's gutter). Left unmerged, every percentage-only row (a
+        margin, an effective tax rate, a "% of net sales" row) reports
+        twice its real column count, which then desyncs its values from
+        the year header by however many stray '%' cells preceded them.
+        Confirmed real case: Corning's "Effective tax rate 23% 20%" row
+        compacted to 4 cells (23, %, 20, %) instead of 2 (23%, 20%),
+        pushing the year-header injection logic to treat "2022 2021 22
+        vs. 21" as belonging to a *different*, wider row shape and
+        synthesize bogus "2023"/"Col2"/"Col3"/"Col4" headers instead.
         """
         if not row:
             return row
         label = row[0]
         rest = [c for c in row[1:] if c and c.strip() not in ("", "$")]
+        _NUMERIC_NO_PCT_RE = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.?\d*\)?$')
         merged: list = []
         i = 0
         while i < len(rest):
@@ -911,13 +950,44 @@ class FinancialFileParser:
             if (
                 i + 1 < len(rest)
                 and re.match(r'^\(\s*[\d,.]+$', cell)
-                and rest[i + 1].strip() == ')'
+                and rest[i + 1].strip() in (')', '%)')
             ):
-                merged.append(cell + ')')
+                merged.append(cell + rest[i + 1].strip())
+                i += 2
+            elif (
+                i + 1 < len(rest)
+                and _NUMERIC_NO_PCT_RE.match(cell)
+                and rest[i + 1].strip() == '%'
+            ):
+                merged.append(cell + '%')
                 i += 2
             else:
                 merged.append(rest[i])
                 i += 1
+
+        # A line-item label that wraps across two physical PDF lines (e.g.
+        # "Property and equipment," on one line, "net $" on the next) can
+        # land in pdfplumber's cell grid with the SECOND line's fragment as
+        # row[0] (the label) and the FIRST line's fragment pushed into what
+        # looks like the first value column — a non-numeric string sitting
+        # where a dollar figure should be. Reclaim any such leading
+        # non-numeric "value" cells back into the label (prepended, since
+        # they came from the line ABOVE the fragment that ended up as
+        # row[0]) rather than leaving them to either masquerade as data or
+        # silently break the row's column-index alignment with the header.
+        # Confirmed real case: CVS Health's "Property and equipment, net"
+        # balance-sheet row parsed as label="net $" with "Property and
+        # equipment," sitting in the first value slot — no alias for
+        # "property and equipment, net" could ever match a label of just
+        # "net $", so fixed-asset-turnover fell back to guessing.
+        _numeric_cell_re = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.?\d*\)?%?$')
+        while (
+            merged
+            and merged[0].strip() not in ("—", "-", "–")
+            and not _numeric_cell_re.match(merged[0].strip())
+        ):
+            label = f"{merged.pop(0).strip()} {label}".strip()
+
         return [label] + merged
 
     def _inject_missing_year_header(self, rows: list, page, table_top: float) -> list:
@@ -939,12 +1009,46 @@ class FinancialFileParser:
         discarding it. Expects rows already compacted by
         _compact_row_cells() so "how many years" and "how many value
         columns the widest data row has" agree without extra bookkeeping.
+
+        Some real 10-Ks split the header across TWO of pdfplumber's own
+        detected rows instead of one: a bare date-preposition line
+        ("December 31,") on its own, immediately followed by a
+        "(units caption)  2020  2019" row that carries the actual years
+        in its VALUE cells — confirmed real case: Corning's FY2020
+        balance sheet. rows[0] alone has no year, and nothing above the
+        table's bbox does either (the "December 31," line sits INSIDE
+        the detected table region, not above it), so the original
+        above-the-table search alone never finds it. Before giving up,
+        this also checks the next few rows for one whose own cells
+        contain a real year — if found, that row IS the header (not a
+        data row) and is consumed rather than kept.
         """
         if not rows:
             return rows
         header_text = " ".join(c or "" for c in rows[0])
         if self._extract_year_headers(header_text):
             return rows  # already has a real year header — nothing to fix
+
+        # A comparative 10-K table is essentially never headed by a SINGLE
+        # year — even a one-column "current period only" table still pairs
+        # it with a caption, and every real header text this function has
+        # ever synthesized correctly (balance sheet, income highlights)
+        # carries 2+ years side by side. A lone year is much more likely to
+        # be incidental narrative prose a few lines above the table (a
+        # forward-looking "2023 Corporate Outlook" heading, a "for fiscal
+        # 2021" aside) than an actual column header, and accepting it
+        # anyway leaves every OTHER value column unlabeled ("Col2", "Col3",
+        # ...). Confirmed real case: Corning's page-24 "RESULTS OF
+        # OPERATIONS" table (headed by "2022 2021 22 vs. 21", 3 real value
+        # columns) sat right below a "2023 Corporate Outlook" paragraph —
+        # the nearest line above the table bearing ANY year was "For the
+        # first quarter 2023, we anticipate...", a single stray "2023"
+        # that got accepted as the whole header, mislabeling every column.
+        # Requiring 2+ years here makes the search keep climbing past that
+        # kind of noise to the genuine multi-year line (or the "next rows"
+        # fallback below, which finds it directly inside the table).
+        n_value_cols = max((len(r) - 1 for r in rows[1:]), default=0)
+        min_years_needed = min(2, n_value_cols) if n_value_cols else 2
 
         try:
             above = page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
@@ -953,18 +1057,64 @@ class FinancialFileParser:
             above_text = ""
         years: list = []
         for line in reversed(above_text.split("\n")):
+            candidate = self._extract_year_headers(line)
+            if len(candidate) >= min_years_needed:
+                years = candidate
+                break
+
+        if years:
+            n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
+            n_value_cols = max(n_value_cols, len(years))
+            synthesized = [rows[0][0] or "Line Item"] + [
+                years[i] if i < len(years) else f"Col{i + 1}" for i in range(n_value_cols)
+            ]
+            return [synthesized, rows[0]] + rows[1:]
+
+        # Nothing above the table either — check whether one of the next
+        # few rows is itself the real (split-out) header.
+        for i in range(1, min(4, len(rows))):
+            candidate_years = self._extract_year_headers(" ".join(c or "" for c in rows[i]))
+            if not candidate_years:
+                continue
+            n_value_cols = max((len(r) - 1 for r in rows[i + 1:]), default=len(candidate_years))
+            n_value_cols = max(n_value_cols, len(candidate_years))
+            synthesized = ["Line Item"] + [
+                candidate_years[j] if j < len(candidate_years) else f"Col{j + 1}"
+                for j in range(n_value_cols)
+            ]
+            return [synthesized] + rows[:i] + rows[i + 1:]
+
+        # Still nothing — for a small table recovered separately by Tier
+        # 2 (see _reinject_year_header_if_missing()), `table_top` is the
+        # PAGE's first ruled-line group's own top, not this fragment's
+        # position, and its own rows never contain the year at all (a
+        # genuine data-only orphan, e.g. Corning's "Cost of sales" /
+        # "Gross margin" pair, split out from the real statement purely
+        # by an unrelated pdfplumber row-detection artifact — see
+        # _ruled_line_tables_and_prose()). The real year header for a
+        # page's first/topmost table is reliably close by, just a little
+        # further down than "above the table" covers (it's often split
+        # across its own two or three short lines, per
+        # _inject_missing_year_header()'s main docstring) — so make one
+        # more attempt over a small window starting right at table_top.
+        try:
+            nearby = page.within_bbox(
+                (0, max(0, table_top), page.width, table_top + 60), relative=False
+            )
+            nearby_text = nearby.extract_text() or ""
+        except Exception:
+            nearby_text = ""
+        for line in nearby_text.split("\n"):
             years = self._extract_year_headers(line)
             if years:
-                break
-        if not years:
-            return rows  # no candidate found anywhere above — leave as-is
+                n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
+                n_value_cols = max(n_value_cols, len(years))
+                synthesized = ["Line Item"] + [
+                    years[j] if j < len(years) else f"Col{j + 1}" for j in range(n_value_cols)
+                ]
+                return [synthesized] + rows
 
-        n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
-        n_value_cols = max(n_value_cols, len(years))
-        synthesized = [rows[0][0] or "Line Item"] + [
-            years[i] if i < len(years) else f"Col{i + 1}" for i in range(n_value_cols)
-        ]
-        return [synthesized, rows[0]] + rows[1:]
+        return rows  # no candidate found anywhere — leave as-is
 
     def _reinject_year_header_if_missing(self, md: str, page, table_top: float) -> str:
         """
@@ -1125,7 +1275,28 @@ class FinancialFileParser:
                 md_tables.append(md)
             for t in group:
                 try:
-                    filtered_page = filtered_page.outside_bbox(t.bbox)
+                    # outside_bbox() only keeps objects FULLY outside the
+                    # given box — a word whose bbox bleeds even a fraction
+                    # of a point into an adjacent detected table's edge
+                    # (ordinary line-height/descender spacing, not a real
+                    # overlap) gets treated as "inside" and silently
+                    # dropped, even though it belongs to a completely
+                    # different row. Confirmed real case: Corning's income
+                    # statement "Cost of sales" row sits in the ~12pt gap
+                    # between two adjacent detected table fragments, but
+                    # its own text bbox bottom edge (151.68) crept 0.3pt
+                    # past the next fragment's top edge (151.39) — enough
+                    # for outside_bbox() to discard the word entirely, and
+                    # neither Tier 1 (it was never inside any detected
+                    # table) nor Tier 2 (excluded here) ever recovered it.
+                    # Shrinking the excluded box inward by a small margin
+                    # keeps genuine table content safely excluded while
+                    # no longer eating a neighboring row over sub-point
+                    # bleed.
+                    x0, top, x1, bottom = t.bbox
+                    pad = 1.0
+                    shrunk_bbox = (x0, min(top + pad, bottom), x1, max(bottom - pad, top))
+                    filtered_page = filtered_page.outside_bbox(shrunk_bbox)
                 except Exception:
                     pass
 

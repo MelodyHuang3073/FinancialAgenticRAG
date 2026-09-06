@@ -10,7 +10,7 @@ FinAgent-RAG Orchestrator
   6. LLM 回答綜合（llm_client）
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from app.rag.vector_store import FinancialVectorStoreManager
 from app.agent.question_classifier import FinanceBenchClassifier
@@ -23,9 +23,43 @@ from app.agent.financial_formula_library import detect_formula, get_variable_ali
 
 
 class FinAgentRAGOrchestrator:
-    RETRIEVAL_TOP_K = 3          # chunks per sub-question (was 5)
-    RETRIEVAL_MAX_TOTAL = 15     # hard ceiling on total evidence buffer size
-    CONTEXT_CHUNK_LIMIT = 8
+    # Chunks per sub-question. Raised from 3 back toward the original 5:
+    # a bare alias like "net income" can legitimately match several
+    # differently-scoped rows on the SAME income statement ("Net income
+    # from continuing operations", "Consolidated net income", "Net income
+    # attributable to shareowners of ..."), and the one GAAP convention
+    # actually wants can rank #4-#5 for a generic query even though it's
+    # sitting cleanly in a real evidence chunk — confirmed real case:
+    # Coca-Cola FY2017 net income for ROA, where top_k=3 never retrieved
+    # any of the pages carrying the correctly-labeled "attributable to
+    # shareowners" row at all, leaving only mis-scoped rows to choose
+    # from no matter how good the downstream tie-break logic is.
+    RETRIEVAL_TOP_K = 5
+    # Hard ceiling on total evidence buffer size. Must comfortably fit every
+    # sub-query a single formula's own required_vars can generate (top_k=5
+    # each) — a composite formula like cash_conversion_cycle needs 8
+    # placeholders (cogs, revenue, inv_old/new, ar_old/new, ap_old/new), so
+    # 8*5=40 sub-results. The old value of 15 silently cut off mid-formula,
+    # dropping ap_old/ap_new before they were ever retrieved (confirmed
+    # real case: General Mills FY2019 CCC — accounts payable never entered
+    # the evidence buffer at all, and the whole computation fell back to a
+    # generic, ungrounded LLM guess). Sized with headroom above today's
+    # largest formula rather than pinned to exactly 40, so the next
+    # formula with one or two more placeholders doesn't repeat this.
+    RETRIEVAL_MAX_TOTAL = 45
+    # A SECOND, separate cap applied right before evidence reaches PoT/the
+    # LLM (sorted by relevance_score, top N kept) — raising
+    # RETRIEVAL_MAX_TOTAL alone isn't enough if this one stays tight,
+    # since it can still truncate a lower-but-still-correct-scoring row
+    # out of the final window even though it survived the earlier cap.
+    # Confirmed real case: General Mills' own real "Net earnings
+    # attributable to General Mills" row (score ~43) ranked #3 for its
+    # own retrieval query — comfortably inside RETRIEVAL_MAX_TOTAL=30 —
+    # but still got squeezed out of the final CONTEXT_CHUNK_LIMIT=8 window
+    # by higher-scoring prose chunks from OTHER sub-queries in the same
+    # evidence_buffer, leaving retention_ratio's net_income_attributable
+    # placeholder unresolved and falling back to an ungrounded guess.
+    CONTEXT_CHUNK_LIMIT = 30
 
     def __init__(self, vector_store: FinancialVectorStoreManager):
         self.vector_store = vector_store
@@ -77,7 +111,27 @@ class FinAgentRAGOrchestrator:
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
 
-        # Entity alignment: match entity against actual corpus company names
+        # Entity alignment: match entity against actual corpus company names.
+        # The classifier's OWN clean entity ("General Mills") is kept
+        # separately as `clean_entity` for embedding in retrieval QUERY
+        # TEXT — production's raw filename-stem company field (e.g.
+        # "GENERALMILLS_2022_10K") is what classification["entity"] becomes
+        # below, and that's the right form for the entity= soft-filter
+        # parameter passed to search() (_company_match_score compares it
+        # against doc_company), but a poor form to paste into the query
+        # string itself: many FinanceBench filenames glue multi-word
+        # company names together with no separator ("GENERALMILLS",
+        # "BESTBUY", "KRAFTHEINZ", "AMERICANWATERWORKS"...), so the
+        # tokenizer produces one fused token that can never match the two
+        # separate words ("general", "mills") the filing's own text
+        # actually uses — silently losing all of that token's BM25
+        # contribution. Confirmed real case: General Mills' FY2022
+        # "Net earnings attributable to General Mills" row scored far
+        # lower against a query built from "GENERALMILLS_2022_10K" than
+        # the identical query built from "General Mills", pushing an
+        # unrelated row into the retrieval results the formula extraction
+        # then had to guess from.
+        clean_entity = classification["entity"]
         classification["entity"] = self._match_entity_to_corpus(
             classification["entity"], query
         )
@@ -118,8 +172,9 @@ class FinAgentRAGOrchestrator:
         # exactly what extraction will later look for, deterministically.
         formula_entry = detect_formula(query) if answer_mode == "NUMERIC" else None
         if formula_entry:
+            query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
             sub_questions = self._build_formula_subquestions(
-                formula_entry, classification["entity"], classification["years"]
+                formula_entry, query_entity, classification["years"]
             )
         elif answer_mode == "NUMERIC":
             sub_questions = self.decomposer.decompose(
@@ -129,7 +184,9 @@ class FinAgentRAGOrchestrator:
                 entity=classification["entity"],
             )
         else:
-            sub_questions = self._build_non_numeric_subquestions(query, answer_mode)
+            sub_questions = self._build_non_numeric_subquestions(
+                query, answer_mode, classification.get("target_metrics")
+            )
 
         trace_steps.append({
             "step_name": "Query Decomposition",
@@ -298,7 +355,9 @@ class FinAgentRAGOrchestrator:
                     if parent_id and not ev_enriched.get("parent_content"):
                         ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
                     context_window.append(ev_enriched)
-                pot_res = self.pot_reasoner.generate_and_execute(query, context_window)
+                pot_res = self.pot_reasoner.generate_and_execute(
+                    query, context_window, entity=classification["entity"]
+                )
                 iter_trace["pot_code"] = pot_res["code"]
                 iter_trace["sandbox_output"] = pot_res["output_log"]
                 iter_trace["result_value"] = pot_res["result_value"]
@@ -334,7 +393,29 @@ class FinAgentRAGOrchestrator:
                 "verification": {}
             }
 
-            search_queries = classification["retrieval_queries"]
+            # If the target metric happens to match a registered formula
+            # (e.g. "working_capital" = current_assets - current_liabilities),
+            # search for its OWN required_vars instead of the classifier's
+            # generic retrieval_queries — those are often just the raw
+            # question text plus a fixed boilerplate suffix ("operating
+            # margin cost structure segment" for every EXPLANATION
+            # question), which can score near zero against a filing that
+            # never literally prints the derived metric's own name.
+            # Confirmed real case: "Does American Water Works have
+            # positive working capital..." searched for "Working Capital"
+            # itself, which appears nowhere as a real line item, and
+            # retrieved unrelated debt-exhibit boilerplate instead of
+            # "Total current assets"/"Total current liabilities" (both of
+            # which retrieve cleanly on their own).
+            non_numeric_formula = detect_formula(query)
+            if non_numeric_formula:
+                formula_query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
+                search_queries = [
+                    step["query"] for step in
+                    self._build_formula_subquestions(non_numeric_formula, formula_query_entity, classification["years"])
+                ]
+            else:
+                search_queries = classification["retrieval_queries"]
             new_hits = []
             for sq in search_queries:
                 new_hits.extend(self.vector_store.search(
@@ -351,11 +432,43 @@ class FinAgentRAGOrchestrator:
                 iter_trace["retrieved_passages"].append(info)
                 evidence_meta.append(info)
 
-            pot_res = {
-                "code": "", "success": True, "result_value": None,
-                "output_log": "", "extracted_variables": {},
-                "answer_mode": answer_mode,
-            }
+            # An EXPLANATION/ASSESSMENT question ("does X have positive
+            # working capital", "did Y's margin improve") still turns on a
+            # real number comparison whenever it matches a registered
+            # formula — it just ALSO needs qualitative framing in the
+            # final text. This used to always return a stub pot_res with
+            # no code and result_value=None, meaning the LLM derived
+            # every number itself straight from raw evidence text with
+            # zero sandbox grounding — exactly the failure mode the
+            # "trust the sandbox" instruction in llm_client.py exists to
+            # prevent elsewhere, just never reached here at all. Confirmed
+            # real case: American Water Works' FY2022 working-capital
+            # question got the right numbers this time purely by LLM
+            # luck, with no Python trace to show for it or to have caught
+            # it if the LLM had been wrong.
+            context_window = []
+            for ev in sorted(evidence_buffer, key=lambda x: x.get("relevance_score", 0.0), reverse=True)[:self.CONTEXT_CHUNK_LIMIT]:
+                ev_enriched = dict(ev)
+                parent_id = ev.get("parent_id")
+                if parent_id and not ev_enriched.get("parent_content"):
+                    ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
+                context_window.append(ev_enriched)
+
+            if non_numeric_formula:
+                pot_res = self.pot_reasoner.generate_and_execute(
+                    query, context_window, entity=classification["entity"]
+                )
+            else:
+                pot_res = {
+                    "code": "", "success": True, "result_value": None,
+                    "output_log": "", "extracted_variables": {},
+                    "answer_mode": answer_mode,
+                }
+            pot_res["answer_mode"] = answer_mode
+            iter_trace["pot_code"] = pot_res.get("code", "")
+            iter_trace["sandbox_output"] = pot_res.get("output_log", "")
+            iter_trace["result_value"] = pot_res.get("result_value")
+
             verification_res = self.verifier.verify(query, evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:], pot_res)
             iter_trace["verification"] = verification_res
             trace_steps.append({
@@ -389,6 +502,7 @@ class FinAgentRAGOrchestrator:
             "result_series": pot_res.get("result_series", []) if pot_res else [],
             "result_delta": pot_res.get("result_delta") if pot_res else None,
             "result_direction": pot_res.get("result_direction") if pot_res else None,
+            "result_unit": pot_res.get("result_unit", "") if pot_res else "",
             # Return ALL evidence items (with sub_question tag) so the frontend
             # can display every data point that contributed to the calculation
             "evidence_sources": evidence_meta if evidence_meta else [
@@ -422,12 +536,30 @@ class FinAgentRAGOrchestrator:
         norm_classifier = _normalise(classifier_entity)
         best_company = None
         best_score = 0
+        best_year: Optional[str] = None
+
+        # Years the query itself mentions — used only to break ties between
+        # multiple filings of the SAME company (see below), since
+        # _normalise() deliberately strips year tokens before scoring so
+        # "Corning" can match either "CORNING_2021_10K" or
+        # "CORNING_2022_10K" equally well in the first place.
+        #
+        # Uses (?<!\d)...(?!\d) rather than \b: \b only fires at a
+        # word/non-word transition, and both "_" and digits count as word
+        # characters to regex — so \b2021\b never matches inside
+        # "CORNING_2021_10K" (underscore before) or "FY2021" (letter
+        # before, no separator) at all, silently defeating year detection
+        # in exactly the two places years actually show up here.
+        _YEAR_RE = r'(?<!\d)(?:20|19)\d{2}(?!\d)'
+        query_years = set(_re.findall(_YEAR_RE, query))
 
         for uf in self.vector_store.uploaded_files:
             corpus_company = uf.get("company", "")
             if not corpus_company:
                 continue
             norm_corpus = _normalise(corpus_company)
+            corpus_year_match = _re.search(_YEAR_RE, corpus_company)
+            corpus_year = corpus_year_match.group(0) if corpus_year_match else None
 
             score = 0
             # Score 1: corpus company words appear in query
@@ -445,9 +577,28 @@ class FinAgentRAGOrchestrator:
                 if norm_classifier in norm_corpus or norm_corpus in norm_classifier:
                     score += 5
 
-            if score > best_score:
+            if score > best_score or (
+                # Tie-break between multiple filings of the SAME company
+                # (identical score, since the company-name portion is
+                # identical once years are stripped): prefer whichever
+                # filing's OWN year is the one the query actually asks
+                # about, falling back to the most recent filing — never an
+                # arbitrary "whichever was uploaded first". Confirmed real
+                # case: a "how did Corning's tax rate change between
+                # FY2021 and FY2022" question, with both CORNING_2021_10K
+                # and CORNING_2022_10K loaded, tied at the same score and
+                # picked CORNING_2021_10K purely by upload order — a
+                # filing that structurally CANNOT contain FY2022 figures
+                # at all, since it predates that fiscal year.
+                score > 0 and score == best_score and corpus_year and (
+                    (corpus_year in query_years and best_year not in query_years)
+                    or (corpus_year in query_years and best_year in query_years and corpus_year > best_year)
+                    or (not query_years and (best_year is None or corpus_year > best_year))
+                )
+            ):
                 best_score = score
                 best_company = corpus_company
+                best_year = corpus_year
 
         if best_company and best_score > 0:
             return best_company
@@ -510,11 +661,35 @@ class FinAgentRAGOrchestrator:
             # an all-English 10-K for Chinese text, retrieving nothing
             # relevant (confirmed real case: DPO's own retrieval queries
             # came out as "Amazon 應付帳款 2016" etc., matching zero real
-            # content in the English filing). Prefer the first ASCII/
-            # Latin-alphabet alias — every formula in the library also
-            # lists an English variant — falling back to aliases[0] only
-            # if none exists.
-            primary_alias = next((a for a in aliases if a.isascii()), aliases[0] if aliases else placeholder)
+            # content in the English filing). Prefer ASCII/Latin-alphabet
+            # aliases — every formula in the library also lists an English
+            # variant — falling back to aliases[0] only if none exists.
+            #
+            # Uses up to the first THREE distinct ASCII aliases, not just
+            # one: different companies genuinely use different phrasings
+            # for the same line item (e.g. "net income attributable to
+            # shareowners" vs. "net earnings attributable to <company>"),
+            # and picking only the single first alias means the query only
+            # ever matches ONE company's convention. Confirmed real case:
+            # General Mills' "Net earnings attributable to General Mills"
+            # row scored below an unrelated NCI row when the query only
+            # contained "net income attributable to shareowners" (Coca-
+            # Cola's own phrasing) — combining alias variants into one
+            # query correctly ranks the right row #1 for EITHER company's
+            # wording, without needing a second retrieval round-trip.
+            # Bumped from 2 to 3: cogs alone has FOUR genuinely common
+            # phrasings across real 10-Ks ("cost of goods sold", "cost of
+            # sales", "cost of revenue", "cost of products sold"), and
+            # with only 2 covered, a company using the 3rd/4th variant
+            # (Kraft Heinz: "Cost of products sold") got literally zero
+            # _line_item_match_score credit for its own real row while an
+            # unrelated OTHER company's row using one of the covered
+            # phrasings scored an exact match and outranked it even after
+            # the entity-mismatch penalty.
+            ascii_aliases = [a for a in aliases if a.isascii()]
+            primary_alias = " ".join(dict.fromkeys(ascii_aliases[:3])) if ascii_aliases else (
+                aliases[0] if aliases else placeholder
+            )
             if is_period_average and sorted_years:
                 target_years = sorted_years
             elif is_multi_year and len(sorted_years) >= 2:
@@ -535,18 +710,40 @@ class FinAgentRAGOrchestrator:
                 })
         return steps
 
-    def _build_non_numeric_subquestions(self, query: str, answer_mode: str) -> List[Dict[str, str]]:
+    def _build_non_numeric_subquestions(
+        self, query: str, answer_mode: str, target_metrics: Optional[List[str]] = None,
+    ) -> List[Dict[str, str]]:
+        # The retrieval suffix for each template used to be a fixed phrase
+        # ("operating margin cost structure segment" for EVERY EXPLANATION
+        # question, regardless of what the question actually asked about),
+        # which only coincidentally overlaps with what a given question
+        # needs. When the classifier already identified specific
+        # target_metrics, search for THOSE instead — a general improvement
+        # for any qualitative question, not just this one. Confirmed real
+        # case: "Does American Water Works have positive working capital"
+        # (target_metrics=['working_capital']) retrieved evidence about
+        # operating margin and cost structure instead of current assets/
+        # liabilities, so the model's answer never stated the actual
+        # -$1,561M figure at all — just a generic non-answer.
+        metric_terms = " ".join(m.replace("_", " ") for m in (target_metrics or []))
+        fallback_suffix = {
+            "ASSESSMENT": "capital expenditure assets depreciation",
+            "EXCLUSION": "segment revenue organic growth acquisition",
+            "EXPLANATION": "operating margin cost structure segment",
+        }.get(answer_mode, "")
+        retrieval_query = f"{query} {metric_terms or fallback_suffix}".strip()
+
         templates = {
             "ASSESSMENT": [
-                {"step": 1, "type": "retrieval", "query": f"{query} capital expenditure assets depreciation"},
+                {"step": 1, "type": "retrieval", "query": retrieval_query},
                 {"step": 2, "type": "analysis", "query": "Assess the metric's suitability"},
             ],
             "EXCLUSION": [
-                {"step": 1, "type": "retrieval", "query": f"{query} segment revenue organic growth acquisition"},
+                {"step": 1, "type": "retrieval", "query": retrieval_query},
                 {"step": 2, "type": "analysis", "query": "Isolate organic vs M&A impact"},
             ],
             "EXPLANATION": [
-                {"step": 1, "type": "retrieval", "query": f"{query} operating margin cost structure segment"},
+                {"step": 1, "type": "retrieval", "query": retrieval_query},
                 {"step": 2, "type": "analysis", "query": "Identify key drivers"},
             ],
         }

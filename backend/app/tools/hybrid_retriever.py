@@ -3,12 +3,32 @@ from typing import List, Dict, Any, Optional
 
 
 class HybridFinancialRetriever:
+    # Used for a 1.5x _line_item_match_score boost when a query and a
+    # candidate passage both mention the same term — this is what lets a
+    # short, clean balance-sheet/cash-flow table ROW outrank a long prose
+    # page that happens to repeat the company's own name many times (e.g.
+    # a subsidiary list or legal exhibit index) purely on raw BM25 term
+    # frequency. Several formula-library primary aliases (the literal text
+    # used to build retrieval queries — see
+    # orchestrator._build_formula_retrieval_steps) were missing here
+    # entirely, leaving those specific lookups with no such protection.
+    # Confirmed real case: Kraft Heinz's real "Inventories" row (page 52)
+    # ranked #12, behind 11 boilerplate/legal pages that just happened to
+    # repeat "Kraft Heinz" and a stray "2018" many times — "inventory"/
+    # "inventories" wasn't in this list at all.
     FINANCIAL_TERMS = [
         "營業收入", "營收", "毛利", "毛利率", "營業利益", "營業利益率", "營業費用",
         "研發費用", "本期淨利", "淨利", "每股盈餘", "資本支出", "銷貨成本", "營業成本",
+        "存貨", "應付帳款", "應收帳款",
         "revenue", "gross profit", "gross margin", "operating income", "operating margin",
         "net income", "eps", "capital expenditure", "capex", "r&d", "net sales",
         "total revenue", "cost of revenue", "ebitda", "free cash flow",
+        "inventory", "inventories", "accounts payable", "accounts receivable", "receivables",
+        "cost of goods sold", "cost of sales", "cost of products sold",
+        "total assets", "total liabilities", "current liabilities", "current assets",
+        "provision for income taxes", "income tax", "dividends paid",
+        "net cash provided by operating activities", "property and equipment",
+        "property, plant and equipment",
     ]
 
     #: A row whose own Line Item label starts with "Total" (e.g. "Total
@@ -34,8 +54,23 @@ class HybridFinancialRetriever:
 
     def _tokenize(self, text: str) -> List[str]:
         text_lower = text.lower()
-        # Split Chinese chars individually; keep alphanumeric words and decimal numbers
-        tokens = re.findall(r'[\u4e00-\u9fff]|[a-z0-9]+(?:\.\d+)?|\d+[,.]?\d*', text_lower)
+        # Split Chinese chars individually; keep alphanumeric words and decimal numbers.
+        # Comma-grouped numbers (e.g. "7,772") MUST be matched as one token before the
+        # plain [a-z0-9]+ alternative, which stops at the comma \u2014 otherwise "7,772"
+        # becomes two tokens ("7","772") while an unrelated same-row value like "13"
+        # stays one token, artificially inflating doc_len (and thus penalising BM25
+        # score) for every row that happens to have 4-digit accounting figures.
+        # Confirmed real case: Corning's real "Cost of sales" row (7,772/7,468/6,829)
+        # scored BELOW an unrelated footnote row with tiny 2-digit values (13/11/13)
+        # purely because of this length-normalisation artifact, not any real relevance
+        # difference.
+        tokens = re.findall(
+            r'[\u4e00-\u9fff]'
+            r'|\d{1,3}(?:,\d{3})+(?:\.\d+)?'
+            r'|[a-z0-9]+(?:\.\d+)?'
+            r'|\d+[,.]?\d*',
+            text_lower,
+        )
         # Also add multi-char financial terms as atomic tokens for better matching
         for term in self.FINANCIAL_TERMS:
             if term in text_lower:

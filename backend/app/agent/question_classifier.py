@@ -49,8 +49,9 @@ _METRIC_KEYWORDS = {
     # routed PP&E questions to the wrong statement and searched for the
     # wrong term — confirmed root cause of fixed_asset_turnover's PP&E
     # never being retrieved for a real Activision Blizzard question.
-    "ppe":           ["pp&e", "property, plant and equipment", "property and equipment",
-                       "fixed assets", "不動產、廠房及設備", "固定資產"],
+    "ppe":           ["pp&e", "property, plant and equipment", "property, plant, and equipment",
+                       "property and equipment", "fixed assets",
+                       "不動產、廠房及設備", "固定資產"],
     "depreciation":  ["折舊", "depreciation", "amortization"],
     "ebitda":        ["ebitda"],
     "roe":           ["roe", "return on equity"],
@@ -84,6 +85,7 @@ _METRIC_KEYWORDS = {
     "roce":             ["roce", "return on capital employed"],
     "roic":             ["roic", "return on invested capital"],
     "net_margin":       ["net margin", "net profit margin", "profit margin"],
+    "tax_rate":         ["effective tax rate", "tax rate"],
     # ── Cash flow metrics ─────────────────────────────────────────────
     "operating_cf":     ["operating cash flow", "cash from operations", "cfo",
                           "cash from operating", "cash provided by operating",
@@ -112,6 +114,7 @@ _STATEMENT_TYPE_MAP: Dict[str, str] = {
     "net_margin":       "income_statement",
     "roce":             "income_statement",
     "roic":             "income_statement",
+    "tax_rate":         "income_statement",
     # Balance Sheet metrics
     "total_assets":     "balance_sheet",
     "total_liab":       "balance_sheet",
@@ -388,9 +391,28 @@ class FinanceBenchClassifier:
             "twitter": "Twitter/X",
             "spotify": "Spotify",
             "pinterest": "Pinterest",
+            "american water works": "American Water Works", "awk": "American Water Works",
+            "kraft heinz": "Kraft Heinz",
+            "jnj": "Johnson & Johnson",
+            "cvs health": "CVS Health", "cvs": "CVS Health",
+            "general mills": "General Mills",
+            "aes corporation": "AES Corporation",
+            "best buy": "Best Buy",
+            "corning": "Corning",
+            "amcor": "Amcor",
         }
+        # Plain "if keyword in q" substring matching lets a short key match
+        # INSIDE an unrelated word — confirmed real case: the "ge" key
+        # (General Electric) matched inside "avera-ge- inventory" and
+        # "mana-ge-ment", silently misclassifying entirely unrelated
+        # Kraft Heinz / JnJ questions as being about General Electric,
+        # which then made retrieval search for the wrong company's
+        # documents entirely. Real word-boundary matching (not just the
+        # left-boundary-only _kw_match used elsewhere for keyword STEMS
+        # like "improv") is correct here since a company name is always
+        # referenced as a whole word/phrase, never as a deliberate prefix.
         for keyword, name in known.items():
-            if keyword in q:
+            if re.search(r'\b' + re.escape(keyword) + r'\b', q):
                 return name
 
         # ── 2. Dynamic: extract individual capitalized tokens from original query ────
