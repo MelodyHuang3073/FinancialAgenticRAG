@@ -430,6 +430,12 @@ class FinancialFileParser:
     #: Minimum consecutive data rows for a run to count as a real table.
     _WORD_TABLE_MIN_ROWS = 2
 
+    #: Maximum numeric value columns a Tier 2-recovered row may have and
+    #: still be labeled as a simple year/period comparison — see the
+    #: real CVS Health segment-breakdown case in _flush()'s docstring
+    #: comment for why a wider row must be left as prose instead.
+    _WORD_TABLE_MAX_VALUE_COLS = 4
+
     #: Minimum fraction of numeric-token-bearing rows that must share the
     #: SAME anchor "shape" (which value-column anchors their numbers
     #: landed on) for the page's anchors to be trusted at all. Real
@@ -669,13 +675,29 @@ class FinancialFileParser:
         self, rows: List[List[Dict[str, Any]]], anchors: List[float], tolerance: float
     ) -> float:
         """
-        Of every row with 2+ numeric-looking tokens, what fraction share
-        the single most common "shape" (the sorted set of anchor indices
-        those numbers matched)? Computed from numeric tokens ONLY — label
-        words are excluded, since a label word coincidentally landing
-        near an anchor by chance is noise, not evidence of real column
-        structure. See _WORD_COL_MIN_SHAPE_CONFIDENCE for how this is
-        used.
+        Of every row with 2+ numeric-looking tokens AND at least one of
+        them landing on a real anchor, what fraction share the single
+        most common "shape" (the sorted set of anchor indices those
+        numbers matched)? Computed from numeric tokens ONLY — label words
+        are excluded, since a label word coincidentally landing near an
+        anchor by chance is noise, not evidence of real column structure.
+        See _WORD_COL_MIN_SHAPE_CONFIDENCE for how this is used.
+
+        A row whose numbers matched NO anchor at all (empty shape ()) is
+        excluded from both the vote and the denominator — it's proof of
+        the ABSENCE of column structure for that one row, not evidence
+        FOR any particular shape, so it must not be allowed to compete in
+        most_common() (or even worse, WIN, silently outvoting the real
+        table shape purely by being the single most common kind of
+        "miss"). Confirmed real case: 3M's own FY2018 Free Cash Flow page
+        has exactly 4 rows sharing the real (1, 2, 4) table shape, but 5
+        OTHER unrelated numeric mentions elsewhere on the page (a "$96
+        million" aside, a page number, etc.) all failed to land on any
+        anchor and so all shared the same empty shape () — which,
+        included in the vote, outnumbered the real 4-row shape and became
+        "dominant" at 5/12 ≈ 0.42, just under the 0.5 confidence
+        threshold, so the whole page's Tier 2 pass abstained and all four
+        real data rows fell back to unstructured prose.
         """
         shapes = []
         for row in rows:
@@ -683,7 +705,9 @@ class FinancialFileParser:
             if len(numeric_words) < 2:
                 continue
             matches = [self._assign_to_value_anchor(w["x1"], anchors, tolerance) for w in numeric_words]
-            shapes.append(tuple(sorted(i for i in matches if i is not None)))
+            shape = tuple(sorted(i for i in matches if i is not None))
+            if shape:
+                shapes.append(shape)
         if not shapes:
             return 0.0
         most_common_count = Counter(shapes).most_common(1)[0][1]
@@ -795,8 +819,33 @@ class FinancialFileParser:
         header_candidate = [""]
 
         def _flush():
-            if len(current_rows) >= self._WORD_TABLE_MIN_ROWS:
-                n_cols = current_n_cols[0]
+            n_cols = current_n_cols[0]
+            # A real financial-statement row almost never carries more
+            # than a handful of year/period columns (this project's own
+            # confirmed cases top out at 3). A row with MANY more numeric
+            # columns than that is a different shape of table entirely —
+            # a segment/category breakdown for a SINGLE period (e.g. "Total
+            # revenues | Pharmacy Services | Retail/LTC | Health Care
+            # Benefits | Corporate/Other | Eliminations | Consolidated"),
+            # not a multi-year comparison — and _extract_year_headers has
+            # no way to tell "2018" (a section divider introducing THAT
+            # year's own segment breakdown) apart from a genuine 3-column
+            # year header, so every segment's own value would be labeled
+            # as if it were a DIFFERENT year's whole-company total.
+            # Confirmed real case: CVS Health's FY2018 segment-analysis
+            # table has a "Total revenues" row reading "134,128 | 83,989 |
+            # 5,549 | 606 | (29,693) | 194,579" (Pharmacy Services segment
+            # revenue, four more segments, then the real consolidated
+            # total last) -- labeling column 1 "2018" made downstream
+            # extraction treat 134,128 (just the Pharmacy Services slice)
+            # as CVS's whole FY2018 revenue instead of the real 194,579.
+            # Safer to leave an implausibly-wide row as prose (same as
+            # before this reconstruction existed at all) than to mislabel
+            # segment data as a simple year comparison.
+            if n_cols is not None and n_cols > self._WORD_TABLE_MAX_VALUE_COLS:
+                for label, values in current_rows:
+                    prose_lines.append((label + "  " + "  ".join(values)).strip())
+            elif len(current_rows) >= self._WORD_TABLE_MIN_ROWS:
                 years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
                 headers = ["Line Item"] + [
                     years[i] if i < len(years) else f"Col{i + 1}"
@@ -816,7 +865,23 @@ class FinancialFileParser:
         for row_words in rows:
             cells: List[List[str]] = [[] for _ in range(len(anchors) + 1)]
             for w in row_words:
-                col = self._assign_to_value_anchor(w["x1"], anchors, tolerance)
+                w_text = w["text"].strip()
+                # Only a word that actually LOOKS like a value token (or a
+                # bare '$', handled specially just below) is even eligible
+                # for value-anchor assignment — an ordinary label word
+                # (e.g. "cash" in "Net cash provided by...") must never be
+                # pulled into a value column purely because its x1
+                # coincidentally lands within `tolerance` of some OTHER,
+                # unrelated numeric token's anchor elsewhere on the page.
+                # Confirmed real case: 3M's own "Net cash provided by
+                # operating activities" row had "cash" (x1≈83.7) collide
+                # with a spurious low-x1 value anchor seeded by unrelated
+                # stray numbers in nearby MD&A prose (anchor≈82.68,
+                # tolerance=3.0) — "cash" got wrenched out of the label
+                # and into its own bogus value cell, corrupting both the
+                # label text and the column count for the whole row.
+                is_value_like = bool(self._LAYOUT_VALUE_RE.fullmatch(w_text)) or w_text == "$"
+                col = self._assign_to_value_anchor(w["x1"], anchors, tolerance) if is_value_like else None
                 # A standalone '$' too far from its own number to satisfy
                 # _WORD_DOLLAR_MERGE_GAP (some filings right-align the
                 # glyph at the LEFT edge of a wide value column, well
@@ -830,8 +895,15 @@ class FinancialFileParser:
                 # column this way, leaving DPO's ap_old/ap_new to both
                 # fall back to the FY2017 figure. The glyph adds no
                 # numeric information once a real column is assigned, so
-                # it's dropped here rather than carried into the cell.
-                if col is not None and w["text"].strip() == "$":
+                # it's dropped here rather than carried into the cell —
+                # unconditionally now, not just when it landed on a value
+                # anchor: since a bare "$" is never label content either,
+                # one that missed every anchor (e.g. too far from its own
+                # number, and no OTHER column happened to be nearby) would
+                # otherwise fall into the label bucket instead and litter
+                # the row's label with stray "$ $ $" (confirmed real case:
+                # 3M's "Net cash provided by operating activities $ $ $").
+                if w_text == "$":
                     continue
                 cells[0 if col is None else col + 1].append(w["text"])
             cell_texts = [" ".join(parts).strip() for parts in cells]
@@ -1593,9 +1665,12 @@ class FinancialFileParser:
             year_headers = ["Col1", "Col2"]
 
         parent_id = f"parent_{company_name}_p{page_num}_tbl"
+        # Full page_text, not a [:1000] preview — see _chunk_text_to_passages'
+        # docstring for why a hardcoded character cap on parent_content
+        # silently defeats its own purpose.
         parent_content = (
             f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
-            + page_text[:1000]
+            + page_text
         )
 
         passages = []
@@ -1657,6 +1732,26 @@ class FinancialFileParser:
         the parent record keep the full original page text (e.g. including a
         table that was linearised separately) even when only the prose part
         of the page is being chunked here.
+
+        parent_content deliberately carries the FULL source_text, not a
+        truncated preview — this used to be hardcoded to source_text[:1000],
+        silently dropping anything on the page past character 1000. A real
+        10-K note routinely runs well past that on a single page (e.g. a
+        multi-item acquisitions/divestitures note, a legal-proceedings
+        section): every downstream consumer of parent_content (the frontend
+        Source Evidence panel, and — once fixed the same way —
+        llm_client.py's evidence formatting) exists specifically to show
+        "the whole page this chunk came from", so truncating it here defeats
+        that purpose for exactly the pages where it matters most. Confirmed
+        real case: Amcor's FY2023 "Note 5 - Acquisitions and Divestitures"
+        page names three separate acquisitions (Czech Republic, Shanghai,
+        New Zealand) — the third one sits past character 1000, so it was
+        silently missing from parent_content even though every one of the
+        note's OWN child chunks (built from the same page text via
+        chunk_text() below, which has no such cap) still covered it.
+        Downstream truncation for a specific consumer's own budget (e.g. an
+        LLM prompt's token limit) belongs at that consumer, not baked into
+        the shared corpus record here.
         """
         source_text = parent_source_text if parent_source_text is not None else text
         chunks = chunk_text(text, chunk_size=800, overlap=120, min_chunk_size=100)
@@ -1666,7 +1761,7 @@ class FinancialFileParser:
         parent_id = f"parent_{company_name}_p{page_num}"
         parent_content = (
             f"Company: {company_name} | Document: {filename} | Page: {page_num} | "
-            + source_text[:1000]
+            + source_text
         )
 
         passages = []
@@ -2058,11 +2153,16 @@ class FinancialFileParser:
         if not chunks and text_str.strip():
             chunks = [text_str.strip()]
 
-        # parent: first 1000 chars of the full document
+        # parent: first 5000 chars of the full document. Unlike a single PDF
+        # page (naturally bounded to a few thousand characters, so left
+        # uncapped elsewhere — see _chunk_text_to_passages' docstring), an
+        # uploaded .txt/.md file has no such bound, so this keeps a generous
+        # but finite preview rather than the [:1000] cap used before (too
+        # short for a multi-paragraph note to survive intact).
         parent_id = f"parent_{company_name}_txt"
         parent_content = (
             f"Company: {company_name} | Document: {filename} | Content: "
-            + text_str[:1000]
+            + text_str[:5000]
         )
 
         passages = []
