@@ -205,10 +205,34 @@ def _is_attributable_to_reporting_entity(text_after: str, ev_company: str) -> bo
 # interests" (a tiny NCI adjustment, ~1) instead of the real "Net income
 # from continuing operations" (1,182) row it was truncated from, because
 # the carve-out qualifier came many words after where "net income" itself
-# matched.
+# matched. Also covers "paid to"/"allocated to"/"distributed to" (not
+# just "attributable to") — same disqualifying relationship, different
+# verb: Coca-Cola's own FY2022 "Dividends paid to noncontrolling
+# interests" (-51) was picked as the whole company's dividends_paid
+# instead of the real "Dividends" cash-flow row (-7,617) for the exact
+# same reason.
 _CARVEOUT_ANYWHERE_RE = re.compile(
-    r'attributable to\s+(?:the\s+)?(?:redeemable|noncontrolling|non-controlling|minority)\b'
+    r'(?:attributable|paid|allocated|distributed)\s+to\s+(?:the\s+)?'
+    r'(?:redeemable|noncontrolling|non-controlling|minority)\b'
 )
+
+# A "per share" row (EPS, dividends per share, etc.) is a fundamentally
+# different metric — a small per-unit RATIO, not the aggregate dollar
+# figure most aliases are actually searching for. A bare "net income"
+# alias substring-matches "BASIC NET INCOME PER SHARE" just as readily
+# as it matches the real aggregate "Net Income" row, silently swapping
+# in an EPS value (a few cents) for what should be a multi-hundred-
+# million-dollar figure. Confirmed real case: Coca-Cola's FY2017 ROA
+# calculation picked "BASIC NET INCOME PER SHARE1" (0.29) as its own
+# net_income instead of the real aggregate Net Income row (~1,248),
+# because nothing distinguished the per-share row from the aggregate
+# one — silently producing an ROA of 0.00 instead of the correct 0.01.
+#: No trailing \b after "share" — a real 10-K's own footnote-reference
+#: superscript routinely glues a bare digit directly onto the word with
+#: no space ("PER SHARE1"), and \w includes digits, so a \b boundary
+#: check right after "share" would never fire there at all (confirmed
+#: real case: Coca-Cola's own "BASIC NET INCOME PER SHARE1" row).
+_PER_SHARE_ANYWHERE_RE = re.compile(r'per\s+(?:common\s+|diluted\s+|basic\s+)?share')
 
 
 def _is_negated_match(item_lower: str, match_start: int) -> bool:
@@ -981,9 +1005,17 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
     label_norm = re.sub(r'\s+', ' ', label_norm).strip()
     if _CARVEOUT_ANYWHERE_RE.search(label_norm):
         return 0
+    # A per-share row should only ever match an alias that is ITSELF
+    # asking for a per-share figure (the "eps"/"dividends per share"
+    # placeholder's own alias list) — for every other placeholder, it's
+    # a disqualifying mismatch, exactly like the carve-out check above.
+    # See _PER_SHARE_ANYWHERE_RE's docstring for the confirmed real case.
+    row_is_per_share = bool(_PER_SHARE_ANYWHERE_RE.search(label_norm))
     for alias in aliases:
         a = alias.lower().strip()
         if not a:
+            continue
+        if row_is_per_share and 'per share' not in a and a != 'eps':
             continue
         idx = label_norm.find(a)
         if idx == -1 or _is_negated_match(label_norm, idx):
@@ -2930,23 +2962,35 @@ def _build_calculation_code(
             return True
 
     # ── ROE ───────────────────────────────────────────────────────────────────
+    # Bare decimal ratio (e.g. "-0.02"), not a "-2.00%" percentage — see
+    # the ROA comment just below for why (same fix, same reasoning).
     if _kw_match(_ROE_TRIGGERS, q_lower):
         n, d = _find_pair_for_margin(groups, "net_income", "equity", preferred_year)
         if n and d:
             code_lines.append(f"# ROE = Net Income / Equity")
-            code_lines.append(f"result = round(margin({n['code_key']}, {d['code_key']}), 2)")
+            code_lines.append(f"result = round({n['code_key']} / {d['code_key']}, 2)")
             yr = n['year']
-            code_lines.append(f"print(f'Return on Equity (ROE) ({yr}): {{result}}%')")
+            code_lines.append(f"print(f'Return on Equity (ROE) ({yr}): {{result}}')")
             return True
 
     # ── ROA ───────────────────────────────────────────────────────────────────
+    # Bare decimal ratio, not a percentage — matches every OTHER true
+    # ratio in this codebase (quick_ratio, current_ratio,
+    # dividend_payout_ratio) and FinanceBench's own gold-answer
+    # convention. Confirmed real case: AES Corporation's FY2022 ROA gold
+    # answer is "-0.02" -- the system's own calculation was numerically
+    # correct (net income -546 / avg total assets 35,813 = -1.53%) but
+    # the margin() helper's ×100 scaling (designed for genuine
+    # percentage metrics like operating margin) turned it into
+    # "-1.53%", a 100x scale mismatch against gold that had nothing to
+    # do with the actual math.
     if _kw_match(_ROA_TRIGGERS, q_lower):
         n, d = _find_pair_for_margin(groups, "net_income", "total_assets", preferred_year)
         if n and d:
             code_lines.append(f"# ROA = Net Income / Total Assets")
-            code_lines.append(f"result = round(margin({n['code_key']}, {d['code_key']}), 2)")
+            code_lines.append(f"result = round({n['code_key']} / {d['code_key']}, 2)")
             yr = n['year']
-            code_lines.append(f"print(f'Return on Assets (ROA) ({yr}): {{result}}%')")
+            code_lines.append(f"print(f'Return on Assets (ROA) ({yr}): {{result}}')")
             return True
 
     # ── Current Ratio ─────────────────────────────────────────────────────────

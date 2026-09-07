@@ -308,7 +308,11 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "shareholders_equity_new": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
         },
         "result_label": "Return on Equity (ROE)",
-        "unit": "%",
+        # Bare decimal (e.g. "-0.02"), not a percentage -- see the "roa"
+        # entry just below for the confirmed real case and full reasoning
+        # (ROE is the same metric family as ROA, sharing the same gold-
+        # answer convention throughout this benchmark).
+        "unit": "",
         "multi_year": True,
     },
     "roa": {
@@ -321,7 +325,16 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "total_assets_new": ["總資產", "total assets", "assets"],
         },
         "result_label": "Return on Assets (ROA)",
-        "unit": "%",
+        # Bare decimal ratio, not a percentage -- matches every OTHER
+        # true ratio in this codebase (quick_ratio, current_ratio,
+        # dividend_payout_ratio) and FinanceBench's own gold-answer
+        # convention. Confirmed real case: AES Corporation's FY2022 ROA
+        # gold answer is "-0.02" -- the system's own calculation was
+        # numerically correct (net income -546 / avg total assets
+        # 35,813 ≈ -0.0152, which rounds to -0.02) but this formula's
+        # ×100 scaling turned it into "-1.53%", a 100x scale mismatch
+        # against gold that had nothing to do with the actual math.
+        "unit": "",
         "multi_year": True,
     },
     "roic": {
@@ -388,7 +401,18 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             ],
         },
         "result_label": "Dividend Payout Ratio",
-        "unit": "%",
+        # Bare decimal (e.g. "0.80"), not a percentage -- matches its
+        # sibling formula retention_ratio just below (same underlying
+        # line items, "unit": ""), and matches how FinanceBench's own
+        # gold answers express every other true RATIO in this benchmark
+        # (quick ratio "0.69", working capital ratio "0.68", inventory
+        # turnover "6.25") as opposed to a MARGIN/RATE ("%"). Confirmed
+        # real case: Coca-Cola's FY2022 dividend payout ratio gold answer
+        # is "0.8" -- the system's own calculation was numerically
+        # correct (0.7983) but presented as "79.83%", a 100x scale
+        # mismatch against gold that had nothing to do with the actual
+        # math.
+        "unit": "",
     },
     "retention_ratio": {
         # Was entirely unregistered — fell to a generic evidence-dump
