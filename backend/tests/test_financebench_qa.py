@@ -36,6 +36,7 @@ import json
 import os
 import re
 import sys
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -98,15 +99,27 @@ DOC_TO_FILE = {
     "ULTABEAUTY_2023_10K": ("ULTABEAUTY_2023_10K.pdf", "Ulta Beauty"),
 }
 
-_NUM_RE = re.compile(r"-?\d[\d,]*\.?\d*")
+#: Allows an optional '$' between the sign and the digits (in EITHER
+#: order — "-$1,561" and "$-1,561" both appear in the wild) so a
+#: negative dollar figure isn't silently read as positive. Confirmed
+#: real case: gold text "...negative working capital of -$1561M..."
+#: extracted as +1561.0 under the old sign-immediately-before-digit-only
+#: pattern (the '-' has no digit right after it, so it never joined the
+#: match at all — the regex just started fresh at "1561"), while a model
+#: answer phrased as "-1,561 million" (no dollar sign in between)
+#: correctly extracted as -1561.0 — an entirely spurious sign mismatch
+#: between two answers that actually agreed, not a real numeric
+#: disagreement.
+_NUM_RE = re.compile(r"-?\$?-?\d[\d,]*\.?\d*")
 
 
 def _numbers_in(text: str):
-    """Extract all numeric tokens (commas stripped) from a string as floats."""
+    """Extract all numeric tokens (commas and '$' stripped) from a string
+    as floats."""
     out = []
     for m in _NUM_RE.findall(text or ""):
         try:
-            out.append(float(m.replace(",", "")))
+            out.append(float(m.replace(",", "").replace("$", "")))
         except ValueError:
             continue
     return out
@@ -137,6 +150,81 @@ def _check_numeric(gold_answer: str, model_answer: str, rel_tol: float = 0.02) -
     return False
 
 
+#: A bare 4-digit calendar year (1900-2099) is essentially never the
+#: substantive fact a qualitative question is actually testing — almost
+#: every FinanceBench answer about "FY2022" naturally repeats "2022"
+#: somewhere in both the gold text and any model answer about the same
+#: filing, correct or not. Counting it as a matchable "fact" lets a
+#: substantively WRONG answer register as a match purely because both
+#: texts mention the same fiscal year. Confirmed real cases (all
+#: gold-says-Yes/model-says-No or vice versa, yet PASSed on this check
+#: alone before this exclusion): CVS Health's Q2 FY2022 dividend
+#: question (gold "$0.55/share", model "no dividend, 0.0" — matched only
+#: on both texts saying "2022"), MGM Resorts' FY2022 dividend question
+#: (same pattern, gold "$0.01/share"), PepsiCo's FY2022 restructuring
+#: costs (gold "$411 million", model "no restructuring costs, 0" —
+#: matched only on "2022"), Boeing's FY2022 gross margin trend (gold
+#: 4.8%->5.3%, model 84.70%->65.43%, matched only on "2022"), and
+#: Boeing's primary-customers question (gold "the US government
+#: accounted for 40%", model "140 aircraft" — matched only on "2022").
+def _is_bare_year(n: float) -> bool:
+    return 1900 <= n <= 2099 and n == int(n)
+
+
+#: Phase 3 fix: a gold answer whose only numbers are bare calendar years
+#: (e.g. "Yes. ...resulting from a 2018 Lion Air crash and a 2019
+#: Ethiopian Airlines crash.") has nothing but those years to check
+#: against, so a model answer that gets the DIRECTION completely
+#: backwards can still coincidentally "pass" purely because both texts
+#: mention the same fiscal year -- the numeric check alone can't catch
+#: this. This adds a lightweight opening-stance veto on top of it: if
+#: the gold answer starts with an explicit Yes/No and the model answer's
+#: opening clearly states (or negates) the opposite, that's an automatic
+#: FAIL regardless of what the numeric check would otherwise say.
+#:
+#: This can only ever turn a would-be PASS into a FAIL on a clear,
+#: detected contradiction -- when the model's stance can't be determined
+#: (no explicit Yes/No opener and none of the negation phrases below
+#: appear near the start), this falls through to the existing numeric
+#: check completely unchanged, so it can never fabricate a PASS out of a
+#: previously-None (informational-only) result. Verified against every
+#: currently-passing Yes/No-shaped gold answer in both the calc and
+#: extraction suites (Boeing legal battles, Adobe operating margin,
+#: American Water Works working capital) -- all have a model stance that
+#: either matches or is undetermined, so none of them flip.
+_NEGATION_PHRASES = [
+    "did not", "does not", "doesn't", "didn't", "has not", "hasn't",
+    "have not", "haven't", "is not", "isn't", "are not", "aren't",
+    "cannot", "can not", "there are none", "there is no", "no material",
+    "not report", "not reported", "not been reported",
+]
+
+
+def _leading_yn_stance(text: str) -> Optional[bool]:
+    """
+    True = affirmative (Yes) stance, False = negative (No) stance,
+    None = undetermined.
+
+    Only looks at the OPENING of the text: an explicit "Yes"/"No" token
+    first, else one of _NEGATION_PHRASES within the first ~200
+    characters -- this covers the common model phrasing for a "No"
+    answer that doesn't literally start with the word "No" (e.g. "CVS
+    Health did not pay dividends...", "Boeing does not have an
+    improving gross margin..."). Deliberately does NOT try to infer an
+    affirmative "Yes" stance from the mere absence of a negation phrase
+    (that would be guessing, not detecting) -- an affirmative stance is
+    only ever an explicit leading "Yes".
+    """
+    stripped = re.sub(r'^[\*\s]+', '', text or '').strip()
+    m = re.match(r'(yes|no)\b', stripped, re.IGNORECASE)
+    if m:
+        return m.group(1).lower() == "yes"
+    window = stripped[:200].lower()
+    if any(phrase in window for phrase in _NEGATION_PHRASES):
+        return False
+    return None
+
+
 def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
     """
     Qualitative gold answers (e.g. 'The consumer segment shrunk by 0.9%
@@ -147,18 +235,37 @@ def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
     Gold answers with no numbers at all (pure qualitative, e.g. industry
     description) are treated as informational-only and always reported but
     never asserted on.
+
+    Bare calendar years are excluded from the numbers being checked
+    whenever at least one non-year number is also present — see
+    _is_bare_year's docstring for why. A gold answer with ONLY year
+    numbers (e.g. "...resulting from a 2018 Lion Air crash and a 2019
+    Ethiopian Airlines crash") has nothing else to fall back on, so those
+    years are still used rather than checking nothing at all — this
+    residual case (a yes/no question whose only "facts" are incidental
+    years) isn't caught by a numeric check either way — see
+    _leading_yn_stance, checked first below, which is what actually
+    fixes it.
     """
+    gold_stance = _leading_yn_stance(gold_answer)
+    if gold_stance is not None:
+        model_stance = _leading_yn_stance(model_answer)
+        if model_stance is not None and model_stance != gold_stance:
+            return False  # explicit direction contradiction — no need to check numbers at all
+
     gold_nums = _numbers_in(gold_answer)
     if not gold_nums:
         return None  # no numeric ground truth to check — informational only
     model_nums = _numbers_in(model_answer)
     if not model_nums:
         return False
+    non_year_nums = [n for n in gold_nums if not _is_bare_year(n)]
+    check_nums = non_year_nums or gold_nums
     hits = 0
-    for g in gold_nums:
+    for g in check_nums:
         if any((abs(g - m) / abs(g) <= 0.02 if g != 0 else abs(m) < 1e-9) for m in model_nums):
             hits += 1
-    return hits >= max(1, len(gold_nums) // 2)  # at least half the gold numbers must surface
+    return hits >= max(1, len(check_nums) // 2)  # at least half the checked numbers must surface
 
 
 def _available_doc_names() -> set:

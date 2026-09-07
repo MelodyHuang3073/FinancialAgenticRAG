@@ -47,6 +47,21 @@ class HybridFinancialRetriever:
 
     def __init__(self, corpus: List[Dict[str, Any]]):
         self.corpus = corpus
+        # BM25's length-normalization term needs THIS corpus's own average
+        # document length, not an arbitrary guess -- _bm25_score used to
+        # hardcode avgdl=50, which systematically penalizes every
+        # text_note passage here (this corpus's real text_note average is
+        # ~125 tokens, ~80 overall across text_note + table_row) as if it
+        # were 2-3x longer than "normal", silently burying long,
+        # information-dense narrative passages under short ones that only
+        # superficially match. Confirmed real case: Amcor's own "Note 5 -
+        # Acquisitions and Divestitures" passage (the ACTUAL list of the
+        # three FY2023 acquisitions the gold answer names) scored BELOW a
+        # much shorter, less informative passage that merely says "refer
+        # to Note 5" without any of the real content, purely because it's
+        # longer -- not because it's less relevant.
+        doc_lens = [len(self._tokenize(d.get('content', ''))) for d in corpus]
+        self._avg_doc_len = (sum(doc_lens) / len(doc_lens)) if doc_lens else 50.0
 
     # ──────────────────────────────────────────────────────────────
     # Tokenisation (handles Chinese characters + English/numbers)
@@ -87,10 +102,11 @@ class HybridFinancialRetriever:
         if doc_len == 0:
             return 0.0
         doc_set = set(doc_tokens)
+        avgdl = self._avg_doc_len or 50.0
         for token in query_tokens:
             if token in doc_set:
                 tf = doc_tokens.count(token)
-                score += (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * (doc_len / 50.0)))
+                score += (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * (doc_len / avgdl)))
         return score
 
     # ──────────────────────────────────────────────────────────────
@@ -122,7 +138,22 @@ class HybridFinancialRetriever:
         Returns a multiplier based on how well doc_company matches entity.
           2.0  → strong match  (boost)
           1.0  → neutral
-          0.15 → mismatch      (heavy penalty, not hard exclusion)
+          0.05 → mismatch      (heavy penalty, not hard exclusion)
+
+        Deliberately still a SOFT penalty, not a hard filter — several
+        confirmed fixes this session (Activision Blizzard's capex,
+        General Mills' CCC placeholders) depend on a right-company
+        PARTIAL/sub-item match being able to outrank a wrong-company
+        EXACT match, which requires the wrong-company candidate to still
+        be scoreable at all rather than excluded outright; the actual
+        correctness guarantee against a wrong-company row winning lives
+        in pot_reasoner.py's entity-identity-aware reduction, not here.
+        Lowered from 0.15 (still 3x stricter) purely to cut down how
+        often an obviously-wrong-company row is visible at all in the
+        Source Evidence panel for an already-correct answer — a cosmetic/
+        noise concern, verified via the full calc-question suite to
+        confirm no previously-correct answer actually depended on a
+        wrong-company candidate surviving at the old, looser penalty.
         """
         if not entity or entity.lower() in ("company", "unknown", ""):
             return 1.0  # no filter if entity is generic
@@ -141,6 +172,27 @@ class HybridFinancialRetriever:
         if norm_ent in norm_doc or norm_doc in norm_ent:
             return 1.8
 
+        # Collapsed (no-space) comparison: catches a human-readable name
+        # like "Best Buy"/"General Mills"/"Coca Cola" against this
+        # project's doc_name convention, which concatenates multi-word
+        # company names WITHOUT a space ("BESTBUY_2023_10K",
+        # "GENERALMILLS_2020_10K", "COCACOLA_2021_10K"). Neither the
+        # exact-match nor the word-overlap check below can ever catch
+        # this -- there's no word boundary inside "bestbuy" to compare
+        # against the separate word "best" -- so every candidate
+        # document, same-company or not, fell straight through to the
+        # 0.05 "different company" penalty, silently turning the entity
+        # filter into a no-op for any multi-word company whose doc_name
+        # strips the space. Confirmed real case: a "Best Buy" entity
+        # query got the SAME 0.05x penalty on Best Buy's OWN
+        # BESTBUY_2023_10K passages as on every other company's, so an
+        # unrelated company's page could freely outrank Best Buy's own
+        # actual answer on raw term overlap alone.
+        collapsed_doc = norm_doc.replace(' ', '')
+        collapsed_ent = norm_ent.replace(' ', '')
+        if collapsed_ent and (collapsed_ent in collapsed_doc or collapsed_doc in collapsed_ent):
+            return 1.8
+
         # Word-level overlap
         ent_words = [w for w in norm_ent.split() if len(w) >= 2]
         doc_words = set(norm_doc.split())
@@ -152,7 +204,7 @@ class HybridFinancialRetriever:
             return 1.8   # all entity words found in doc company name
         if matches > 0:
             return 1.2   # partial match — mild boost
-        return 0.15      # no word overlap → very likely a different company
+        return 0.05      # no word overlap → very likely a different company
 
     # ──────────────────────────────────────────────────────────────
     # Main search
@@ -166,6 +218,7 @@ class HybridFinancialRetriever:
         entity: Optional[str] = None,
         section: Optional[str] = None,
         statement_type_hint: Optional[str] = None,
+        prefer_narrative: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Search the corpus with BM25 + overlap scoring.
@@ -179,6 +232,28 @@ class HybridFinancialRetriever:
             statement_type_hint: Step-4 report type hint — income_statement | balance_sheet |
                                  cash_flow | notes | unknown.  Matching docs get a 1.5x boost;
                                  non-matching docs are unaffected (no penalty).
+            prefer_narrative   : True for genuinely qualitative/narrative questions with
+                                 no matching formula and no recognized financial-metric
+                                 keyword (legal proceedings, dividend disclosures,
+                                 business-combination lists, geographies, customers,
+                                 industry/product overviews — see
+                                 question_classifier._detect_narrative_topic_query).
+                                 Defaults to False and is only ever passed True from
+                                 orchestrator.py's non-numeric, no-formula retrieval
+                                 branch, so every numeric/formula-driven retrieval call
+                                 (everything the calc-question suite depends on) is
+                                 bit-for-bit unaffected by the two behaviors below.
+                                 Confirmed real case (Boeing FY2022 legal-proceedings
+                                 question): with this off, the one passage actually
+                                 describing the Lion Air/Ethiopian Airlines litigation
+                                 ranked ~100th out of 200 candidates — table ROWS
+                                 (a handful of tokens each) get a much friendlier BM25
+                                 length-normalization than a full prose paragraph, and
+                                 the unconditional "Total row" boost below adds a 1.3x
+                                 bonus to any "Total X" balance-sheet row regardless of
+                                 whether the query has anything to do with financial
+                                 totals at all — both systematically bury narrative
+                                 content under unrelated financial tables.
         """
         exclude_ids = set(exclude_ids or [])
         query_tokens = self._tokenize(query)
@@ -205,8 +280,26 @@ class HybridFinancialRetriever:
             multiplier *= self._line_item_match_score(query, content)
 
             # ── Total-row boost ──────────────────────────────────────────────
-            if self._TOTAL_ROW_RE.search(content):
+            # Skipped under prefer_narrative: this boost exists so a real
+            # "Total X" statement row can outrank a sub-item/note row for
+            # a NUMERIC lookup — meaningless (and actively harmful, since
+            # it applies to ANY "Total ..." row regardless of topic) for a
+            # question that isn't about a financial total at all.
+            if not prefer_narrative and self._TOTAL_ROW_RE.search(content):
                 multiplier *= 1.3
+
+            # ── Narrative-content boost (only when prefer_narrative) ──────────
+            # Counteracts BM25's inherent length bias: a table row chunk
+            # is typically a handful of tokens, so even one matching term
+            # dominates its score, while a full prose paragraph needs
+            # several matches to reach the same magnitude purely because
+            # of the doc_len normalization in _bm25_score. For a question
+            # this module has already determined has no financial-metric
+            # or formula match at all, the answer is almost certainly in
+            # prose, not a table row, so this compensates rather than
+            # relying on raw BM25 alone to surface it.
+            if prefer_narrative and doc.get("type") == "text_note":
+                multiplier *= 1.5
 
             # ── Year / quarter boost ───────────────────────────────────────
             doc_period = str(doc.get('period', '')) + " " + content

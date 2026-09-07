@@ -416,6 +416,15 @@ class FinAgentRAGOrchestrator:
                 ]
             else:
                 search_queries = classification["retrieval_queries"]
+            # No registered formula matched at all — this is reached ONLY
+            # by genuinely qualitative/narrative questions (every formula-
+            # backed non-numeric question, e.g. working_capital/inventory_
+            # turnover/effective_tax_rate, took the `if` branch above
+            # instead), so it's safe to bias ranking toward prose content
+            # here without touching anything a numeric/formula answer
+            # depends on — see hybrid_retriever.search()'s prefer_narrative
+            # docstring for the confirmed real case this fixes.
+            prefer_narrative = non_numeric_formula is None
             new_hits = []
             for sq in search_queries:
                 new_hits.extend(self.vector_store.search(
@@ -423,6 +432,7 @@ class FinAgentRAGOrchestrator:
                     exclude_ids=list(retrieved_ids),
                     entity=classification.get("entity"),
                     statement_type_hint=statement_type_hint,  # Step 4
+                    prefer_narrative=prefer_narrative,
                 ))
             new_hits = self._deduplicate_hits(new_hits)
             for hit in new_hits:
@@ -725,6 +735,21 @@ class FinAgentRAGOrchestrator:
         # operating margin and cost structure instead of current assets/
         # liabilities, so the model's answer never stated the actual
         # -$1,561M figure at all — just a generic non-answer.
+        #
+        # NOTE: this function's output is ONLY used for the "Query
+        # Decomposition" trace display and the (currently unused by the
+        # LLM prompt) sub_questions parameter — NOT for actual retrieval.
+        # The real non-numeric retrieval query, whenever no formula
+        # matches the question, comes from
+        # classification["retrieval_queries"] (built by
+        # FinanceBenchClassifier._build_retrieval_queries()), a
+        # completely separate code path. A general query-vocabulary fix
+        # for narrative questions (legal proceedings, dividends,
+        # restructuring, etc.) belongs there, not here — confirmed by
+        # tracing an actual failing case (Boeing legal-battles question)
+        # end to end: this function's suffix showed up correctly in the
+        # trace, but the retrieved evidence was completely unaffected by
+        # it.
         metric_terms = " ".join(m.replace("_", " ") for m in (target_metrics or []))
         fallback_suffix = {
             "ASSESSMENT": "capital expenditure assets depreciation",
