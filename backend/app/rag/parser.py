@@ -65,6 +65,34 @@ class FinancialFileParser:
     )
     # Recognises year headers: FY2023, 2023, Dec 2023, December 31 2023, etc.
     _YEAR_HEADER_RE = re.compile(r'(?:FY\s*|fiscal\s+)?(20\d{2}|19\d{2})', re.IGNORECASE)
+    #: "First ... Second ... Third ... Fourth" quarter-ordinal column
+    #: headers for a single-year quarterly breakdown table (e.g. a 10-K's
+    #: own "Quarterly Results" footnote disclosure). These carry no
+    #: 4-digit year of their own — the year sits in a SEPARATE "Year
+    #: Ended December 31, 20XX" caption line just above them — so without
+    #: this check, _inject_missing_year_header's year-only search below
+    #: would skip right past this genuine, close-by header (finding no
+    #: year in it at all) and keep climbing until it hit an unrelated,
+    #: far-away line that coincidentally mentions 2+ years. Confirmed
+    #: real case: Amazon's own FY2017 10-K "Note 12 — QUARTERLY RESULTS"
+    #: page has "First Second Third Fourth" and "Quarter Quarter Quarter
+    #: Quarter" as two SEPARATE lines (a filer PDF line-wrap artifact,
+    #: not one contiguous "First Quarter" phrase) sitting right below
+    #: "Year Ended December 31, 2016 (1)" — the year-only search skipped
+    #: past all of that and landed on the page's own INTRO paragraph
+    #: several lines further up ("...selected...information for each
+    #: quarter of 2016 and 2017..."), which merely NAMES both years being
+    #: covered across TWO separate quarterly tables on the page, and
+    #: wrongly synthesized "2016 | 2017 | Col3 | Col4" as if this were a
+    #: 2016-vs-2017 comparison instead of four quarters within 2016 alone
+    #: — every quarter's own dollar figure ended up mislabeled as if it
+    #: were a different YEAR's whole-period total. .{0,40} between each
+    #: ordinal tolerates the line-wrap gap (a newline plus the other
+    #: three ordinals' own text) between "First" and "Second" etc.
+    _QUARTER_ORDINALS_RE = re.compile(
+        r'\bfirst\b.{0,40}\bsecond\b.{0,40}\bthird\b.{0,40}\bfourth\b',
+        re.IGNORECASE | re.DOTALL,
+    )
     # Known financial line-item keywords (triggers table detection)
     _FINANCIAL_KEYWORDS = {
         "revenue", "net sales", "net revenue", "total revenue",
@@ -1099,7 +1127,22 @@ class FinancialFileParser:
             return rows
         header_text = " ".join(c or "" for c in rows[0])
         if self._extract_year_headers(header_text):
-            return rows  # already has a real year header — nothing to fix
+            # Same override as _reinject_year_header_if_missing's own
+            # early-exit — an existing year-looking header is normally
+            # trusted, but not when it's actually a Tier-2-reconstructed
+            # table's own header_candidate guess (an unrelated multi-year
+            # sentence scanned in passing) being routed back through here
+            # via _reinject_year_header_if_missing, with a quarter-
+            # ordinal header genuinely sitting closer to this table.
+            try:
+                above_probe = (
+                    page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
+                    .extract_text() or ""
+                )
+            except Exception:
+                above_probe = ""
+            if not self._QUARTER_ORDINALS_RE.search(above_probe):
+                return rows  # already has a real year header — nothing to fix
 
         # A comparative 10-K table is essentially never headed by a SINGLE
         # year — even a one-column "current period only" table still pairs
@@ -1127,6 +1170,39 @@ class FinancialFileParser:
             above_text = above.extract_text() or ""
         except Exception:
             above_text = ""
+
+        # ── Quarter-ordinal header (a single-year quarterly breakdown,
+        # e.g. a 10-K's own "Quarterly Results" footnote) — checked
+        # BEFORE the "2+ years" search below, and returns immediately
+        # when found, so that search never gets a chance to keep
+        # climbing past this genuine header to an unrelated, more
+        # distant line that coincidentally mentions 2+ years. See
+        # _QUARTER_ORDINALS_RE's docstring for the confirmed real case.
+        # The LAST (closest-to-the-table) match, not .search()'s FIRST —
+        # `above_text` spans the entire page from y=0 down to this
+        # table's own top, so on a page with TWO quarterly blocks (e.g.
+        # 2016's then 2017's, one after another), the first match found
+        # would always be the EARLIER (2016) block's own "First...Fourth"
+        # line even when resolving the header for the LATER (2017)
+        # block's table — silently reusing 2016's own year for 2017's
+        # data. Confirmed real case: Amazon's own FY2017 quarterly
+        # results page did exactly this, mislabeling every one of
+        # 2017's four quarters as "Q1 2016".."Q4 2016".
+        quarter_matches = list(self._QUARTER_ORDINALS_RE.finditer(above_text))
+        quarter_match = quarter_matches[-1] if quarter_matches else None
+        if quarter_match:
+            year_matches = list(self._YEAR_HEADER_RE.finditer(above_text[:quarter_match.start()]))
+            if year_matches:
+                yr = year_matches[-1].group(1)
+                n_value_cols_q = max((len(r) - 1 for r in rows[1:]), default=4)
+                n_value_cols_q = max(n_value_cols_q, 4)
+                quarter_labels = ["Q1", "Q2", "Q3", "Q4"]
+                synthesized_q = [rows[0][0] or "Line Item"] + [
+                    f"{quarter_labels[i]} {yr}" if i < 4 else f"Col{i + 1}"
+                    for i in range(n_value_cols_q)
+                ]
+                return [synthesized_q, rows[0]] + rows[1:]
+
         years: list = []
         for line in reversed(above_text.split("\n")):
             candidate = self._extract_year_headers(line)
@@ -1205,12 +1281,40 @@ class FinancialFileParser:
         still end up under a generic "Col1 | Col2" header instead of the
         real "2019 | 2018" — which then fails downstream extraction the
         exact same way a missing Tier 1 header would.
+
+        An existing year-looking header (lines[0]) is normally trusted
+        outright and left alone — EXCEPT when a quarter-ordinal header
+        (see _QUARTER_ORDINALS_RE) sits nearby just above this table.
+        Tier 2's own internal header_candidate tracking (see
+        _reconstruct_table_from_word_positions's _flush()) only ever
+        looks at the single most recent text-only line it happened to
+        scan, with no page-bbox awareness at all, so it can latch onto
+        an entirely unrelated multi-year sentence (e.g. a page's own
+        intro paragraph, several lines above the real table) well before
+        this bbox-aware check ever gets a chance to run — and that guess
+        LOOKS like a valid year header on its own, so the check below
+        would otherwise trust it and stop. Confirmed real case: Amazon's
+        FY2017 quarterly-results page recovered an "Operating income"
+        table via Tier 2 and labeled it "2016 | 2017 | Col3 | Col4" from
+        the page's own intro sentence ("...for each quarter of 2016 and
+        2017...") — a real quarter-ordinal header ("First Second Third
+        Fourth") sits much closer, right above the table, and correctly
+        identifies these four columns as one single year's four quarters
+        instead.
         """
         lines = md.split("\n")
         if len(lines) < 2:
             return md
         if self._extract_year_headers(lines[0]):
-            return md  # already has a real year header — nothing to fix
+            try:
+                above_text = (
+                    page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
+                    .extract_text() or ""
+                ) if table_top else ""
+            except Exception:
+                above_text = ""
+            if not self._QUARTER_ORDINALS_RE.search(above_text):
+                return md  # already has a real year header — nothing to fix
 
         rows = [
             [c.strip() for c in line.strip().strip("|").split("|")]
@@ -1625,6 +1729,26 @@ class FinancialFileParser:
 
         return passages, prose_only_text
 
+    #: A 10-K's own front-matter Table of Contents page lists section/Item
+    #: names next to a bare page number (e.g. "PART II 21", "Item 3. Legal
+    #: Proceedings. 20") — structurally IDENTICAL to a real two-column
+    #: financial table (a short label immediately followed by one small
+    #: integer), so table detection routinely mistakes it for one.
+    #: Confirmed real case: Best Buy's own TOC produced a corpus row
+    #: reading "Line Item: PART II | 2023: 21" — the section's STARTING
+    #: PAGE NUMBER (21) got labeled as if it were a $21 million dollar
+    #: figure for fiscal year 2023. "TABLE OF CONTENTS" is standard,
+    #: near-universal SEC 10-K boilerplate that appears as its own heading
+    #: line at the very top of this exact page, making it a reliable,
+    #: general signal — checked only within the page's own opening text
+    #: (not the whole page) so an ordinary content page that merely
+    #: mentions the phrase in passing elsewhere doesn't get excluded by
+    #: mistake.
+    _TABLE_OF_CONTENTS_RE = re.compile(r'\btable\s+of\s+contents\b', re.IGNORECASE)
+
+    def _is_table_of_contents_page(self, page_text: str) -> bool:
+        return bool(self._TABLE_OF_CONTENTS_RE.search(page_text[:300]))
+
     def _is_financial_table_page(self, text: str) -> bool:
         """Return True if the page looks like a financial statement table."""
         text_lower = text.lower()
@@ -1796,6 +1920,10 @@ class FinancialFileParser:
     ) -> list:
         """
         Entry point for a single page:
+        - If the page is the filing's own front-matter Table of Contents
+          → always chunk as free text, regardless of what table-detection
+          below would otherwise find (see _TABLE_OF_CONTENTS_RE's
+          docstring).
         - If the page contains Markdown pipe tables (from pdfplumber
           extract_tables/find_tables) → linearise each row individually,
           and chunk any remaining prose separately.
@@ -1807,6 +1935,10 @@ class FinancialFileParser:
         Each passage is a child; the full page text is the parent.
         All passages receive the 'section' metadata tag for Step-3 anchored retrieval.
         """
+        # ── Table of Contents page: never table-detected ────────────────────
+        if self._is_table_of_contents_page(page_text):
+            return self._chunk_text_to_passages(company_name, filename, page_num, page_text, section)
+
         # ── Markdown tables (pdfplumber-detected) ──────────────────────────
         md_table_passages, prose_only_text = self._linearize_markdown_tables(
             company_name, filename, page_num, page_text
