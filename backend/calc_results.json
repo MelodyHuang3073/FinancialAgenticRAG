@@ -334,7 +334,7 @@
     "question": "Roughly how many times has JnJ sold its inventory in FY2022? Calculate inventory turnover ratio for FY2022; if conventional inventory management is not meaningful for the company then state that and explain why.",
     "gold": "JnJ sold its inventory 2.7 times in FY2022.",
     "model_answer": "Johnson & Johnson's inventory turnover ratio for FY2022 is **2.49 times**. This indicates that the company sold its inventory approximately 2.49 times during the year.\n\nGiven the nature of Johnson & Johnson's business, which includes pharmaceuticals, medical devices, and consumer health products, conventional inventory management metrics like inventory turnover may not fully capture operational efficiency. The diverse product lines and varying sales cycles can lead to fluctuations in inventory levels that do not reflect typical retail inventory dynamics.",
-    "passed": true,
+    "passed": false,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
     "elapsed": 12.284722328186035

@@ -1,0 +1,312 @@
+[
+  {
+    "doc_name": "3M_2018_10K",
+    "question": "What is the FY2018 capital expenditure amount (in USD millions) for 3M? Give a response to the question by relying on the details shown in the cash flow statement.",
+    "gold": "$1577.00",
+    "model_answer": "The FY2018 capital expenditure amount for 3M is **$1,486.84 million**. This figure reflects the company's investments in capital projects for that fiscal year.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 22.37165379524231
+  },
+  {
+    "doc_name": "3M_2018_10K",
+    "question": "Assume that you are a public equities analyst. Answer the following question by primarily using information that is shown in the balance sheet: what is the year end FY2018 net PPNE for 3M? Answer in USD billions.",
+    "gold": "$8.70",
+    "model_answer": "The year-end FY2018 net Property, Plant, and Equipment (PPNE) for 3M is **$16.2 billion**. This figure reflects the company's investment in physical assets, which is critical for its operational capabilities.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 13.794405221939087
+  },
+  {
+    "doc_name": "3M_2023Q2_10Q",
+    "question": "Which debt securities are registered to trade on a national securities exchange under 3M's name as of Q2 of 2023?",
+    "gold": "Following debt securities registered under 3M's name are listed to trade on the New York Stock Exchange:\n-1.500% Notes due 2026 (Trading Symbol: MMM26)\n-1.750% Notes due 2030 (Trading Symbol: MMM30)\n-1.500% Notes due 2031 (Trading Symbol: MMM31)",
+    "model_answer": "As of Q2 2023, there is no specific information available regarding the debt securities registered to trade on a national securities exchange under 3M's name. The financial evidence does not provide details on the types or amounts of such securities. \n\nThe PoT result indicates **0.0**, suggesting that relevant data was not found in the provided documents.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 11.291410446166992
+  },
+  {
+    "doc_name": "AES_2022_10K",
+    "question": "What is the quantity of restructuring costs directly outlined in AES Corporation's income statements for FY2022? If restructuring costs are not explicitly outlined then state 0.",
+    "gold": "0",
+    "model_answer": "AES Corporation did not explicitly outline any restructuring costs in its income statements for FY2022. Therefore, the quantity of restructuring costs is **0**.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 11.95028281211853
+  },
+  {
+    "doc_name": "AMAZON_2019_10K",
+    "question": "By drawing conclusions from the information stated only in the income statement, what is Amazon's FY2019 net income attributable to shareholders (in USD millions)?",
+    "gold": "$11588.00",
+    "model_answer": "Amazon's FY2019 net income attributable to shareholders is **$11,588 million**. This figure reflects a significant increase compared to previous years, showcasing the company's strong financial performance.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 17.39506983757019
+  },
+  {
+    "doc_name": "AMCOR_2020_10K",
+    "question": "What is Amcor's year end FY2020 net AR (in USD millions)? Address the question by adopting the perspective of a financial analyst who can only use the details shown within the balance sheet.",
+    "gold": "$1616.00",
+    "model_answer": "Amcor's year-end FY2020 net accounts receivable (AR) is not explicitly provided in the available balance sheet details. To determine the net AR, we would typically look for the total accounts receivable figure and any allowances for doubtful accounts, which are not included in the provided evidence. Therefore, the specific amount for net AR in USD millions cannot be concluded from the available information.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 12.803623914718628
+  },
+  {
+    "doc_name": "AMCOR_2023_10K",
+    "question": "What are major acquisitions that AMCOR has done in FY2023, FY2022 and FY2021?",
+    "gold": "Amcor completed these acquisitions during FY2023:\n-100% equity interest of a flexibles manufacturing company in the Czech Republic\n- 100% equity interest in a medical device packaging manufacturing site in\nShanghai, China.\n-acquisition of a New Zealand-based leading manufacturer of state-of-the-art, automated protein\npackaging machines.",
+    "model_answer": "AMCOR made **three major acquisitions in FY2023**, **17 in FY2022**, and **one in FY2021**. The significant fluctuation in acquisition activity indicates a strategic shift, with a notable increase in FY2022 compared to the other years. However, specific details about the acquired companies or their impact on AMCOR's operations are not provided in the available data.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 17.711061716079712
+  },
+  {
+    "doc_name": "AMCOR_2023_10K",
+    "question": "What industry does AMCOR primarily operate in?",
+    "gold": "Amcor is a global leader in packaging production for various use cases.",
+    "model_answer": "AMCOR primarily operates in the **packaging industry**, focusing on both **healthcare packaging** and **food and beverage packaging**. These sectors are characterized by strict regulatory requirements and significant competition, impacting AMCOR's operational strategies and market dynamics.",
+    "passed": null,
+    "check_kind": "informational only",
+    "error": null,
+    "elapsed": 6.994713306427002
+  },
+  {
+    "doc_name": "AMD_2022_10K",
+    "question": "What are the major products and services that AMD sells as of FY22?",
+    "gold": "AMD sells server microprocessors (CPUs) and graphics processing units (GPUs), data processing units (DPUs), Field Programmable Gate Arrays (FPGAs), and Adaptive System-on-Chip (SoC) products for data centers; CPUs, accelerated processing units (APUs) that integrate CPUs and GPUs, and chipsets for desktop and notebook personal computers; discrete GPUs, and semi-custom SoC products and development services; and embedded CPUs, GPUs, APUs, FPGAs, and Adaptive SoC products.",
+    "model_answer": "As of FY22, AMD's major products and services include **microprocessors**, **graphics processors**, and **system-on-chip (SoC) solutions**. The company primarily generates revenue from product sales, which account for nearly **100%** of its revenue, reflecting its focus on hardware offerings. Additionally, AMD provides **FPGAs** (Field-Programmable Gate Arrays) and related technologies, enhancing its portfolio in the semiconductor market. However, specific revenue figures for each product category are not detailed in the available evidence.",
+    "passed": null,
+    "check_kind": "informational only",
+    "error": null,
+    "elapsed": 8.74987244606018
+  },
+  {
+    "doc_name": "AMD_2022_10K",
+    "question": "What drove revenue change as of the FY22 for AMD?",
+    "gold": "In 2022, AMD reported Higher sales of their EPYC server processors, higher semi-custom product sales, and the inclusion of Xilinx embedded product sales",
+    "model_answer": "The revenue change for AMD in FY22 was primarily driven by significant growth across its business segments, resulting in a total net revenue of **$23,601 million**, up from **$16,434 million** in FY21, reflecting a year-over-year growth of **43.2%**. Notably, the Data Center segment increased from **$3,694 million** to **$6,043 million**, and the Embedded segment surged from **$246 million** to **$4,552 million**, contributing substantially to this growth.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 31.125611782073975
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2022_10K",
+    "question": "Which debt securities are registered to trade on a national securities exchange under American Express' name as of 2022?",
+    "gold": "There are none",
+    "model_answer": "As of 2022, there is no specific information available regarding the debt securities registered to trade on a national securities exchange under American Express' name. The evidence reviewed did not contain relevant data on the specific debt securities. \n\nThe PoT result indicates **0.0**, highlighting the absence of this information.",
+    "passed": null,
+    "check_kind": "informational only",
+    "error": null,
+    "elapsed": 8.91478419303894
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2022_10K",
+    "question": "What are the geographies that American Express primarily operates in as of 2022?",
+    "gold": "United States, EMEA, APAC, and LACC",
+    "model_answer": "As of 2022, American Express primarily operates in **North America**, with a significant presence in **Europe**, **Asia**, and **Latin America**. The company has a strong focus on the U.S. market, which constitutes a large portion of its customer base and transaction volume.",
+    "passed": null,
+    "check_kind": "informational only",
+    "error": null,
+    "elapsed": 9.45171046257019
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2022_10K",
+    "question": "Does AMEX have an improving operating margin profile as of 2022? If operating margin is not a useful metric for a company like this, then state that and explain why.",
+    "gold": "Performance is not measured through operating margin",
+    "model_answer": "As of 2022, AMEX does not have an improving operating margin profile; the operating margin decreased to **19.1037%** from **20.8429%** in 2021, reflecting a decline of **1.7392%**. \n\nOperating margin may not be the most useful metric for AMEX, as it primarily operates in the financial services sector where revenue generation can be influenced by factors such as transaction volume and customer spending rather than traditional operating costs. Therefore, a focus on metrics like return on equity or net income might provide a clearer picture of performance.",
+    "passed": null,
+    "check_kind": "informational only",
+    "error": null,
+    "elapsed": 16.650243759155273
+  },
+  {
+    "doc_name": "BESTBUY_2023_10K",
+    "question": "What are major acquisitions that Best Buy has done in FY2023, FY2022 and FY2021?",
+    "gold": "Best Buy closed two acquisitions, both these companies were already partially owned by Best Buy, but Best Buy acquired all outstanding shares of these two companies during FY 2022: (1) Current Health Ltd and (2) Two Peaks, LLC d/b/a Yardbird Furniture",
+    "model_answer": "Best Buy did not make any major acquisitions in FY2023, FY2022, or FY2021. The financial reports indicate no significant acquisition activity during these years, with the only notable figures being a **$131 million** increase in assets in FY2023, while previous years showed no acquisitions. Therefore, there are no major acquisitions to report for these fiscal years.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 18.385247945785522
+  },
+  {
+    "doc_name": "BOEING_2022_10K",
+    "question": "Has Boeing reported any materially important ongoing legal battles from FY2022?",
+    "gold": "Yes. Multiple lawsuits have been filed against Boeing resulting from a 2018 Lion Air crash and a 2019 Ethiopian Airlines crash.",
+    "model_answer": "Boeing has not reported any materially important ongoing legal battles from FY2022 in the available documentation. The financial report does not indicate any significant legal issues that could impact the company's operations or financial position. However, it is essential to review the \"Risk Factors\" section for any potential undisclosed legal matters that could arise.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 8.760555028915405
+  },
+  {
+    "doc_name": "BOEING_2022_10K",
+    "question": "Does Boeing have an improving gross margin profile as of FY2022? If gross margin is not a useful metric for a company like this, then state that and explain why.",
+    "gold": "Yes. Boeing has an improving gross margin profile as of FY2022. Gross profit improved from $3,017 million in FY2021 to $3,502 million in FY2022. Gross margin % improved from 4.8% in FY2021 to 5.3% in FY2022.",
+    "model_answer": "Boeing does not have an improving gross margin profile as of FY2022. The gross margin decreased to **65.43%** in 2022 from **84.70%** in 2021, reflecting a decline of **19.28%**. \n\nGross margin may not be the most useful metric for Boeing due to its reliance on long-term contracts and program accounting, which can lead to significant fluctuations in revenue and costs that are not captured by gross margin alone. This makes it essential to consider other financial metrics for a comprehensive analysis of Boeing's performance.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 8.779576539993286
+  },
+  {
+    "doc_name": "BOEING_2022_10K",
+    "question": "Who are the primary customers of Boeing as of FY2022?",
+    "gold": "Boeing's primary customers as of FY2022 are a limited number of commercial airlines and the US government. The US government accounted for 40% of Boeing's total revenues in FY2022.",
+    "model_answer": "As of FY2022, Boeing's primary customers include commercial airlines, government entities, and defense contractors. Notably, approximately **140 aircraft** in Boeing's inventory were designated for customers in **China**, indicating a significant market presence there. Additionally, Boeing has been remarketing aircraft to other customers due to delivery deferrals and cancellations, reflecting a reliance on a relatively small number of key clients.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 9.090988636016846
+  },
+  {
+    "doc_name": "COSTCO_2021_10K",
+    "question": "Using only the information within the balance sheet, how much total assets did Costco have at the end of FY2021? Answer in USD millions.",
+    "gold": "$59268.00",
+    "model_answer": "Costco had total assets of **$59,268 million** at the end of FY2021. This figure reflects the company's financial position, showing a significant increase from the previous year.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 8.484708786010742
+  },
+  {
+    "doc_name": "CVSHEALTH_2022_10K",
+    "question": "Has CVS Health reported any materially important ongoing legal battles from 2022, 2021 and 2020?",
+    "gold": "Yes, CVS Health has been involved in multiple ongoing legal battles. Some notable legal dispute areas for CVS are: (1) usual and customary pricing litigation: where it's claimed that CVSâs retail pharmacies overcharged for prescription drugs; (2) PBM litigation and investigations: where it's claimed that that rebate agreements between the drug manufacturers and PBMs caused inflated prices for certain drug products; and (3) controlled substances litigation: legal matters around opioids for which CVS has agreed to pay up to $4.3 billion to claimants in remediation and $625 million to attorneys and fees",
+    "model_answer": "CVS Health has not reported any materially important ongoing legal battles from 2020 to 2022. The financial documents reviewed do not indicate any significant legal issues or losses related to ongoing litigation during these years. \n\nKey figures such as total incurred health care costs increased from **$55,406 million in 2020** to **$70,887 million in 2022**, but there are no mentions of legal disputes impacting these figures. Therefore, it appears that CVS Health has maintained a stable legal standing during this period.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 18.806193351745605
+  },
+  {
+    "doc_name": "CVSHEALTH_2022_10K",
+    "question": "Has CVS Health paid dividends to common shareholders in Q2 of FY2022?",
+    "gold": "Yes, CVS paid a $ 0.55 dividend per share every quarter in FY2022",
+    "model_answer": "CVS Health did not pay dividends to common shareholders in Q2 of FY2022, as indicated by the available evidence. The result from the analysis is **0.0**. There is no specific mention of dividend payments for that quarter in the retrieved financial documents.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 16.320430517196655
+  },
+  {
+    "doc_name": "MGMRESORTS_2018_10K",
+    "question": "Basing your judgments off of the balance sheet, what is the year end FY2018 amount of accounts payable for MGM Resorts? Answer in USD millions.",
+    "gold": "$303.00",
+    "model_answer": "The year-end FY2018 amount of accounts payable for MGM Resorts is **$302.6 million**. This reflects an increase from the previous year's amount of **$255.0 million**.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 8.929832458496094
+  },
+  {
+    "doc_name": "MGMRESORTS_2022_10K",
+    "question": "Has MGM Resorts paid dividends to common shareholders in FY2022?",
+    "gold": "Yes. MGM maintained 0.01$ per share annual dividend through out FY 2022.",
+    "model_answer": "MGM Resorts did not pay dividends to common shareholders in FY2022. The analysis indicates a **0.0** dividend payout for the year, suggesting that the company retained its earnings instead of distributing them to shareholders.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 16.043365955352783
+  },
+  {
+    "doc_name": "MICROSOFT_2016_10K",
+    "question": "What is the FY2016 COGS for Microsoft? Please state answer in USD millions. Provide a response to the question by primarily using the statement of income.",
+    "gold": "$32780.00",
+    "model_answer": "The FY2016 Cost of Goods Sold (COGS) for Microsoft is **$431 million**. This figure is derived from the statement of income in the financial report.",
+    "passed": false,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 8.652391910552979
+  },
+  {
+    "doc_name": "NETFLIX_2017_10K",
+    "question": "What is Netflix's year end FY2017 total current liabilities (in USD millions)? Base your judgments on the information provided primarily in the balance sheet.",
+    "gold": "$5466.00",
+    "model_answer": "Netflix's total current liabilities at the end of FY2017 amounted to **$5,466 million**. This reflects an increase from the previous year's total current liabilities of **$4,587 million**.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 8.97439694404602
+  },
+  {
+    "doc_name": "NIKE_2019_10K",
+    "question": "According to the details clearly outlined within the balance sheet, how much total current assets did Nike have at the end of FY2019? Answer in USD millions.",
+    "gold": "$16525.00",
+    "model_answer": "At the end of FY2019, Nike had total current assets of **$16,525 million**. This figure reflects the company's liquidity and short-term financial health as of May 31, 2019.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 8.720114946365356
+  },
+  {
+    "doc_name": "PEPSICO_2021_10K",
+    "question": "What is the FY2021 capital expenditure amount (in USD billions) for PepsiCo? Respond to the question by assuming the perspective of an investment analyst who can only use the details shown within the statement of cash flows.",
+    "gold": "$4.60",
+    "model_answer": "The FY2021 capital expenditure amount for PepsiCo is **$4.625 billion**. This figure reflects the company's investment in capital spending for the year.",
+    "passed": true,
+    "check_kind": "numeric (2% tol)",
+    "error": null,
+    "elapsed": 8.917300701141357
+  },
+  {
+    "doc_name": "PEPSICO_2022_10K",
+    "question": "What are the geographies that Pepsico primarily operates in as of FY2022?",
+    "gold": "As of FY2022, Pepsico primarily operates in the following geographies: North America, Latin America, Europe, Africa, Middle East, South Asia, Asia Pacific, Australia, New Zealand and China.",
+    "model_answer": "As of FY2022, PepsiCo primarily operates in **six geographic segments**: North America, Latin America, Europe, Africa, the Middle East, and South Asia, as well as Asia Pacific. The North America segment is the largest, contributing significantly to the company's overall revenue. However, specific revenue figures for each geography are not provided in the available evidence.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 9.45932912826538
+  },
+  {
+    "doc_name": "PEPSICO_2022_10K",
+    "question": "Has Pepsico reported any materially important ongoing legal battles from FY2022 and FY2021?",
+    "gold": "No, Pepsico is not involved in material legal battles.",
+    "model_answer": "PepsiCo has not reported any materially important ongoing legal battles for FY2022 and FY2021. The available financial documents do not indicate any significant legal issues that could impact the company's financial position or operations during these years.",
+    "passed": null,
+    "check_kind": "informational only",
+    "error": null,
+    "elapsed": 17.697406768798828
+  },
+  {
+    "doc_name": "PEPSICO_2022_10K",
+    "question": "What is the quantity of restructuring costs directly outlined in Pepsico's income statements for FY2022? If restructuring costs are not explicitly outlined then state 0.",
+    "gold": "Pepsico's restructuring costs in FY2022 amounted to $411 million .",
+    "model_answer": "PepsiCo's income statements for FY2022 do not explicitly outline any restructuring costs. Therefore, the quantity of restructuring costs is **0**.",
+    "passed": false,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 11.481322288513184
+  },
+  {
+    "doc_name": "ULTABEAUTY_2023_10K",
+    "question": "Which debt securities are registered to trade on a national securities exchange under Ulta Beauty's name as of FY2023?",
+    "gold": "There are none",
+    "model_answer": "As of FY2023, there are **no debt securities** registered to trade on a national securities exchange under Ulta Beauty's name. The available evidence does not provide any information regarding the existence of such securities.",
+    "passed": null,
+    "check_kind": "informational only",
+    "error": null,
+    "elapsed": 9.28314208984375
+  },
+  {
+    "doc_name": "ULTABEAUTY_2023_10K",
+    "question": "What are major acquisitions that Ulta Beauty has done in FY2023 and FY2022?",
+    "gold": "Ulta Beauty did not make any acquisitions in FY2023 and FY2022.",
+    "model_answer": "Ulta Beauty did not make any major acquisitions in FY2023 or FY2022, as there is no documented evidence of such transactions in the available financial reports. The focus appears to be on internal growth and operational improvements rather than external acquisitions during these fiscal years.",
+    "passed": true,
+    "check_kind": "fact-presence (2% tol)",
+    "error": null,
+    "elapsed": 17.17077946662903
+  }
+]

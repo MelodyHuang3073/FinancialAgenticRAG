@@ -46,6 +46,9 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
                          "研發費用"]),
     ("sga",            ["sg&a", "selling general", "selling and marketing",
                          "推銷管理費用", "推銷與管理費用"]),
+    ("restructuring_costs", ["restructuring and impairment charges",
+                              "restructuring charges", "restructuring costs",
+                              "重組費用", "重組成本"]),
     # Net income / EPS
     ("net_income_btax",["net income before tax", "income before tax", "pretax income",
                          "稅前淨利"]),
@@ -61,6 +64,7 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("current_assets", ["total current assets", "current assets", "流動資產"]),
     ("inventory",      ["inventory", "inventories", "存貨"]),
     ("accounts_rec",   ["accounts receivable", "trade receivables", "receivables", "receivable", "應收帳款"]),
+    ("accounts_payable", ["accounts payable", "trade payables", "payables", "payable", "應付帳款"]),
     ("current_liab",   ["total current liabilities", "current liabilities", "流動負債"]),
     ("total_liab",     ["total liabilities", "總負債"]),
     # ", net" variants lead the list so a real balance-sheet PP&E row gets
@@ -89,7 +93,7 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("operating_cf",   ["operating cash flow", "cash from operations",
                          "cash provided by operating", "營業活動現金"]),
     ("capex",          ["capital expenditure", "purchases of ppe",
-                         "capital expenditure", "資本支出"]),
+                         "capital spending", "資本支出"]),
     ("depreciation",   ["depreciation and amortization", "depreciation & amortization",
                          "depreciation", "amortization", "d&a", "折舊"]),
     ("fcf",            ["free cash flow", "fcf", "自由現金流"]),
@@ -252,37 +256,60 @@ def _get_canonical(item_name: str, company_name: str = "") -> str:
 
     Returns:
         canonical metric key (e.g. "revenue") or "unknown"
+
+    Matching is by LONGEST match length across override aliases AND the
+    global taxonomy together (an exact match's length is the full item
+    string) — ties go to an override, then to a global exact match, then
+    to a global substring match. A short, generic override alias no
+    longer unconditionally wins just because company overrides are
+    "priority 1" and get checked first: it only wins when nothing more
+    specific matches. Confirmed real case: Microsoft's own override
+    `"revenue": ["total revenue", "revenue"]` (added to catch "Total
+    revenue" / "Revenue" rows the global taxonomy already handles fine)
+    also matched as a bare substring of "Total cost of revenue" purely
+    because "revenue" is the last word of that unrelated line item —
+    silently reclassifying Microsoft's own COGS row as "revenue" and
+    making a plain "What is Microsoft's FY2016 COGS?" question fall
+    through to the no-canonical-found fallback (result 0.0, WARNING),
+    even though "Total cost of revenue" also has an exact global-taxonomy
+    substring match ("cost of revenue", 16 chars — longer and far more
+    specific than the 7-char "revenue" override hit).
     """
     item_lower = item_name.lower().strip()
 
-    # ── Priority 1: Company-specific overrides ────────────────────────────────
+    # (match_len, canonical, source_rank) — source_rank breaks ties:
+    # override (0) > global exact (1) > global substring (2).
+    candidates: List[Tuple[int, str, int]] = []
+
+    # ── Company-specific overrides ──────────────────────────────────────────
     if company_name:
         overrides = get_overrides_for_company(company_name)
         for canonical, aliases in overrides.items():
             for alias in aliases:
                 alias_lower = alias.lower()
                 if alias_lower == item_lower:
-                    return canonical
+                    return canonical  # whole-string override match is unambiguous
                 idx = item_lower.find(alias_lower)
                 if idx != -1 and not _is_negated_match(item_lower, idx):
-                    return canonical
+                    candidates.append((len(alias_lower), canonical, 0))
 
-    # ── Priority 2: Global taxonomy exact match ──────────────────────────────
+    # ── Global taxonomy exact match ──────────────────────────────────────────
     if item_lower in _ALIAS_TO_CANONICAL:
-        return _ALIAS_TO_CANONICAL[item_lower]
+        candidates.append((len(item_lower), _ALIAS_TO_CANONICAL[item_lower], 1))
 
-    # ── Priority 3: Global taxonomy longest substring match ────────────────────
-    best = ""
-    best_len = 0
+    # ── Global taxonomy substring match ───────────────────────────────────────
     for alias, canonical in _ALIAS_TO_CANONICAL.items():
         idx = item_lower.find(alias)
-        if idx == -1 or len(alias) <= best_len:
+        if idx == -1:
             continue
         if _is_negated_match(item_lower, idx):
             continue
-        best = canonical
-        best_len = len(alias)
-    return best or "unknown"
+        candidates.append((len(alias), canonical, 2))
+
+    if not candidates:
+        return "unknown"
+    candidates.sort(key=lambda c: (-c[0], c[2]))
+    return candidates[0][1]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -546,7 +573,9 @@ def _extract_from_markdown_table_block(content: str, ev_company: str = "") -> Di
 # Extraction: linearized-table (pipe-delimited)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[str, Dict]:
+def _extract_from_linearized_table(
+    evidence_list: List[Dict[str, Any]], entity: str = "",
+) -> Dict[str, Dict]:
     """
     Works on pipe-delimited linearized table rows:
       ... | Line Item: 營業收入 (Revenue) | 2023 年 (全年度): 2,161.7 | 2024 年: 2,894.3
@@ -563,6 +592,50 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
         r"(.*?(?:20\d{2}|FY\d{4})[^:]*?)\s*:\s*([\d,]+\.?\d*)",
         re.IGNORECASE,
     )
+    # Retrieval's own company filter is a SOFT penalty (see
+    # hybrid_retriever._company_match_score's docstring), not a hard
+    # exclusion, so a wrong-company chunk can and does still end up in
+    # evidence_list — _extract_formula_guided() already guards against
+    # this via its own entity-identity-aware reduction, but this simpler
+    # "just dump every row and pick the best-scoring one" path never had
+    # an equivalent check at all. Confirmed real case: a "3M capital
+    # expenditure 2018" query's evidence buffer picked up MGM Resorts'
+    # own "Capital expenditures, net of construction payable" row
+    # (-1,486,843 thousand — MGM reports in thousands, not millions,
+    # which is also why the number looked so absurdly large) instead of
+    # 3M's real "Purchases of property, plant and equipment (PP&E)" row
+    # (-1,577 million), because nothing here ever checked which company
+    # a candidate row actually came from.
+    entity_target_words = _entity_words(entity) if entity and entity.lower() not in ("company", "unknown", "") else None
+
+    def _entity_ok(ev_company: str) -> bool:
+        if entity_target_words is None:
+            return True
+        doc_words = _entity_words(ev_company)
+        if not doc_words:
+            return True  # no company tag at all — nothing to contradict the target
+        if (entity_target_words <= doc_words or doc_words <= entity_target_words
+                or (entity_target_words & doc_words)):
+            return True
+        # Collapsed (no-space) comparison: a word-SET comparison can never
+        # catch a human-readable multi-word name ("MGM Resorts", "Best
+        # Buy") against this project's doc_name convention, which
+        # concatenates multi-word company names WITHOUT a space
+        # ("MGMRESORTS_2018_10K" -> _entity_words gives the single mashed
+        # word {"mgmresorts"}, which never intersects {"mgm", "resorts"}
+        # as separate set elements no matter how the comparison is
+        # phrased). Same fix, same reasoning, as
+        # hybrid_retriever._company_match_score's own collapsed check.
+        # Confirmed real case: entity="MGM Resorts" made EVERY passage
+        # from MGM's own 10-K fail this filter, silently emptying
+        # extracted_table entirely and falling through to the raw-text
+        # fallback, where the LLM read a stray "Accounts payable: 25,758"
+        # figure straight off an unrelated exhibit page instead.
+        collapsed_ent = _entity_collapsed(entity)
+        collapsed_doc = _entity_collapsed(ev_company)
+        return bool(collapsed_ent and (
+            collapsed_ent in collapsed_doc or collapsed_doc in collapsed_ent
+        ))
 
     for ev in evidence_list:
         # Prefer parent_content for richer context
@@ -588,6 +661,9 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
             import re as _re
             m_co = _re.search(r"Company:\s*([^|]+)", content)
             ev_company = m_co.group(1).strip() if m_co else ""
+
+        if not _entity_ok(ev_company):
+            continue
 
         # ── Standard Markdown table (header + |---|---| separator) ──────────
         if any(is_markdown_separator_row(l) for l in content.split("\n")):
@@ -683,6 +759,30 @@ _SUPPLEMENTARY_SCHEDULE_MARKERS = (
     "recognized amounts of identified assets",
 )
 
+#: A SEC "Exhibit 99.X" filed alongside the parent's own 10-K is
+#: routinely a wholly separate legal entity's own complete financial
+#: statements — most commonly a material joint venture or equity-method
+#: investee whose lender covenants require standalone disclosure —
+#: reusing the exact same "Accounts payable"/"Total current assets"/etc.
+#: line-item vocabulary as the parent's OWN consolidated statements, but
+#: for a much smaller, different reporting entity. Same failure class as
+#: the guarantor-schedule markers above, just a different SEC exhibit
+#: type. This needs a STRUCTURAL check (exhibit number immediately
+#: followed by an entity name and a "Consolidated Balance Sheet(s)" /
+#: "Consolidated Statement(s) of ..." heading), not a bare substring
+#: marker — an ordinary page of the filer's OWN statements can still
+#: mention "Exhibit 99.1" in passing (e.g. a cross-reference footnote)
+#: without being that exhibit's own content. Confirmed real case: MGM
+#: Resorts' FY2018 10-K bundles "Exhibit 99.3\nCITYCENTER HOLDINGS,
+#: LLC\nCONSOLIDATED BALANCE SHEETS" as an exhibit — CityCenter's own
+#: $25.8M accounts payable row outranked MGM's real consolidated $302.6M
+#: row on an equally-clean exact-label tie, because nothing distinguished
+#: "this table belongs to a different company" from the row text alone.
+_EXHIBIT_FINANCIALS_RE = re.compile(
+    r'exhibit\s+\d+\.\d+\s*\n[^\n]{0,80}\n\s*consolidated\s+(balance\s+sheets?|statements?)',
+    re.IGNORECASE,
+)
+
 
 def _is_supplementary_schedule(content: str) -> bool:
     """
@@ -704,7 +804,9 @@ def _is_supplementary_schedule(content: str) -> bool:
     same to the real balance-sheet "Inventories, net" row.
     """
     lower = content.lower()
-    return any(m in lower for m in _SUPPLEMENTARY_SCHEDULE_MARKERS)
+    if any(m in lower for m in _SUPPLEMENTARY_SCHEDULE_MARKERS):
+        return True
+    return bool(_EXHIBIT_FINANCIALS_RE.search(content))
 
 
 #: Markers for a company's own "Selected Financial Data" / "Summary of
@@ -861,6 +963,21 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
     # letting an unrelated but cleanly-labeled row outscore it).
     label_norm = re.sub(r'\s+', ' ', label.lower().strip().rstrip(':'))
     label_norm = re.sub(r'(?:(?<=\s)|^)\$(?=\s|$)', '', label_norm)
+    # A dash/en-dash/em-dash surrounded by spaces is a common financial-
+    # statement typographic convention for the SAME clause-separator role
+    # as a comma (e.g. "Property, plant and equipment — net" vs
+    # "Property, plant and equipment, net" — the exact same concept, just
+    # a different filer's/page's punctuation choice within the SAME 10-K
+    # even). Without this, an alias written with a comma never reaches
+    # exact-match against a dash-punctuated label, so it falls back to
+    # matching only the bare, unqualified prefix — tying with (and often
+    # losing a length tie-break to) an unrelated row that happens to BE
+    # that bare prefix. Confirmed real case: 3M's real "Property, plant
+    # and equipment — net" (8,738, the correct answer) scored only a
+    # substring match against the ", net" alias and lost to "Property,
+    # plant and equipment" (24,873, the GROSS figure) scoring an exact
+    # match against the bare "property, plant and equipment" alias.
+    label_norm = re.sub(r'\s+[\-–—]\s+', ', ', label_norm)
     label_norm = re.sub(r'\s+', ' ', label_norm).strip()
     if _CARVEOUT_ANYWHERE_RE.search(label_norm):
         return 0
@@ -1004,6 +1121,19 @@ def _entity_words(name: str) -> set:
     n = re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', name)
     n = re.sub(r'[_\-]+', ' ', n)
     return {w for w in n.lower().split() if len(w) >= 2 and w != "10k"}
+
+
+def _entity_collapsed(name: str) -> str:
+    """Same normalization as _entity_words, but returns the space-
+    stripped single string instead of a word set -- lets a multi-word
+    human-readable name ("MGM Resorts") be substring-compared against
+    this project's single-mashed-word doc_name convention
+    ("mgmresorts"), which a word-SET comparison can never catch (see
+    _entity_words' docstring)."""
+    n = re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', name)
+    n = re.sub(r'[_\-]+', ' ', n)
+    n = re.sub(r'\b10k\b', '', n.lower())
+    return re.sub(r'\s+', '', n)
 
 
 def _extract_formula_guided(
@@ -2340,6 +2470,8 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["capex", "capital expenditure"],                      "capex"),
     (["r&d", "research and development", "研發"],           "rd_expense"),
     (["free cash flow", "fcf"],                             "fcf"),
+    (["restructuring charges", "restructuring costs", "restructuring and impairment",
+      "restructuring"],                                     "restructuring_costs"),
     # Same gap class as the others below: a direct "how much cash flow
     # from operating activities did X generate" question had no hint to
     # route to operating_cf's own canonical (already registered in
@@ -2350,9 +2482,44 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["cash flow from operating activities", "cash from operations",
       "operating cash flow", "cash provided by operating"],  "operating_cf"),
     (["total assets", "資產"],                              "total_assets"),
+    # Same gap class as accounts_payable/restructuring_costs/net-AR below:
+    # these three canonicals were already registered in _ITEM_TAXONOMY
+    # (for classifying a raw row's OWN label) and are used by the Current
+    # Ratio formula, but had no _QUERY_CANONICAL_HINTS entry at all, so a
+    # plain "what is X's total current liabilities" direct-lookup
+    # question always returned None here and fell straight through to
+    # the "no canonical found" fallback. Confirmed real case: Netflix's
+    # FY2017 total current liabilities question fell back to the LLM
+    # reading raw evidence unaided, which incorrectly summed just
+    # "Accounts payable" + "Deferred revenue" (two OTHER current-
+    # liability sub-items visible in the same evidence) instead of using
+    # the real "Total current liabilities" row (5,466,312 thousand =
+    # $5,466M, exactly matching gold) that was sitting right there,
+    # correctly extracted, in the PoT variable dump the whole time.
+    (["total current liabilities", "current liabilities", "流動負債"],
+                                                             "current_liab"),
+    (["total current assets", "current assets", "流動資產"],
+                                                             "current_assets"),
+    (["total liabilities", "總負債"],                        "total_liab"),
+    # "dividends"/"dividends paid" is checked BEFORE the "equity" hint
+    # just below on purpose: "shareholders"/"stockholders" there are
+    # bare, generic triggers that also fire as mere qualifiers inside
+    # unrelated dividend questions ("dividends to common shareholders"),
+    # not just genuine equity questions ("shareholders' equity"). Since
+    # _infer_target_canonical returns on the FIRST hint that matches,
+    # the more specific "dividends" signal has to be checked first or it
+    # never gets a chance. Confirmed real case: "Has MGM Resorts paid
+    # dividends to common shareholders in FY2022?" resolved to "equity"
+    # (via the word "shareholders") instead of "dividends_paid", so the
+    # direct-lookup fallback picked total_stockholders_equity data
+    # instead of the correct "Dividends paid to common shareholders"
+    # row (-4,048) that was sitting right there in the extracted
+    # evidence -- same bug reproduced for CVS Health's own "dividends to
+    # common shareholders" question.
+    (["dividends paid", "cash dividends", "dividends"],       "dividends_paid"),
     (["equity", "shareholders", "stockholders"],            "equity"),
     (["property, plant and equipment", "property, plant, and equipment",
-      "property and equipment", "pp&e", "net ppe", "fixed assets",
+      "property and equipment", "pp&e", "net ppe", "ppne", "fixed assets",
       "不動產、廠房及設備", "固定資產"],                     "ppe"),
     (["cost of revenue", "cost of goods", "cost of sales", "cogs"], "cost_of_revenue"),
     # Missing entirely — same class of gap as the ppe entry above. Confirmed
@@ -2366,11 +2533,24 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     # through to the generic evidence-dump fallback, and the LLM
     # eventually grabbed an unrelated "Total" row (129) instead.
     (["inventory", "inventories", "存貨"],                    "inventory"),
-    # Same gap class again: "how much did X pay out in cash dividends"
-    # had no canonical hint to route the direct-lookup to the correct
-    # "Dividends paid" cash-flow-statement row (confirmed real case:
-    # American Water Works FY2020 cash dividends).
-    (["dividends paid", "cash dividends", "dividends"],       "dividends_paid"),
+    # (dividends_paid hint moved above the "equity" entry — see the
+    # comment there for why it has to be checked before "shareholders".)
+    # Missing entirely — same gap class as ppe/inventory above. Confirmed
+    # real case: "What is Amcor's year end FY2020 net AR (in USD millions)?"
+    # had target_metrics=['accounts_rec'] from the classifier, but
+    # _infer_target_canonical() returned None (no "accounts_rec" hint
+    # existed here at all), so the direct-lookup fallback never fired and
+    # the answer came back as "not explicitly provided" despite the
+    # balance-sheet "Trade receivables, net" row sitting in evidence.
+    (["accounts receivable", "trade receivables", "receivables", "net ar",
+      "應收帳款"],                                             "accounts_rec"),
+    # Same gap class again: "accounts_payable" is already a registered
+    # _METRIC_KEYWORDS canonical in question_classifier.py, but had no
+    # matching hint here at all, so _infer_target_canonical() always
+    # returned None for a plain "what is X's accounts payable" question
+    # -- the direct-lookup fallback never fired even when the real
+    # "Accounts payable" row was sitting right there in extracted_table.
+    (["accounts payable", "trade payables", "應付帳款"],       "accounts_payable"),
 ]
 
 
@@ -2499,6 +2679,20 @@ def _find_same_item_pair(
 _CANONICAL_TO_ALIASES: Dict[str, List[str]] = {c: aliases for c, aliases in _ITEM_TAXONOMY}
 
 
+#: A bare label ("Property, plant and equipment") tied at the same
+#: _score_row_match score against its own "..., net" sibling
+#: ("Property, plant and equipment, net"/"— net"/"- net") is almost
+#: always the GROSS figure — filers routinely print both the gross
+#: amount and its net-of-depreciation/allowance counterpart as separate
+#: rows in the SAME statement, with only the net row bothering to say so
+#: explicitly, and "net" is what a bare financial-metric question
+#: ("net PP&E", "net accounts receivable") virtually always means by
+#: default. Checked as a tie-break ABOVE label length, since length alone
+#: picks the bare/gross row purely for being shorter — see
+#: _pick_best_in_group's confirmed real case below.
+_NET_QUALIFIER_RE = re.compile(r'\bnet\b')
+
+
 def _pick_best_in_group(
     items: List[Dict],
     canonical: str,
@@ -2512,19 +2706,31 @@ def _pick_best_in_group(
     total/subtotal line rather than an arbitrary sub-component — using the
     same total-row-priority scoring _extract_formula_guided() already uses
     (_score_row_match: 2 = genuine total row, 1 = sub-item substring match).
-    Ties broken by matching preferred_year, then by shorter label (closer
-    to the alias itself rather than a footnote elaboration padded with
-    extra qualifying text — see _find_pair_for_margin's pair_key for the
-    confirmed real case this guards against), then by first occurrence.
+    Ties broken by matching preferred_year, then by whether the label is
+    itself qualified "...net" (see _NET_QUALIFIER_RE — a bare label tied
+    at the same score as its own "net" sibling is virtually always the
+    GROSS figure), then by shorter label (closer to the alias itself
+    rather than a footnote elaboration padded with extra qualifying text
+    — see _find_pair_for_margin's pair_key for the confirmed real case
+    this guards against), then by first occurrence.
+
+    Confirmed real case: 3M's balance sheet shows BOTH "Property, plant
+    and equipment" (24,873 — the gross figure, sometimes captioned
+    "Gross property, plant and equipment" elsewhere on the same page) and
+    "Property, plant and equipment — net" (8,738, the real answer to "net
+    PP&E") as separate rows scoring an equal exact match against the
+    "ppe" canonical's alias list; without the net-qualifier tie-break,
+    length alone preferred the shorter, gross-figure row.
     """
     if not items:
         return None
     aliases = _CANONICAL_TO_ALIASES.get(canonical, [canonical])
 
-    def sort_key(x: Dict) -> Tuple[int, int, int]:
+    def sort_key(x: Dict) -> Tuple[int, int, int, int]:
         score = _score_row_match(x["item"], aliases)
         year_match = 1 if preferred_year and x["year"] == preferred_year else 0
-        return (score, year_match, -len(x["item"]))
+        is_net = 1 if _NET_QUALIFIER_RE.search(x["item"].lower()) else 0
+        return (score, year_match, is_net, -len(x["item"]))
 
     return max(items, key=sort_key)
 
@@ -2918,7 +3124,7 @@ class ProgramOfThoughtReasoner:
         formula_entry = detect_formula(query)
 
         # ── Step 2: Extract variables from linearized tables ──────────────────
-        extracted_table = _extract_from_linearized_table(evidence_list)
+        extracted_table = _extract_from_linearized_table(evidence_list, entity)
 
         # ── Step 3: Formula-guided extraction ─────────────────────────────────
         resolved_formula: Dict[str, float] = {}

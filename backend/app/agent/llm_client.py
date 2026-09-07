@@ -111,9 +111,23 @@ class LLMAnswerGenerator:
         if not client:
             return None
 
+        # parent_content (the FULL page/table this chunk came from), not
+        # content (just the one matched row/paragraph fragment) — mirrors
+        # what the frontend's own Source Evidence panel already does (see
+        # orchestrator._build_evidence_info's docstring) and what
+        # pot_reasoner's extraction already relies on. Confirmed real case:
+        # a narrative note spanning several child chunks on one page (e.g.
+        # Amcor's FY2023 "Note 5" listing three separate acquisitions, each
+        # named in a different chunk) had the LLM see only whichever single
+        # ~150-char fragment happened to be evidence[0] — usually just the
+        # first item named — even though the full page (now available via
+        # parent_content, see parser._chunk_text_to_passages) already
+        # covers all of them. max_chars raised from the function's 600
+        # default to comfortably fit a full single-page note/table rather
+        # than just a fragment of one.
         evidence_text = "\n".join(
             f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] "
-            f"{_truncate_evidence_content(item.get('content', ''))}"
+            f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=2000)}"
             for item in evidence[:4]
         )
 

@@ -22,6 +22,17 @@ detail; prints a pass/fail table to stdout.
 """
 import sys, os, json, time
 
+# Gold answers/model text can carry curly quotes, em dashes, or other
+# non-ASCII characters that crash a plain print() under Windows' default
+# console codepage (cp950/cp1252 — neither is UTF-8) with
+# UnicodeEncodeError, killing the whole run partway through and losing
+# every remaining question's result. Forcing stdout/stderr to UTF-8
+# (falling back to replacing any still-unencodable byte rather than
+# raising) makes every print() safe regardless of the console's codepage.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, os.path.dirname(__file__))
 
