@@ -241,8 +241,25 @@ _ASSESSMENT_KEYWORDS = [
 
 _EXCLUSION_KEYWORDS = [
     "exclude", "excluding", "without", "adjusted for", "m&a",
-    "acquisition", "organic", "merger",
+    "organic", "merger",
     "剔除", "排除", "不含", "併購", "併入",
+]
+# "acquisition" is NOT in _EXCLUSION_KEYWORDS above -- on its own it is
+# just as likely to appear in a plain listing/narrative question ("What
+# are major acquisitions that X has done...") as in a genuine
+# M&A-adjustment calculation ("excluding the impact of acquisitions,
+# what was organic growth..."). Only counts as exclusion intent when
+# paired with a word that actually asks to isolate/exclude something.
+# Confirmed real case: "What are major acquisitions that Best Buy has
+# done in FY2023, FY2022 and FY2021?" was misclassified
+# answer_mode=EXCLUSION purely because of the bare word "acquisition",
+# routing it through the "Isolate organic vs M&A impact" analysis
+# template and polluting its retrieval query with an unrelated "segment
+# revenue organic growth acquisition" suffix, even though the question
+# is a simple enumeration.
+_ACQUISITION_EXCLUSION_PAIR_KEYWORDS = [
+    "exclude", "excluding", "without", "adjusted for", "organic",
+    "剔除", "排除", "不含",
 ]
 
 
@@ -312,7 +329,10 @@ class FinanceBenchClassifier:
         quarters = sorted(set(re.findall(r'[Qq][1-4]', query)))
         has_explanation = any(kw in q_lower for kw in _EXPLANATION_KEYWORDS)
         has_assessment = any(kw in q_lower for kw in _ASSESSMENT_KEYWORDS)
-        has_exclusion = any(kw in q_lower for kw in _EXCLUSION_KEYWORDS)
+        has_exclusion = any(kw in q_lower for kw in _EXCLUSION_KEYWORDS) or (
+            "acquisition" in q_lower
+            and any(kw in q_lower for kw in _ACQUISITION_EXCLUSION_PAIR_KEYWORDS)
+        )
         # A strict subset of _EXPLANATION_KEYWORDS: "what drove"/"what
         # caused"/"driver"/"drove" always ask for a CAUSAL narrative
         # ("higher EPYC sales, inclusion of Xilinx..."), never a number,

@@ -206,18 +206,50 @@ class LLMAnswerGenerator:
             if result_value is not None:
                 pot_summary += (
                     f"\n⚠️ CRITICAL: The PoT result above ({result_value}) was computed by a "
-                    "verified Python sandbox, NOT by you. You MUST quote this exact number "
+                    "verified Python sandbox, NOT by you. You MUST quote this exact number -- "
+                    "in your HEADLINE/first-line answer, not only in supporting detail -- "
                     "(reformatted for units/rounding exactly as the question asks, but not "
                     "recalculated) as your answer. Do NOT redo the arithmetic yourself from "
                     "the raw evidence figures below -- independent re-derivation has produced "
                     "wrong numbers before even when every input you cited was correct. When "
-                    "citing ANY supporting figure (e.g. \"net income of $X million\"), you MUST "
-                    "quote the exact value assigned to that variable in the PoT calculation "
-                    "code above -- NOT a different number for the same line item that appears "
-                    "in the raw evidence below, even if that other number looks equally "
-                    "plausible. The code's variables are ground truth for what was used; the "
-                    "raw evidence may contain other same-labeled figures that were NOT used."
+                    "citing ANY figure, headline or supporting (e.g. \"net income of $X "
+                    "million\", \"a dividend of $X million\"), you MUST quote the exact value "
+                    "assigned to that variable in the PoT calculation code above -- NOT a "
+                    "different, more detailed-looking number for the same line item that "
+                    "appears in the raw evidence below, even if that other number comes with "
+                    "an appealing extra detail (a per-share rate, a specific date) that makes "
+                    "it look more complete or authoritative. The code's variables are ground "
+                    "truth for what was used; the raw evidence commonly contains OTHER rows "
+                    "sharing the exact same line-item label but naming a DIFFERENT fiscal year "
+                    "in nearby text (e.g. a multi-year rollforward statement repeats \"Dividends "
+                    "declared and paid to common shareholders\" once per year, each with its own "
+                    "number) -- these were NOT the ones the sandbox used and must not replace "
+                    "the PoT result."
                 )
+                # A non-zero PoT result directly answers a "Has company X
+                # done Y?" yes/no question (paid dividends, reported
+                # restructuring costs, etc.) -- spelled out explicitly so
+                # the model doesn't need to infer direction from a raw
+                # evidence row's own accounting notation (parentheses
+                # around a number mean a negative amount/cash outflow,
+                # NOT zero or "nothing happened", but that convention is
+                # easy to misread when several evidence rows are shown
+                # together). Confirmed real case: MGM Resorts' FY2022
+                # dividend question -- result_value correctly computed as
+                # 4048 (from a cash-flow-statement row reading "(4,048)"),
+                # yet the model's answer stated "MGM did not pay
+                # dividends", contradicting its own PoT result.
+                if result_value not in (0, 0.0):
+                    pot_summary += (
+                        f"\nNote: a raw evidence row may show this figure in "
+                        f"parentheses, e.g. \"({abs(result_value):g})\" -- that is "
+                        "standard financial-statement notation for a negative "
+                        "amount or cash outflow, NOT zero or \"did not occur\". "
+                        f"The PoT result ({result_value}) being non-zero means "
+                        "the event/amount the question asks about DID occur -- "
+                        "for a yes/no question, this generally means the answer "
+                        "is Yes."
+                    )
             if pot_res.get("is_degraded_formula"):
                 pot_summary += (
                     f"\n⚠️ CRITICAL: {pot_res.get('degraded_note', '')} "
@@ -283,6 +315,22 @@ Available Evidence:
    business segments, products, or line items each with their own
    stated reason), name ALL of them that the evidence supports -- do
    not stop after the first one or two that seem sufficient.
+8. If the question asks you to LIST items (acquisitions, legal matters,
+   products, geographies, etc.), enumerate EVERY item the evidence below
+   names -- do not stop after finding a plausible-looking subset. NEVER
+   name a specific company, transaction, dollar amount, or event unless
+   the evidence below EXPLICITLY connects it to the exact period/year the
+   question asks about. A name or word matching something you recognize
+   from general knowledge appearing ANYWHERE in the evidence text is NOT
+   enough by itself -- check what the SURROUNDING sentence actually says
+   about it before citing it. Confirmed real failure mode: a company name
+   appears in evidence only as part of an unrelated executive's past
+   employer ("President, [Company] North America, 2017 to 2019") or a
+   stray mention with a different year attached -- seeing that name is
+   not evidence that IT was acquired in, or is otherwise relevant to, the
+   fiscal year actually being asked about. When in doubt about whether a
+   specific fact you're about to cite is truly supported for the exact
+   period asked, leave it out rather than include it.
 """
 
         try:
