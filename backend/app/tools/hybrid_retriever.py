@@ -231,6 +231,28 @@ class HybridFinancialRetriever:
     #: never made the top-3 cutoff actually used).
     _TOTAL_ROW_RE = re.compile(r'Line Item:\s*Total\b', re.IGNORECASE)
 
+    #: A table_row whose own linearized content contains a generic "ColN:"
+    #: placeholder (parser.py's own fallback whenever it couldn't resolve
+    #: a real year/period header for one of a row's value columns -- see
+    #: e.g. parser._inject_missing_year_header, _reconstruct_table_from_
+    #: word_positions) is a low-confidence extraction: the row's real
+    #: label may be right, but at least one of its numbers has an
+    #: unreliable or entirely wrong year attached to it. A CORRECTLY
+    #: parsed row never contains this literal text (a real year header
+    #: always reads "2022:"/"2021:" etc, never "Col4:"), so this only
+    #: ever demotes genuinely uncertain rows -- soft penalty, not
+    #: exclusion, since the row may still be the only evidence available
+    #: for its line item. Confirmed real case: MGM Resorts' "Consolidated
+    #: Statements of Stockholders' Equity" is a rollforward/waterfall
+    #: statement (one narrative block per year, not year-column pairs),
+    #: which the standard table parser mis-splits into "Col4"/"Col6"/
+    #: "Col8" placeholders -- its own confusing "(77,606)" value (really
+    #: 2020's dividend total) outranked the cash-flow-statement's cleanly
+    #: 2022-labeled "(4,048)" row for a FY2022 dividends question, and
+    #: even survived an explicit "trust the PoT sandbox result" prompt
+    #: instruction because the raw evidence looked more detailed/complete.
+    _LOW_CONFIDENCE_COLUMN_RE = re.compile(r'\bCol\d+:')
+
     _CAUSAL_LANGUAGE_RE = re.compile(
         r'\bdriven\s+by\b|\bprimarily\s+due\s+to\b|\bmainly\s+due\s+to\b|'
         r'\bas\s+a\s+result\s+of\b|\battributable\s+to\b|\bresulted\s+from\b',
@@ -597,6 +619,14 @@ class HybridFinancialRetriever:
             # "Geographic Operations" table otherwise).
             if prefer_narrative and geography_active and _GEOGRAPHIC_SECTION_RE.search(content):
                 multiplier *= 1.4
+
+            # ── Low-confidence column penalty ─────────────────────────────────
+            # Applies regardless of prefer_narrative -- a mis-parsed year
+            # header is exactly as misleading for a NUMERIC lookup (the
+            # confirmed MGM dividends real case is answer_mode=NUMERIC) as
+            # for a narrative one. See _LOW_CONFIDENCE_COLUMN_RE's docstring.
+            if self._LOW_CONFIDENCE_COLUMN_RE.search(content):
+                multiplier *= 0.5
 
             # ── Year / quarter boost ───────────────────────────────────────
             doc_period = str(doc.get('period', '')) + " " + content
