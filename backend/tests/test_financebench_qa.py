@@ -112,12 +112,32 @@ DOC_TO_FILE = {
 #: disagreement.
 _NUM_RE = re.compile(r"-?\$?-?\d[\d,]*\.?\d*")
 
+#: A 2-digit fiscal-year shorthand ("FY22") extracts as the bare number
+#: 22 under _NUM_RE, not 2022 -- so when a gold answer's ONLY checkable
+#: "fact" is a bare calendar year (see _is_bare_year) written out in full
+#: ("In 2022, AMD reported..."), a model answer that correctly answered
+#: the SAME question but phrased the year as "FY22"/"in FY22" (a common,
+#: equally-correct real-world phrasing) fails the numeric check purely
+#: on this shorthand mismatch -- not because anything it said was wrong.
+#: Confirmed real case: AMD's "What drove revenue change... FY22" gold
+#: answer's only number is the bare year 2022; a fully correct model
+#: answer citing "FY22"/"FY21" throughout never produces a literal 2022
+#: for _numbers_in to find. Expanding the shorthand to its 4-digit form
+#: BEFORE extraction (same fix already applied to retrieval scoring in
+#: hybrid_retriever._extract_years) removes this false negative without
+#: touching how real dollar/percent figures are compared.
+_FY_SHORT_RE = re.compile(r"\bFY\s*(\d{2})\b", re.IGNORECASE)
+
+
+def _expand_fy_shorthand(text: str) -> str:
+    return _FY_SHORT_RE.sub(lambda m: "FY20" + m.group(1), text or "")
+
 
 def _numbers_in(text: str):
     """Extract all numeric tokens (commas and '$' stripped) from a string
     as floats."""
     out = []
-    for m in _NUM_RE.findall(text or ""):
+    for m in _NUM_RE.findall(_expand_fy_shorthand(text)):
         try:
             out.append(float(m.replace(",", "").replace("$", "")))
         except ValueError:

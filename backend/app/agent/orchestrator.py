@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Optional
 from app.rag.vector_store import FinancialVectorStoreManager
 from app.agent.question_classifier import FinanceBenchClassifier
 from app.agent.decomposer import QueryDecomposer
-from app.agent.pot_reasoner import ProgramOfThoughtReasoner
+from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import LLMAnswerGenerator
@@ -172,16 +172,31 @@ class FinAgentRAGOrchestrator:
         # formula's own aliases guarantees retrieval searches for
         # exactly what extraction will later look for, deterministically.
         formula_entry = detect_formula(query) if answer_mode == "NUMERIC" else None
+        # A question asking whether a metric is "improving"/"declining" as
+        # of year Y implies a comparison against year Y-1, even when the
+        # classifier's own year extraction names only Y -- without this,
+        # RETRIEVAL never fetches the prior year at all, so by the time
+        # pot_reasoner.py's own _with_implied_trend_year (used at
+        # CALCULATION time) tries to compare two years, there is no prior-
+        # year evidence in the buffer to find, and the formula silently
+        # falls back to "0.0 -- not a useful metric" instead of the real
+        # trend answer. Confirmed real case: "Does Boeing have an
+        # improving gross margin profile as of FY2022?" -- classification
+        # extracted only ["2022"], retrieval fetched gross_profit(2022)
+        # alone, and the answer came back 0.0 even though Boeing's real
+        # FY2021->FY2022 gross margin trend (4.8% -> 5.3%) is a clean,
+        # directly answerable "Yes".
+        retrieval_years = _with_implied_trend_year(classification["years"], query.lower())
         if formula_entry:
             query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
             sub_questions = self._build_formula_subquestions(
-                formula_entry, query_entity, classification["years"]
+                formula_entry, query_entity, retrieval_years
             )
         elif answer_mode == "NUMERIC":
             sub_questions = self.decomposer.decompose(
                 query,
                 target_metrics=classification["target_metrics"],
-                years=classification["years"],
+                years=retrieval_years,
                 entity=classification["entity"],
             )
         else:
