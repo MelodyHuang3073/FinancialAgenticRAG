@@ -124,11 +124,58 @@ class LLMAnswerGenerator:
         # parent_content, see parser._chunk_text_to_passages) already
         # covers all of them. max_chars raised from the function's 600
         # default to comfortably fit a full single-page note/table rather
-        # than just a fragment of one.
+        # than just a fragment of one -- and raised AGAIN from 2000 to
+        # 4000 once parser.py's own chunk_size grew from 800 to 3000 (see
+        # that constant's own docstring): a single retrieved chunk can now
+        # be up to 3000 chars on its own, and parent_content (the whole
+        # page) is routinely longer still, so 2000 chars often cut off
+        # BEFORE reaching content the retrieval step deliberately
+        # surfaced. Confirmed real case: AMD's FY2022 "What drove revenue
+        # change" question retrieved the correct page (containing "driven
+        # by a 64% increase in Data Center segment revenue... EPYC...")
+        # but that sentence sat past character 2000 of the page's own
+        # parent_content, so the LLM's answer cited the OTHER two drivers
+        # it could still see (Gaming, Xilinx/Embedded) while silently
+        # omitting the one that got truncated away.
+        # Sorted by the retriever's own relevance_score, NOT the order
+        # items happen to sit in `evidence` -- for a non-numeric question
+        # with multiple retrieval sub-queries (see orchestrator.py's
+        # non-numeric loop), `evidence` is several sub-queries' hit lists
+        # concatenated in whichever order those sub-queries happened to
+        # run, so a plain evidence[:4] slice is really "the first
+        # sub-query's own top few candidates", not "the 4 most relevant
+        # items across every sub-query". Confirmed real case: AMD's FY2022
+        # "What drove revenue change" question's OWN keyword sub-query
+        # ("AMD Revenue Net Revenue...") ran first and doesn't mention a
+        # year at all, so AMD's unrelated FY2015 filing content filled its
+        # own top slots on equal footing with the real FY2022 content --
+        # the one passage that actually named the Data Center/EPYC driver
+        # ranked 5th within THAT sub-query alone and never reached the
+        # unsorted evidence[:4] cut, even though it clearly outranks the
+        # FY2015 content by score once every sub-query's results are
+        # considered together. A local copy -- `evidence` itself is left
+        # untouched for any other consumer (e.g. the Source Evidence
+        # panel) that may rely on its original order.
+        sorted_evidence = sorted(
+            evidence, key=lambda item: item.get("relevance_score") or 0, reverse=True
+        )
+        # 6, not 4 -- a genuinely multi-page narrative topic (e.g. a
+        # litigation/legal-proceedings discussion, or a list of several
+        # acquisitions each described on its own page) routinely has its
+        # relevant content spread across MORE than 4 distinct pages, each
+        # scoring close to the others. Confirmed real case: Boeing's FY2022
+        # "materially important ongoing legal battles" question has
+        # relevant evidence on pages 4, 19, 113, 128, 146, 148, and 149 --
+        # the one page naming the Lion Air/Ethiopian Airlines litigation
+        # specifically (page 113) ranked 5th by score, just outside a
+        # 4-item cut, even though every one of those pages is genuinely
+        # about the same legal-proceedings topic. Each item can be up to
+        # 4000 chars (see max_chars above), so 6 items is still a modest
+        # ~24K-char evidence budget for a single LLM call.
         evidence_text = "\n".join(
             f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] "
-            f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=2000)}"
-            for item in evidence[:4]
+            f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=4000)}"
+            for item in sorted_evidence[:6]
         )
 
         pot_summary = ""
@@ -221,6 +268,21 @@ Available Evidence:
 3. Keep total response under 150 words.
 4. Do NOT repeat raw evidence verbatim or list variable names.
 5. If evidence is insufficient, state clearly what data is missing.
+6. If the question asks which SECURITIES (stock, bonds, notes) are
+   REGISTERED to trade on a national exchange, the authoritative source
+   is a "Securities registered pursuant to Section 12(b)/12(g) of the
+   Act" disclosure (usually on the filing's own cover page) -- trust
+   that table's own contents even if it says only common stock is
+   listed and no debt securities appear there at all. A separate
+   "Long-Term Debt" or similar footnote describing outstanding notes/
+   borrowings answers a DIFFERENT question (how much debt financing the
+   company has) and must never be substituted as if it were the
+   exchange-registration answer.
+7. If the question asks what DROVE or CAUSED a change, and the evidence
+   describes MULTIPLE distinct contributing factors (e.g. several
+   business segments, products, or line items each with their own
+   stated reason), name ALL of them that the evidence supports -- do
+   not stop after the first one or two that seem sufficient.
 """
 
         try:
