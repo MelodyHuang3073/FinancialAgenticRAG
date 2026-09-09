@@ -2758,11 +2758,28 @@ def _pick_best_in_group(
         return None
     aliases = _CANONICAL_TO_ALIASES.get(canonical, [canonical])
 
-    def sort_key(x: Dict) -> Tuple[int, int, int, int]:
+    def sort_key(x: Dict) -> Tuple[int, int, int, int, float]:
         score = _score_row_match(x["item"], aliases)
         year_match = 1 if preferred_year and x["year"] == preferred_year else 0
         is_net = 1 if _NET_QUALIFIER_RE.search(x["item"].lower()) else 0
-        return (score, year_match, is_net, -len(x["item"]))
+        # LAST-resort tie-break: prefer the larger absolute magnitude.
+        # Only ever decisive when every earlier tier ties, which for
+        # -len(item) requires the LABEL TEXT ITSELF to be identical
+        # between candidates -- a genuine financial-statement dollar line
+        # item is essentially never sub-1.0 in scale (reported in whole
+        # units or millions), whereas a same-captioned row silently
+        # duplicated from a per-share/EPS-impact reconciliation table
+        # (which reuses the SAME line-item caption as the real statement
+        # row, e.g. "Restructuring and impairment charges" appearing both
+        # as a $411M income-statement line AND as a "$0.30 EPS impact"
+        # entry in a footnote table) is typically a small decimal.
+        # Confirmed real case: PepsiCo FY2022 restructuring_costs tied
+        # {score, year_match, is_net, label length} between the real
+        # 411 and a same-labeled 0.3 EPS-impact row, and without this
+        # tier max() silently fell back to whichever was discovered
+        # first -- purely a function of retrieval order, not correctness.
+        magnitude = abs(x["val"])
+        return (score, year_match, is_net, -len(x["item"]), magnitude)
 
     return max(items, key=sort_key)
 

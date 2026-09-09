@@ -90,7 +90,7 @@ def test_pdfplumber_native_reconstruction_gets_correct_values():
         tables, _ = parser._reconstruct_table_from_word_positions(common)
 
     assert len(tables) == 1
-    joined = tables[0]
+    joined = tables[0][0]
     assert "Net sales" in joined and "34,229" in joined and "35,355" in joined and "32,184" in joined
     assert "Cost of sales" in joined and "19,232" in joined and "18,795" in joined and "16,605" in joined
     for line in joined.split("\n"):
@@ -108,7 +108,7 @@ def test_fitz_native_reconstruction_gets_correct_values():
     tables, _ = parser._reconstruct_table_from_word_positions(common)
 
     assert len(tables) == 1
-    joined = tables[0]
+    joined = tables[0][0]
     assert "Net sales" in joined and "34,229" in joined and "35,355" in joined and "32,184" in joined
     assert "Cost of sales" in joined and "19,232" in joined and "18,795" in joined and "16,605" in joined
 
@@ -120,13 +120,13 @@ def test_net_sales_row_values_in_correct_order_same_row():
         tables, _ = parser._reconstruct_table_from_word_positions(common)
 
     net_sales_line = next(
-        line for line in tables[0].split("\n") if line.strip().startswith("| Net sales ")
+        line for line in tables[0][0].split("\n") if line.strip().startswith("| Net sales ")
     )
     cells = [c.strip() for c in net_sales_line.strip().strip("|").split("|")]
     assert cells == ["Net sales", "34,229", "35,355", "32,184"]
 
     cost_of_sales_line = next(
-        line for line in tables[0].split("\n") if line.strip().startswith("| Cost of sales ")
+        line for line in tables[0][0].split("\n") if line.strip().startswith("| Cost of sales ")
     )
     cells2 = [c.strip() for c in cost_of_sales_line.strip().strip("|").split("|")]
     assert cells2 == ["Cost of sales", "19,232", "18,795", "16,605"]
@@ -207,7 +207,7 @@ def test_tight_column_spacing_still_detected_as_table():
         tables, _ = parser._reconstruct_table_from_word_positions(common)
 
     assert len(tables) == 1, "failed to detect the table at tight (27pt) real-world column spacing"
-    joined = tables[0]
+    joined = tables[0][0]
     for label, vals in TIGHT_ROWS:
         assert label in joined, f"missing line item: {label}"
         for v in vals:
