@@ -20,6 +20,7 @@ from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import LLMAnswerGenerator
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
+from app.tools.hybrid_retriever import is_attribution_query, is_geography_query
 
 
 class FinAgentRAGOrchestrator:
@@ -239,10 +240,29 @@ class FinAgentRAGOrchestrator:
                         target_year   = sub_q.get("target_year")
 
                         # ── Check if this (metric, year) is already in the buffer ──
+                        # Restricted to table_row evidence: only a structured
+                        # "Line Item: X | year: value" row's bare co-occurrence
+                        # of the metric name and year genuinely means a usable
+                        # value was already captured. A text_note chunk merely
+                        # CONTAINING both words somewhere is no such guarantee
+                        # -- prose routinely mentions a year and a metric name
+                        # in unrelated sentences, and this got dramatically
+                        # more likely once chunk_size grew from 800 to 3000
+                        # chars (a single chunk covers much more of a page's
+                        # MD&A prose). Confirmed real case: Activision
+                        # Blizzard's capex query at 3000-char chunks pulled in
+                        # a text_note chunk that happened to also say "2017"
+                        # and "revenue" incidentally, so ALL THREE of the
+                        # question's own separate revenue(2017/2018/2019)
+                        # sub-queries got silently skipped as "already
+                        # retrieved" -- no revenue evidence was ever actually
+                        # fetched, and the calculation fell back to 0.0.
                         def _already_has(metric: str, year: str) -> bool:
                             if not metric or not year:
                                 return False
                             for ev in evidence_buffer:
+                                if ev.get("type") != "table_row":
+                                    continue
                                 c = ev.get("content", "").lower()
                                 if year in c and metric.replace("_", " ") in c:
                                     return True
@@ -425,6 +445,13 @@ class FinAgentRAGOrchestrator:
             # depends on — see hybrid_retriever.search()'s prefer_narrative
             # docstring for the confirmed real case this fixes.
             prefer_narrative = non_numeric_formula is None
+            # Evaluated against the ORIGINAL question, not each individual
+            # sub-query below (a keyword-stuffed sub-query like "AMD
+            # Revenue Net Revenue" never repeats "what drove" phrasing even
+            # when the overall question plainly is an attribution question)
+            # -- see hybrid_retriever.is_attribution_query's docstring.
+            is_attribution = is_attribution_query(query)
+            is_geography = is_geography_query(query)
             new_hits = []
             for sq in search_queries:
                 new_hits.extend(self.vector_store.search(
@@ -433,6 +460,8 @@ class FinAgentRAGOrchestrator:
                     entity=classification.get("entity"),
                     statement_type_hint=statement_type_hint,  # Step 4
                     prefer_narrative=prefer_narrative,
+                    is_attribution=is_attribution,
+                    is_geography=is_geography,
                 ))
             new_hits = self._deduplicate_hits(new_hits)
             for hit in new_hits:

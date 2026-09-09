@@ -93,7 +93,8 @@ class FinancialVectorStoreManager:
 
     def search(self, query: str, top_k: int = 5, exclude_ids: List[str] = None,
                entity: str = None, section: str = None,
-               statement_type_hint: str = None, prefer_narrative: bool = False) -> List[Dict[str, Any]]:
+               statement_type_hint: str = None, prefer_narrative: bool = False,
+               is_attribution: bool = False, is_geography: bool = False) -> List[Dict[str, Any]]:
         if not self.retriever:
             return []
         return self.retriever.search(
@@ -101,5 +102,7 @@ class FinancialVectorStoreManager:
             entity=entity, section=section,
             statement_type_hint=statement_type_hint,
             prefer_narrative=prefer_narrative,
+            is_attribution=is_attribution,
+            is_geography=is_geography,
         )
 

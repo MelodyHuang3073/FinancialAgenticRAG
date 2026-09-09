@@ -33,7 +33,14 @@ _METRIC_NAMES: Dict[str, str] = {
     "total_liab":    "Total Liabilities 總負債",
     "equity":        "Shareholders Equity 股東權益 Total Equity",
     "cash":          "Cash Equivalents 現金及約當現金",
-    "capex":         "Capital Expenditure CapEx 資本支出",
+    # "Capital Spending" is PepsiCo's own cash-flow-statement line item
+    # name for capex (confirmed real case: PepsiCo FY2021 10-K page 53/63)
+    # -- without it here, a query built from this alias list alone never
+    # mentions the one term that actually appears in PepsiCo's own filing,
+    # so the real "Capital spending" row gets no BM25/line-item-boost
+    # advantage over an unrelated "Total ..." row that happens to sit near
+    # a heading mentioning "capital spending" in passing.
+    "capex":         "Capital Expenditure CapEx Capital Spending 資本支出",
     "ppe":           "Property Plant and Equipment PP&E Fixed Assets 不動產廠房及設備 固定資產",
     "depreciation":  "Depreciation Amortization 折舊",
     "ebitda":        "EBITDA",

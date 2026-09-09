@@ -732,6 +732,22 @@ class FinancialFileParser:
             numeric_words = [w for w in row if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())]
             if len(numeric_words) < 2:
                 continue
+            # A repeated multi-category year header's own numeric tokens
+            # (e.g. "2018 2017 2016 2018 2017 2016") are narrower than the
+            # real dollar values below them, so their x1 frequently drifts
+            # outside `tolerance` of the anchors those wider values
+            # produced -- landing on a scattered, effectively RANDOM
+            # subset of anchors rather than the real data rows' shared
+            # shape. Left in the vote, this is the same failure mode the
+            # empty-shape exclusion above already guards against (a row
+            # that's evidence of the ABSENCE of real structure, not FOR
+            # any shape), just non-empty instead of empty -- confirmed
+            # real case: 3M's FY2018 "Business Segment Information" page,
+            # where the two header rows' scattered shapes diluted the 8
+            # real data rows' dominant fraction to just under 0.5,
+            # abstaining the whole page's Tier 2 pass.
+            if self._is_bare_year_row(row):
+                continue
             matches = [self._assign_to_value_anchor(w["x1"], anchors, tolerance) for w in numeric_words]
             shape = tuple(sorted(i for i in matches if i is not None))
             if shape:
@@ -740,6 +756,26 @@ class FinancialFileParser:
             return 0.0
         most_common_count = Counter(shapes).most_common(1)[0][1]
         return most_common_count / len(shapes)
+
+    def _is_bare_year_row(self, row: List[Dict[str, Any]]) -> bool:
+        """
+        True when a row's value-like tokens are ALL bare 4-digit years (no
+        currency symbol, comma, decimal, or parens) -- a year-header line,
+        never real financial data. Shared by _dominant_anchor_shape_fraction
+        (so a repeated-year header's own scattered anchor votes don't
+        dilute/outvote the real data rows' shape) and the per-row
+        classification loop in _reconstruct_table_from_word_positions (so
+        such a row is treated as text/header-candidate, not a data row) --
+        see the callers' docstrings for the confirmed 3M FY2018 "Business
+        Segment Information" case this exists for.
+        """
+        value_like_tokens = [
+            w["text"].strip() for w in row
+            if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())
+        ]
+        return len(value_like_tokens) >= 2 and all(
+            re.fullmatch(r'(?:19|20)\d{2}', t) for t in value_like_tokens
+        )
 
     @staticmethod
     def _assign_to_value_anchor(x1: float, anchors: List[float], tolerance: float) -> Optional[int]:
@@ -774,7 +810,9 @@ class FinancialFileParser:
         numeric_tokens = [t for t in tokens if self._LAYOUT_VALUE_RE.fullmatch(t)]
         return len(numeric_tokens) > len(tokens) / 2
 
-    def _reconstruct_table_from_word_positions(self, words: List[Dict[str, Any]]) -> Tuple[List[str], str]:
+    def _reconstruct_table_from_word_positions(
+        self, words: List[Dict[str, Any]]
+    ) -> Tuple[List[Tuple[str, float]], str]:
         """
         Reconstruct table rows purely from word bounding-box coordinates,
         ignoring however the source engine grouped words into "lines" in
@@ -798,8 +836,14 @@ class FinancialFileParser:
             persistence (a section subheading between the year row and the
             first data row must not clobber a good year-header candidate).
 
-        Returns (markdown_tables, prose) where prose is every text-only
-        row's reconstructed text, in original top-to-bottom order.
+        Returns (tables, prose) where prose is every text-only row's
+        reconstructed text, in original top-to-bottom order, and `tables`
+        is a list of (markdown_table, top_y) pairs — top_y is the page
+        y-position of that specific table's own first row, for a caller
+        that needs to search nearby page text for a header FOR THAT
+        TABLE alone rather than reusing one shared reference point across
+        every table this call recovers (see current_first_row_top's
+        docstring for why that distinction matters).
         """
         rows = self._cluster_words_into_rows(words)
         if not rows:
@@ -831,9 +875,33 @@ class FinancialFileParser:
             return [], _rows_as_prose()
 
         tables: List[str] = []
+        # Each entry pairs with the SAME index in `tables` — the y-position
+        # (page top-coordinate) of that table's own first accumulated row.
+        # Needed so a caller resolving each table's year/period header from
+        # nearby page text (see _reinject_year_header_if_missing()) can use
+        # THIS table's own actual position instead of one shared reference
+        # point for every table this function recovers — see
+        # current_first_row_top's docstring for the confirmed real case.
+        table_positions: List[float] = []
         prose_lines: List[str] = []
         current_rows: List[Tuple[str, List[str]]] = []
         current_n_cols = [None]
+        # The y-position of the FIRST row in the CURRENT accumulating run
+        # — captured once per run, reset after each _flush(). Without
+        # this, every table this function recovers from one page shared
+        # a single caller-supplied reference point (typically the page's
+        # very first ruled-line table's own top), so a SECOND recovered
+        # table further down the SAME page would search for its header
+        # starting from the FIRST table's position instead of its own —
+        # silently inheriting an earlier, unrelated table's year/period
+        # context. Confirmed real case: Amazon's own FY2017 "Quarterly
+        # Results" footnote recovers TWO "Operating income" tables (one
+        # per fiscal year, 2016 and 2017) via this function on the same
+        # page; both searched for a nearby header from the SAME shared
+        # position, so the 2017 table's four quarters were mislabeled
+        # "Q1 2016".."Q4 2016" — the position that was actually correct
+        # for the OTHER (2016) table recovered earlier on the same page.
+        current_first_row_top = [None]
         # Which anchor INDICES were actually populated for the row run
         # currently being accumulated — not just how many. Two rows can
         # coincidentally produce the same value COUNT while their values
@@ -845,6 +913,12 @@ class FinancialFileParser:
         # count alone wouldn't.
         current_col_shape = [None]
         header_candidate = [""]
+        # The immediately-preceding text-only row's own line text — used
+        # only to detect a standalone "After"/"Thereafter" row sitting
+        # right above a header_candidate line, so the two physical rows
+        # of a page-wrapped "After\n2023" column header can be stitched
+        # back into one label. See the stitch site below.
+        prev_line_text = [""]
 
         def _flush():
             n_cols = current_n_cols[0]
@@ -870,11 +944,44 @@ class FinancialFileParser:
             # Safer to leave an implausibly-wide row as prose (same as
             # before this reconstruction existed at all) than to mislabel
             # segment data as a simple year comparison.
-            if n_cols is not None and n_cols > self._WORD_TABLE_MAX_VALUE_COLS:
+            #
+            # EXCEPT when the nearby header line itself shows a clean
+            # repeating year pattern matching n_cols exactly (see
+            # _extract_repeating_year_headers) -- that's the OTHER wide-row
+            # shape: multiple metric categories side by side (e.g. "Net
+            # Sales | Operating Income", each spanning the same 3 years),
+            # not a single-period segment breakdown. Confirmed real case:
+            # 3M's FY2018 "Business Segment Information" page has a 6-value
+            # "Industrial" row under a "(Millions) 2018 2017 2016 2018 2017
+            # 2016" header -- a genuine multi-year table, just wider than
+            # 4 columns because of the two side-by-side categories. This is
+            # a strong, narrow signal (exact repeat count match) that won't
+            # misfire on CVS's case, whose header never repeats a year
+            # sequence at all.
+            repeating_years = (
+                self._extract_repeating_year_headers(header_candidate[0], n_cols)
+                if header_candidate[0] and n_cols is not None else []
+            )
+            # A "Total | 2019 | ... | After 2023"-style header (see
+            # _extract_period_headers) is the OTHER legitimate reason a
+            # row can carry more value columns than _WORD_TABLE_MAX_VALUE_COLS
+            # expects -- a standard 10-K "Contractual Obligations" table,
+            # not a single-period segment breakdown like CVS's. Same exact-
+            # count-match safety property as repeating_years.
+            period_headers = (
+                self._extract_period_headers(header_candidate[0], n_cols)
+                if header_candidate[0] and n_cols is not None else []
+            )
+            if (
+                n_cols is not None and n_cols > self._WORD_TABLE_MAX_VALUE_COLS
+                and not repeating_years and not period_headers
+            ):
                 for label, values in current_rows:
                     prose_lines.append((label + "  " + "  ".join(values)).strip())
             elif len(current_rows) >= self._WORD_TABLE_MIN_ROWS:
-                years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
+                years = repeating_years or period_headers or (
+                    self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
+                )
                 headers = ["Line Item"] + [
                     years[i] if i < len(years) else f"Col{i + 1}"
                     for i in range(n_cols)
@@ -883,12 +990,16 @@ class FinancialFileParser:
                 md = self._table_to_markdown(table)
                 if md:
                     tables.append(md)
+                    table_positions.append(
+                        current_first_row_top[0] if current_first_row_top[0] is not None else 0.0
+                    )
             else:
                 for label, values in current_rows:
                     prose_lines.append((label + "  " + "  ".join(values)).strip())
             current_rows.clear()
             current_n_cols[0] = None
             current_col_shape[0] = None
+            current_first_row_top[0] = None
 
         for row_words in rows:
             cells: List[List[str]] = [[] for _ in range(len(anchors) + 1)]
@@ -947,6 +1058,31 @@ class FinancialFileParser:
                 and len(numeric_rest) >= max(1, len(rest_cols) // 2)
             )
 
+            # A row whose value-like tokens are ALL bare 4-digit years (no
+            # currency symbol, comma, decimal, or parens) is a year-header
+            # line, never real financial data -- even when it just got
+            # classified as a data row above. A repeated multi-category
+            # year header (e.g. "(Millions) 2018 2017 2016 2018 2017 2016"
+            # for a table with TWO metric groups -- Net Sales, Operating
+            # Income -- each spanning the same 3 years) is exactly the
+            # case this catches: year tokens are narrower than the real
+            # dollar values below them, so their x1 often drifts outside
+            # `tolerance` of the anchors those wider values produced --
+            # some years land on an anchor, the rest spill into cell[0]
+            # and glue onto the label. The row that survives looks like a
+            # tiny "data row" (a corrupted label plus 1-2 stray numbers),
+            # gets flushed alone as too short to be a table (< MIN_ROWS),
+            # and is discarded as prose -- so header_candidate never
+            # captures the one line that actually names this table's
+            # years, and every real data row below falls back to generic
+            # Col4/Col5/Col6 placeholders. Confirmed real case: 3M's own
+            # FY2018 "Business Segment Information" page. Forcing this
+            # row through the text/header-candidate branch instead fixes
+            # both problems: the row is no longer corpus noise, and
+            # header_candidate gets the real repeated-year text intact.
+            if is_data_row and self._is_bare_year_row(row_words):
+                is_data_row = False
+
             if is_data_row:
                 # Drop empty cells (matching rest_cols above) — a column
                 # bucket that's genuinely unused by every data row (e.g.
@@ -961,6 +1097,8 @@ class FinancialFileParser:
                 col_shape = tuple(i for i, c in enumerate(cell_texts[1:]) if c)
                 if current_col_shape[0] is not None and col_shape != current_col_shape[0]:
                     _flush()
+                if current_first_row_top[0] is None:
+                    current_first_row_top[0] = row_words[0]["top"] if row_words else 0.0
                 current_rows.append((first_col, values))
                 current_n_cols[0] = len(values)
                 current_col_shape[0] = col_shape
@@ -993,10 +1131,25 @@ class FinancialFileParser:
                 if line_text:
                     prose_lines.append(line_text)
                     if self._extract_year_headers(line_text) or not header_candidate[0]:
+                        # A real 10-K commonly page-wraps a table's LAST
+                        # column header ("After" over "2023") across two
+                        # separate physical rows even though it's
+                        # logically one column label -- stitch a
+                        # standalone "After"/"Thereafter" row sitting
+                        # immediately above this one onto its own trailing
+                        # bare year, same as _inject_missing_year_header's
+                        # Tier 1 equivalent (see that fix's docstring for
+                        # the confirmed 3M FY2018 "Contractual Obligations"
+                        # case this covers).
+                        if prev_line_text[0].strip().lower() == "after":
+                            m = re.search(r'(?:20|19)\d{2}$', line_text)
+                            if m:
+                                line_text = line_text[:m.start()] + f"After {m.group(0)}"
                         header_candidate[0] = line_text
+                    prev_line_text[0] = line_text
         _flush()
 
-        return tables, "\n".join(prose_lines)
+        return list(zip(tables, table_positions)), "\n".join(prose_lines)
 
     @staticmethod
     def _compact_row_cells(row: list) -> list:
@@ -1197,14 +1350,54 @@ class FinancialFileParser:
                 n_value_cols_q = max((len(r) - 1 for r in rows[1:]), default=4)
                 n_value_cols_q = max(n_value_cols_q, 4)
                 quarter_labels = ["Q1", "Q2", "Q3", "Q4"]
-                synthesized_q = [rows[0][0] or "Line Item"] + [
+                synthesized_q = ["Line Item"] + [
                     f"{quarter_labels[i]} {yr}" if i < 4 else f"Col{i + 1}"
                     for i in range(n_value_cols_q)
                 ]
                 return [synthesized_q, rows[0]] + rows[1:]
 
         years: list = []
-        for line in reversed(above_text.split("\n")):
+        above_lines = above_text.split("\n")
+        for idx in range(len(above_lines) - 1, -1, -1):
+            line = above_lines[idx]
+            # A repeating year sequence (e.g. "2018 2017 2016 2018 2017
+            # 2016" for a table with two metric categories side by side,
+            # each spanning the same 3 years) exactly fills every value
+            # column when it matches — preferred over the plain deduped
+            # extraction below, which would collapse it to 3 years and
+            # leave the extra columns as generic Col4/Col5/Col6 fallbacks.
+            # See _extract_repeating_year_headers's docstring.
+            repeating = (
+                self._extract_repeating_year_headers(line, n_value_cols)
+                if n_value_cols else []
+            )
+            if repeating:
+                years = repeating
+                break
+            # A "Total | 2019 | ... | After 2023"-style header (see
+            # _extract_period_headers) also exactly fills every value
+            # column — tried before the plain year-dedup fallback below,
+            # which would otherwise drop "Total"/"After 2023" entirely and
+            # shift every year one column to the left.
+            period_headers = (
+                self._extract_period_headers(line, n_value_cols)
+                if n_value_cols else []
+            )
+            if period_headers:
+                # A real 10-K commonly page-wraps the LAST column's own
+                # 2-line header ("After" over "2023") across two separate
+                # physical text lines even though it's logically one
+                # column label — this line only ever sees the bottom half
+                # ("2023"), duplicating the previous column's own year.
+                # Confirmed real case: 3M's FY2018 "Contractual
+                # Obligations" table, where "After" sits alone on the line
+                # immediately above "(Millions) Total 2019 ... 2023 2023".
+                if idx > 0 and period_headers[-1].isdigit():
+                    prev_line = above_lines[idx - 1].strip()
+                    if prev_line.lower() == "after":
+                        period_headers[-1] = f"After {period_headers[-1]}"
+                years = period_headers
+                break
             candidate = self._extract_year_headers(line)
             if len(candidate) >= min_years_needed:
                 years = candidate
@@ -1213,7 +1406,20 @@ class FinancialFileParser:
         if years:
             n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
             n_value_cols = max(n_value_cols, len(years))
-            synthesized = [rows[0][0] or "Line Item"] + [
+            # The synthesized header's own first cell is always the
+            # generic "Line Item" column label — matching the fallback
+            # branch below (line ~1348) that already does this — NOT
+            # rows[0][0]'s own data value. rows[0] is kept as an ordinary
+            # DATA row right after this header (see docstring), so using
+            # its label here duplicated it into the header too, making a
+            # row's own line-item text look like a column concept name.
+            # Confirmed real case: 3M's FY2018 "Business Segment
+            # Information" page produced a header reading "| Industrial |
+            # 2018 | 2017 | 2016 | ... |" over a table whose first DATA
+            # row's label is ALSO "Industrial" (the segment name) — every
+            # other segment row (Health Care, Consumer, ...) then sat
+            # under a header cell naming an unrelated segment.
+            synthesized = ["Line Item"] + [
                 years[i] if i < len(years) else f"Col{i + 1}" for i in range(n_value_cols)
             ]
             return [synthesized, rows[0]] + rows[1:]
@@ -1484,16 +1690,22 @@ class FinancialFileParser:
             recovered_tables, recovered_prose = [], None
 
         if recovered_tables:
-            # Same year-header context as Tier 1's own tables (usually a
-            # single "As of .../For the years ended ..." line near the
-            # top of a page's one real statement) — reuse the first
-            # ruled-line group's top as the reference point for "text
-            # above this" so a recovered table missing its own header
-            # gets the same treatment Tier 1 tables already get.
-            header_ref_top = merged_groups[0][0].bbox[1] if merged_groups else 0
+            # Each recovered table's OWN top position (see
+            # _reconstruct_table_from_word_positions's docstring) is used
+            # as the reference point for "text just above THIS table" —
+            # NOT one shared position for every table recovered on the
+            # page (the first ruled-line group's own top), which used to
+            # make a SECOND (or later) recovered table search from the
+            # FIRST one's position instead of its own. Falls back to the
+            # first ruled-line group's top only when a table's own
+            # position wasn't captured for some reason (top == 0.0, e.g.
+            # an empty `rows` edge case upstream).
+            fallback_ref_top = merged_groups[0][0].bbox[1] if merged_groups else 0
             recovered_tables = [
-                self._reinject_year_header_if_missing(md, page, header_ref_top)
-                for md in recovered_tables
+                self._reinject_year_header_if_missing(
+                    md, page, top if top else fallback_ref_top
+                )
+                for md, top in recovered_tables
             ]
             md_tables.extend(recovered_tables)
             return md_tables, recovered_prose
@@ -1568,9 +1780,12 @@ class FinancialFileParser:
         # ── Tier 2: word-coordinate reconstruction (pdfplumber-native) ──
         try:
             common_words = self._pdfplumber_words_to_common(page.extract_words() or [])
-            word_tables, word_prose = self._reconstruct_table_from_word_positions(common_words)
+            word_tables_with_pos, word_prose = self._reconstruct_table_from_word_positions(common_words)
         except Exception:
-            word_tables, word_prose = [], ""
+            word_tables_with_pos, word_prose = [], ""
+        # This call site doesn't need per-table position (no header
+        # re-injection happens here) — plain markdown strings only.
+        word_tables = [md for md, _top in word_tables_with_pos]
         if word_tables:
             return word_tables, word_prose
 
@@ -1737,17 +1952,33 @@ class FinancialFileParser:
     #: Confirmed real case: Best Buy's own TOC produced a corpus row
     #: reading "Line Item: PART II | 2023: 21" — the section's STARTING
     #: PAGE NUMBER (21) got labeled as if it were a $21 million dollar
-    #: figure for fiscal year 2023. "TABLE OF CONTENTS" is standard,
-    #: near-universal SEC 10-K boilerplate that appears as its own heading
-    #: line at the very top of this exact page, making it a reliable,
-    #: general signal — checked only within the page's own opening text
-    #: (not the whole page) so an ordinary content page that merely
-    #: mentions the phrase in passing elsewhere doesn't get excluded by
-    #: mistake.
+    #: figure for fiscal year 2023.
+    #:
+    #: The bare phrase "Table of Contents" alone is NOT a reliable signal
+    #: on its own — many EDGAR-formatted 10-Ks print it as a small
+    #: running/navigation header at the very top of EVERY page throughout
+    #: the ENTIRE filing (a "back to contents" convention), not just the
+    #: one real listing page. Confirmed real case, a severe regression:
+    #: Netflix's FY2017 10-K balance sheet page itself starts with
+    #: "Table of Contents\nNETFLIX, INC.\nCONSOLIDATED BALANCE SHEETS\n..."
+    #: — an earlier version of this check keyed on the bare phrase alone
+    #: and misclassified the balance sheet (and most other content pages
+    #: across the corpus) as the TOC, routing them to plain-text chunking
+    #: and silently losing the vast majority of structured table_row
+    #: passages corpus-wide (confirmed: total passage count dropped from
+    #: ~74,600 to ~59,200 across all 48 PDFs from this alone). The REAL
+    #: listing page is reliably distinguished by ALSO containing at least
+    #: one "PART I"/"PART II" section marker within the same opening
+    #: window — a running header on an ordinary content page never does.
     _TABLE_OF_CONTENTS_RE = re.compile(r'\btable\s+of\s+contents\b', re.IGNORECASE)
+    _TOC_PART_MARKER_RE = re.compile(r'\bpart\s+(?:i|ii|iii|iv)\b', re.IGNORECASE)
 
     def _is_table_of_contents_page(self, page_text: str) -> bool:
-        return bool(self._TABLE_OF_CONTENTS_RE.search(page_text[:300]))
+        zone = page_text[:600]
+        return bool(
+            self._TABLE_OF_CONTENTS_RE.search(zone)
+            and self._TOC_PART_MARKER_RE.search(zone)
+        )
 
     def _is_financial_table_page(self, text: str) -> bool:
         """Return True if the page looks like a financial statement table."""
@@ -1771,6 +2002,90 @@ class FinancialFileParser:
             if yr not in years:
                 years.append(yr)
         return years if years else []
+
+    def _extract_repeating_year_headers(self, text: str, n_cols: int) -> list:
+        """
+        Detect a header whose year tokens repeat as a clean multiple across
+        n_cols columns -- e.g. "(Millions) 2018 2017 2016 2018 2017 2016"
+        for a 6-value-column row that's really TWO metric categories (Net
+        Sales, Operating Income) side by side, each spanning the SAME
+        3-year span, not a genuine 6-year comparison. Returns exactly
+        n_cols year strings (the unique year sequence tiled to fill every
+        column) when the header shows this repeating structure, else [].
+
+        Distinct from _extract_year_headers's plain dedup, and deliberately
+        narrow: only fires when the RAW (non-deduplicated) year count in
+        the header line exactly equals n_cols and is a clean whole-number
+        repetition of its own unique prefix. A wide row whose header does
+        NOT show this (e.g. a single "2018" next to a genuinely one-period,
+        multi-segment breakdown -- CVS Health's segment table, where 6
+        value columns are 6 different segments for ONE year, not repeated
+        year groups) must fall through unrecognised, so it still gets
+        caught by _WORD_TABLE_MAX_VALUE_COLS's width cap in the caller
+        rather than being mislabeled as a multi-year table.
+        """
+        if n_cols <= 0:
+            return []
+        header_zone = text[:400]
+        raw_years = [m.group(1) for m in self._YEAR_HEADER_RE.finditer(header_zone)]
+        if len(raw_years) != n_cols:
+            return []
+        unique = list(dict.fromkeys(raw_years))
+        k = len(unique)
+        if k < 2 or n_cols % k != 0 or n_cols // k < 2:
+            return []
+        if raw_years != unique * (n_cols // k):
+            return []
+        return raw_years
+
+    #: A standard 10-K "Contractual Obligations" table headers its columns
+    #: "Total | 2019 | 2020 | 2021 | 2022 | 2023 | After 2023" — a lifetime
+    #: TOTAL column and a catch-all THEREAFTER/AFTER-<year> bucket mixed in
+    #: with the bare years. Ordered so "After 2023" / "Thereafter" match as
+    #: ONE token before the bare-year alternative can independently match
+    #: just the trailing "2023".
+    _PERIOD_TOKEN_RE = re.compile(
+        r'\bAfter\s+(?:20|19)\d{2}\b|\bThereafter\b|\bTotal\b|\b(?:20|19)\d{2}\b',
+        re.IGNORECASE,
+    )
+
+    def _extract_period_headers(self, text: str, n_cols: int) -> list:
+        """
+        Detect a header mixing bare years with the two non-year period
+        labels standard in a 10-K's "Contractual Obligations" table:
+        "Total" (a lifetime/summary column) and "After <year>" or
+        "Thereafter" (a catch-all bucket for everything past the named
+        years) -- e.g. "(Millions) Total 2019 2020 2021 2022 2023 After
+        2023". Plain _extract_year_headers only recognises bare years, so
+        it silently DROPS "Total" and "After 2023" from the header and
+        shifts every following column's label left by one: the row's
+        first value (its lifetime Total) ends up mislabeled as if it were
+        the first year, that year's real value sits under the NEXT year's
+        label, and so on, with the final "After 2023" bucket falling off
+        the end into a generic "Col6"/"Col7" placeholder. Confirmed real
+        case: 3M's FY2018 "Contractual Obligations" table.
+
+        Returns exactly n_cols period-label strings (each a bare year,
+        "Total", "Thereafter", or "After <year>") when the header's own
+        period-token count matches n_cols exactly, else []. Requiring an
+        exact count match keeps this from firing on an unrelated line that
+        merely happens to contain the word "Total" once.
+        """
+        if n_cols <= 0:
+            return []
+        header_zone = text[:400]
+        tokens = []
+        for m in self._PERIOD_TOKEN_RE.finditer(header_zone):
+            t = re.sub(r'\s+', ' ', m.group(0)).strip()
+            tokens.append("Total" if t.lower() == "total" else t.title())
+        if len(tokens) != n_cols:
+            return []
+        # Must actually contain a real bare year somewhere (never JUST
+        # "Total"/"Thereafter" repeated) — otherwise this is indistinguishable
+        # from any other short line that happens to say "Total" n_cols times.
+        if not any(re.fullmatch(r'(?:20|19)\d{2}', t) for t in tokens):
+            return []
+        return tokens
 
     def _linearize_table_page(
         self,
@@ -1878,7 +2193,24 @@ class FinancialFileParser:
         the shared corpus record here.
         """
         source_text = parent_source_text if parent_source_text is not None else text
-        chunks = chunk_text(text, chunk_size=800, overlap=120, min_chunk_size=100)
+        # 3000 chars (not 800) -- matches FinanceBench's own reference
+        # chunk size. A page's per-chunk boosts (the year-match multiplier
+        # in hybrid_retriever.search(), in particular) only ever look at
+        # the CANDIDATE chunk's own text, not the full page -- an 800-char
+        # split routinely separates a page's own date/year line from the
+        # actual data the question needs several sentences later, so the
+        # chunk that actually answers the question misses a boost that a
+        # neighboring, less relevant chunk (which happens to still contain
+        # the date line) gets instead. Confirmed real case: 3M's own
+        # 10-Q cover page splits "For the quarterly period ended June 30,
+        # 2023" into one 800-char chunk and the "Securities registered...
+        # 1.500% Notes due 2026 (MMM26)..." table into a DIFFERENT chunk
+        # with no "2023" of its own -- at 3000 chars both land in the same
+        # chunk. parent_content already gives the LLM the full page
+        # regardless of chunk size (see this function's own docstring
+        # above), so this only affects which chunk WINS RETRIEVAL, not
+        # what the LLM ultimately sees once it's retrieved.
+        chunks = chunk_text(text, chunk_size=3000, overlap=120, min_chunk_size=100)
         if not chunks and text.strip():
             chunks = [text.strip()]
 
@@ -2075,9 +2407,13 @@ class FinancialFileParser:
                         # ── Tier 2: fitz-native word-coordinate reconstruction ──
                         try:
                             common_words = self._fitz_words_to_common(page.get_text("words"))
-                            word_tables, word_prose = self._reconstruct_table_from_word_positions(common_words)
+                            word_tables_with_pos, word_prose = self._reconstruct_table_from_word_positions(common_words)
                         except Exception:
-                            word_tables, word_prose = [], ""
+                            word_tables_with_pos, word_prose = [], ""
+                        # This call site doesn't need per-table position
+                        # (no header re-injection happens here) — plain
+                        # markdown strings only.
+                        word_tables = [md for md, _top in word_tables_with_pos]
                         if word_tables:
                             prose_for_page = self._clean_text_content(word_prose)
                             if not self._is_readable(prose_for_page, min_alnum=1):
