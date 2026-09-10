@@ -167,11 +167,37 @@ def _strip_list_markers(text: str) -> str:
     return _LIST_MARKER_RE.sub("", text or "")
 
 
+#: A gold answer formatted as a bullet list sometimes uses a bare "-" as
+#: the bullet marker with NO space before the item's own text ("-100%
+#: equity interest of a flexibles manufacturing company..."), which
+#: _NUM_RE cannot tell apart from a genuine negative number -- it reads
+#: "-100" as literally negative one hundred, when the "-" is pure list
+#: punctuation and the real fact is a plain positive "100%". Requires a
+#: SPACE then a LETTER right after the number (the shape of "-100%
+#: equity...", i.e. a bullet item with descriptive text following it) --
+#: NOT just "dash at line start before a digit", which would also
+#: (wrongly) rewrite a gold answer that is ITSELF just a single bare
+#: negative number with nothing else on the line, e.g. AES's ROA answer
+#: "-0.02" or General Mills' CCC answer "-3.7" -- both entire strings,
+#: not bullet items, where the leading "-" is a genuine minus sign that
+#: must be left alone. Confirmed real case: Amcor's acquisitions gold
+#: answer ("-100% equity interest...\n- 100% equity interest...\n
+#: -acquisition of a New Zealand-based...") extracted as check_nums
+#: [-100, 100] instead of [100, 100], and no model answer was ever going
+#: to coincidentally state a negative -100 for what are actually two
+#: 100%-owned acquisitions.
+_LEADING_BULLET_DASH_RE = re.compile(r"(?m)^-(?=\d[\d,]*\.?\d*%?\s+[A-Za-z])")
+
+
+def _split_bullet_dash(text: str) -> str:
+    return _LEADING_BULLET_DASH_RE.sub("- ", text or "")
+
+
 def _numbers_in(text: str):
     """Extract all numeric tokens (commas and '$' stripped) from a string
     as floats."""
     out = []
-    for m in _NUM_RE.findall(_strip_list_markers(_expand_fy_shorthand(text))):
+    for m in _NUM_RE.findall(_split_bullet_dash(_strip_list_markers(_expand_fy_shorthand(text)))):
         try:
             out.append(float(m.replace(",", "").replace("$", "")))
         except ValueError:

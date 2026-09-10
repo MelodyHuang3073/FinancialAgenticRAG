@@ -349,7 +349,13 @@ Available Evidence:
    not evidence that IT was acquired in, or is otherwise relevant to, the
    fiscal year actually being asked about. When in doubt about whether a
    specific fact you're about to cite is truly supported for the exact
-   period asked, leave it out rather than include it.
+   period asked, leave it out rather than include it. When listing
+   ACQUISITIONS specifically, also state the OWNERSHIP STAKE acquired
+   (e.g. "100% equity interest", "all of the outstanding shares") if the
+   evidence explicitly states it for that deal -- filings routinely
+   phrase this detail right alongside the target's name and purchase
+   price, and it is often the specific fact a question about acquisitions
+   is checking for, not just the dollar amount.
 9. If the question asks whether the company paid/declared DIVIDENDS, and
    the evidence contains a PER-SHARE dividend rate (e.g. "$0.01 per
    share", "$0.55 per share dividend") in addition to an aggregate dollar
