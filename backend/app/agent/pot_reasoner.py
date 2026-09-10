@@ -959,20 +959,43 @@ def _is_quarterly_breakdown_table(content: str) -> bool:
     return False
 
 
-def _score_row_match(label: str, aliases: List[str]) -> int:
+def _score_row_match(label: str, aliases: List[str]) -> float:
     """
     How well does a table row's own label match one of a variable's
     aliases? Generic across every canonical/alias pair — never special-
     cased to a specific line item.
-      2 = the label IS (once normalized) exactly one of the aliases, or
-          exactly "total {alias}" — a genuine total/subtotal row.
-      1 = the alias appears only as a substring of a longer label — a
-          sub-item, an "Other X" line, or a compound "X and Y" label.
-          Real, but not the total; callers should flag results built
-          from a score-1 match as approximate.
-      0 = no real match at all, including a substring match immediately
-          preceded by a negation prefix ("non-", "not ") — e.g. "current
-          assets" inside "non-current assets" doesn't count.
+      2   = the label IS (once normalized) exactly one of the aliases, or
+            exactly "total {alias}" — a genuine total/subtotal row.
+      1.x = the alias appears only as a substring of a longer label — a
+            sub-item, an "Other X" line, or a compound "X and Y" label.
+            Real, but not the total; callers should flag results built
+            from a score-1.x match as approximate. The fractional part
+            is the length (in characters, /1000) of the LONGEST alias
+            that matched as a substring — checks every alias rather than
+            returning on the first hit, so a row matching a specific
+            multi-word alias ("depreciation and amortization") always
+            outscores one matching only a short generic word from the
+            SAME list ("amortization") that a shorter/later alias also
+            happens to contain. Confirmed real case: Netflix's FY2015
+            cash-flow statement has both "Depreciation and amortization
+            of property, equipment and intangibles" (62,283 — the real
+            D&A figure for EBITDA) and "Amortization of streaming
+            content assets" (3,405,382 — a completely different, much
+            larger concept that happens to contain the bare word
+            "amortization") for the "depreciation" canonical's alias
+            list ["depreciation and amortization", ..., "amortization",
+            ...]. Both used to score a flat 1 (first-alias-hit, no
+            specificity signal), so they tied at the priority-tuple
+            level in _extract_formula_guided() and fell through to its
+            5%-of-largest magnitude-outlier filter, which then discarded
+            the real 62,283 figure for being under 5% of the wrong
+            3,405,382 one -- inflating the EBITDA margin 10x. Scoring by
+            matched-alias specificity lets the real row win outright at
+            the priority-tuple stage, before that filter is ever
+            reached.
+      0   = no real match at all, including a substring match immediately
+            preceded by a negation prefix ("non-", "not ") — e.g. "current
+            assets" inside "non-current assets" doesn't count.
     When multiple rows compete for the same (placeholder, year), the
     highest score wins — this is what makes "Total net revenues" beat
     "Subscription, licensing, and other revenues" for a revenue lookup,
@@ -1012,6 +1035,7 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
     # a disqualifying mismatch, exactly like the carve-out check above.
     # See _PER_SHARE_ANYWHERE_RE's docstring for the confirmed real case.
     row_is_per_share = bool(_PER_SHARE_ANYWHERE_RE.search(label_norm))
+    best_substring_len = 0
     for alias in aliases:
         a = alias.lower().strip()
         if not a:
@@ -1025,7 +1049,9 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
             continue
         if label_norm == a or label_norm == f"total {a}":
             return 2
-        return 1
+        best_substring_len = max(best_substring_len, len(a))
+    if best_substring_len:
+        return 1 + min(best_substring_len, 999) / 1000.0
     return 0
 
 
@@ -1174,6 +1200,7 @@ def _extract_formula_guided(
     formula_entry: Dict[str, Any],
     query_years: List[str],
     entity: str = "",
+    q_lower: str = "",
 ) -> Tuple[Dict[str, float], Dict[str, List[Tuple[float, str]]], Dict[str, Dict[str, Any]]]:
     """
     For each required variable in formula_entry, search evidence for a chunk whose
@@ -1228,7 +1255,23 @@ def _extract_formula_guided(
     """
     var_aliases = get_variable_aliases(formula_entry)
     is_multi_year = formula_entry.get("multi_year", False)
-    is_period_average = formula_entry.get("period_average", False)
+    # A formula being CAPABLE of an N-year average (period_average=True
+    # in financial_formula_library.py) doesn't mean every question that
+    # matches it wants that average -- e.g. ebitda_margin_unadjusted also
+    # matches a plain single-year "what is the FY2015 unadjusted EBITDA %
+    # margin" question, which wants ONLY FY2015's own values, not a
+    # blended average across every year the retrieved evidence happens to
+    # cover. Same gating _build_calculation_code() already applies to its
+    # OWN is_period_average check below (kept in sync deliberately -- see
+    # that check's docstring for why "average"/"avg"/"平均" is the
+    # signal). Confirmed real case: Netflix FY2015 unadjusted EBITDA
+    # margin averaged op_income/depreciation/revenue across FIVE years
+    # (2013-2017, every year present in the retrieved evidence) instead
+    # of using FY2015 alone, turning a correct 5.4% answer into a wrong
+    # 6.59% one blended from unrelated years.
+    is_period_average = formula_entry.get("period_average", False) and any(
+        kw in q_lower for kw in ("average", "avg", "平均")
+    )
 
     # candidates[placeholder] = [(value, year, score, source, is_primary,
     # evidence_index, line_item_label), ...] -- every match found, BEFORE
@@ -3032,7 +3075,17 @@ def _build_calculation_code(
                 yrs = 1.0
             code_lines.append(f"# CAGR: {v1['item']}")
             code_lines.append(f"result_cagr = cagr({v1['code_key']}, {v2['code_key']}, {yrs})")
-            code_lines.append("result = round(result_cagr, 2)")
+            # Rounded to 4dp, not 2dp: the question's OWN requested
+            # rounding precision (e.g. "round to one decimal place") is
+            # applied downstream by the LLM reading this printed value --
+            # rounding to only 2dp here first is a DOUBLE ROUND that can
+            # flip the final digit when the true value sits near a
+            # boundary the 2dp figure lands exactly on. Confirmed real
+            # case: Lockheed Martin's true FY2020->FY2022 revenue CAGR is
+            # 0.4479...%; rounded to 2dp first it becomes exactly 0.45%,
+            # which then rounds to 0.5% at 1dp -- one digit off from the
+            # correct single-rounding answer of 0.4%.
+            code_lines.append("result = round(result_cagr, 4)")
             label = v1['item']
             y1, y2 = v1['year'], v2['year']
             code_lines.append(f"print(f'{label} CAGR ({y1}->{y2}): {{result}}%')")
@@ -3047,7 +3100,9 @@ def _build_calculation_code(
         if v1 and v2:
             code_lines.append(f"# YoY: {v1['item']}")
             code_lines.append(f"result_yoy = yoy({v1['code_key']}, {v2['code_key']})")
-            code_lines.append("result = round(result_yoy, 2)")
+            # 4dp, not 2dp -- same double-rounding rationale as the CAGR
+            # branch just above.
+            code_lines.append("result = round(result_yoy, 4)")
             label = v1['item']
             y1, y2 = v1['year'], v2['year']
             code_lines.append(f"print(f'{label} YoY Growth ({y1}->{y2}): {{result}}%')")
@@ -3271,7 +3326,7 @@ class ProgramOfThoughtReasoner:
         duplicate_warnings: List[str] = []
         if formula_entry:
             resolved_formula, resolved_formula_series, resolved_formula_meta = _extract_formula_guided(
-                evidence_list, formula_entry, query_years, entity
+                evidence_list, formula_entry, query_years, entity, q_lower
             )
             duplicate_warnings = _detect_and_strip_duplicate_values(
                 resolved_formula, resolved_formula_series, resolved_formula_meta
