@@ -13,7 +13,7 @@ FinAgent-RAG Orchestrator
 from typing import Dict, Any, List, Optional
 
 from app.rag.vector_store import FinancialVectorStoreManager
-from app.agent.question_classifier import FinanceBenchClassifier
+from app.agent.question_classifier import FinanceBenchClassifier, _detect_narrative_topic_query
 from app.agent.decomposer import QueryDecomposer
 from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year
 from app.agent.verifier import TriCheckSelfVerifier
@@ -187,8 +187,8 @@ class FinAgentRAGOrchestrator:
         # FY2021->FY2022 gross margin trend (4.8% -> 5.3%) is a clean,
         # directly answerable "Yes".
         retrieval_years = _with_implied_trend_year(classification["years"], query.lower())
+        query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
         if formula_entry:
-            query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
             sub_questions = self._build_formula_subquestions(
                 formula_entry, query_entity, retrieval_years
             )
@@ -203,6 +203,39 @@ class FinAgentRAGOrchestrator:
             sub_questions = self._build_non_numeric_subquestions(
                 query, answer_mode, classification.get("target_metrics")
             )
+
+        # Both NUMERIC sub-question builders above (formula-guided and
+        # LLM-decomposed) search purely on the target line item's OWN
+        # alias vocabulary (e.g. "dividends paid to common shareholders"),
+        # which reliably finds the STRUCTURED statement row (a dollar
+        # total) but never a filing's plain-English narrative sentence
+        # stating the same fact in different words (e.g. Item 5's "we
+        # maintained an annual dividend of $0.01 per share throughout
+        # 2022") -- a prose detail FinanceBench gold answers often want
+        # alongside the total, that alias-matching alone will never
+        # surface within RETRIEVAL_TOP_K. Reuses the same narrative-topic
+        # vocabulary bridge the non-numeric path already relies on
+        # (_detect_narrative_topic_query) as one extra retrieval step --
+        # additive only, appended after whichever NUMERIC path already
+        # ran, never replacing its steps. A no-op for the non-numeric
+        # `else` branch above, which already gets topic-aware queries via
+        # classification["retrieval_queries"]. Confirmed real case: "Has
+        # MGM Resorts paid dividends to common shareholders in FY2022?"
+        # retrieved the correct $4,048K cash-flow total but never the
+        # $0.01/share sentence, because "dividends paid to common
+        # shareholders" has almost no vocabulary overlap with "annual
+        # dividend...per share".
+        if answer_mode == "NUMERIC":
+            topic_query = _detect_narrative_topic_query(query.lower())
+            if topic_query:
+                sub_questions.append({
+                    "step": len(sub_questions) + 1,
+                    "type": "retrieval",
+                    "query": f"{query_entity} {topic_query}".strip(),
+                    "target_metric": "",
+                    "target_year": "",
+                    "source": "narrative_topic",
+                })
 
         trace_steps.append({
             "step_name": "Query Decomposition",

@@ -15,6 +15,25 @@ if load_dotenv is not None and os.path.exists(ENV_PATH):
     load_dotenv(ENV_PATH)
 
 
+def _is_reasoning_model(model_name: str) -> bool:
+    """
+    True for OpenAI's reasoning-tier models (gpt-5 family, o1/o3/o4), which
+    reject any non-default `temperature` value and require
+    `max_completion_tokens` instead of `max_tokens` -- calling them with
+    the same params used for gpt-4o-mini raises a 400 BadRequestError
+    ("Unsupported value: 'temperature' does not support 0.2 with this
+    model. Only the default (1) value is supported"), which the broad
+    `except Exception: return None` around every LLM call here silently
+    swallows into an empty answer instead of surfacing the real cause.
+    Duplicated in decomposer.py (same rationale as this module's other
+    small duplicated helpers) since that module builds its own OpenAI
+    call independently and there's no shared client-config module to
+    import from.
+    """
+    m = (model_name or "").lower()
+    return m.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
 def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_rows: int = 10) -> str:
     """
     Truncate one evidence item's content for the LLM prompt.
@@ -331,18 +350,31 @@ Available Evidence:
    fiscal year actually being asked about. When in doubt about whether a
    specific fact you're about to cite is truly supported for the exact
    period asked, leave it out rather than include it.
+9. If the question asks whether the company paid/declared DIVIDENDS, and
+   the evidence contains a PER-SHARE dividend rate (e.g. "$0.01 per
+   share", "$0.55 per share dividend") in addition to an aggregate dollar
+   total (e.g. a cash-flow-statement "Dividends paid" line), state BOTH
+   numbers -- the per-share rate is usually the more specific fact a
+   dividend question is really asking for, and citing only the aggregate
+   total is an incomplete answer even when that total is itself correct.
+10. For a ratio/multiple result (turnover ratio, current ratio, quick
+    ratio, etc.), state the number by itself (e.g. "17.98") -- do NOT
+    append a trailing "x" ("17.98x"). Percentages still get a trailing
+    "%" as usual; this rule is only about the "x" multiple suffix.
 """
 
         try:
             if hasattr(client, "chat") and hasattr(client.chat, "completions"):
-                response = client.chat.completions.create(
-                    model=self._model,
-                    messages=[
+                create_kwargs: Dict[str, Any] = {
+                    "model": self._model,
+                    "messages": [
                         {"role": "system", "content": "You are a professional financial report analysis assistant. Respond in clear English with a result-first format."},
                         {"role": "user", "content": prompt},
                     ],
-                    temperature=0.2,
-                )
+                }
+                if not _is_reasoning_model(self._model):
+                    create_kwargs["temperature"] = 0.2
+                response = client.chat.completions.create(**create_kwargs)
                 if response and getattr(response, "choices", None):
                     first_choice = response.choices[0]
                     message = getattr(first_choice, "message", None)
