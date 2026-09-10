@@ -49,8 +49,19 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # Confirmed real case: American Water Works FY2022 — the model's
         # text never stated the actual -$1,561M figure at all, just a
         # generic "not a relevant metric for this company" non-answer.
-        "keywords_zh": ["正的營運資金", "負的營運資金"],
-        "keywords_en": ["positive working capital", "negative working capital"],
+        # "net working capital" added alongside the original positive/
+        # negative phrasing: unlike bare "working capital" (which would
+        # also match inside "working capital RATIO" questions and wrongly
+        # hijack those into a subtraction), "net working capital" is
+        # unambiguous -- nobody asks for a "net working capital ratio",
+        # it always names this raw dollar metric. Confirmed real case:
+        # Lockheed Martin's "What is Lockheed Martin's FY2021 net working
+        # capital?" matched no formula at all (detect_formula() returned
+        # None), so it fell through to the less reliable LLM-decomposition
+        # retrieval path instead of this formula's direct, deterministic
+        # current_assets/current_liabilities lookup.
+        "keywords_zh": ["正的營運資金", "負的營運資金", "淨營運資金"],
+        "keywords_en": ["positive working capital", "negative working capital", "net working capital"],
         "formula_expr": "current_assets - current_liabilities",
         "required_vars": {
             "current_assets":    ["流動資產", "current assets", "total current assets"],
@@ -258,6 +269,41 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
         },
         "result_label": "EBITDA Margin",
+        "unit": "%",
+        "period_average": True,
+    },
+    "ebitda_margin_unadjusted": {
+        # Must be checked BEFORE ebitda_unadjusted below: FinanceBench's
+        # own recurring phrasing is "unadjusted EBITDA % margin" (or
+        # "...EBITDA margin"), which contains "unadjusted ebitda" as a
+        # substring -- if the plain-dollar-sum formula below came first
+        # it would win the match and this question would compute a raw
+        # dollar figure instead of a percentage, with no revenue term and
+        # no period-average support at all. ebitda_margin above doesn't
+        # catch this either: its own keyword "ebitda margin" requires
+        # "ebitda" and "margin" to be adjacent, but the real phrasing
+        # inserts "%" between them ("EBITDA % margin"), so \bebitda
+        # margin\b never matches. Confirmed real case: Walmart's "FY2018
+        # - FY2020 3 year average unadjusted EBITDA % margin" question
+        # matched ebitda_unadjusted instead, so retrieval only fetched a
+        # single year's op_income/depreciation and never fetched revenue
+        # at all (needed for the % denominator) or the other two years
+        # (needed for the 3-year average) -- an answer sometimes still
+        # came out right when neighboring evidence happened to carry the
+        # missing pieces anyway, and sometimes didn't, depending on
+        # retrieval luck.
+        "keywords_zh": ["未調整EBITDA利潤率", "未調整EBITDA 利潤率"],
+        "keywords_en": ["unadjusted ebitda % margin", "unadjusted ebitda margin",
+                         "unadjusted ebitda %margin"],
+        "formula_expr": "(op_income + depreciation) / revenue",
+        "required_vars": {
+            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+                              "income from operations"],
+            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+                              "depreciation", "amortization", "d&a"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+        },
+        "result_label": "Unadjusted EBITDA Margin",
         "unit": "%",
         "period_average": True,
     },
@@ -521,15 +567,29 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "multi_year": True,
     },
     "asset_turnover": {
+        # Averages total_assets across the two endpoint years, same
+        # convention as every other turnover ratio in this library
+        # (fixed_asset_turnover's ppe_old/ppe_new, inventory_turnover,
+        # receivables_turnover) -- FinanceBench's own asset_turnover
+        # questions define it exactly this way ("FY2020 revenue /
+        # (average total assets between FY2019 and FY2020)"). Previously
+        # a bare "revenue / total_assets" using only ONE year's total
+        # assets, with no _old/_new split and no period_average flag, so
+        # the average was silently never computed at all. Confirmed real
+        # case: Lockheed Martin FY2020 asset turnover -- gold 1.33 (=
+        # 65,398 / ((47,528+50,710)/2) = 65,398/49,119), old code
+        # returned 1.29 (= 65,398/50,710, FY2020 total assets alone).
         "keywords_zh": ["資產週轉率", "總資產週轉率"],
         "keywords_en": ["asset turnover", "total asset turnover"],
-        "formula_expr": "revenue / total_assets",
+        "formula_expr": "revenue / ((total_assets_old + total_assets_new) / 2)",
         "required_vars": {
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
-            "total_assets": ["總資產", "total assets", "assets"],
+            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "total_assets_old": ["總資產", "total assets", "assets"],
+            "total_assets_new": ["總資產", "total assets", "assets"],
         },
         "result_label": "Asset Turnover",
         "unit": "x",
+        "multi_year": True,
     },
     "cash_conversion_cycle": {
         # Must be registered BEFORE inventory_turnover/receivables_turnover/

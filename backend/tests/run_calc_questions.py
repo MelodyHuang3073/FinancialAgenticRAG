@@ -213,6 +213,61 @@ CALC_QUESTIONS = [
      "defined as: (FY2019 COGS) / (average inventory between FY2018 and FY2019). Round "
      "your answer to two decimal places. Please base your judgments on the information "
      "provided primarily in the balance sheet and the P&L statement."),
+    # ── metrics-generated: added later, PDFs newly downloaded from the
+    # official FinanceBench repo (github.com/patronus-ai/financebench) ──
+    ("LOCKHEEDMARTIN_2020_10K",
+     "We need to calculate a reasonable approximation (or exact number if possible) of a "
+     "financial metric. Basing your judgment by information plainly provided in the "
+     "balance sheet and the P&L statement, what is Lockheed Martin's FY2020 asset "
+     "turnover ratio? Asset turnover ratio is defined as: FY2020 revenue / (average "
+     "total assets between FY2019 and FY2020). Round your answer to two decimal places."),
+    ("LOCKHEEDMARTIN_2021_10K",
+     "What is Lockheed Martin's FY2021 net working capital? Define net working capital "
+     "as total current assets less total current liabilities. Answer in USD millions. "
+     "Respond to the question by assuming the perspective of an investment analyst who "
+     "can only use the details shown within the balance sheet."),
+    ("LOCKHEEDMARTIN_2022_10K",
+     "What is Lockheed Martin's 2 year total revenue CAGR from FY2020 to FY2022 (in "
+     "units of percents and round to one decimal place)? Provide a response to the "
+     "question by primarily using the statement of income."),
+    ("MGMRESORTS_2020_10K",
+     "What is the FY2018 - FY2020 3 year average of capex as a % of revenue for MGM "
+     "Resorts? Answer in units of percents and round to one decimal place. Please "
+     "utilize information provided primarily within the statement of cash flows and the "
+     "statement of income."),
+    ("NETFLIX_2015_10K",
+     "We want to calculate a financial metric. Please help us compute it by basing your "
+     "answers off of the statement of income and the statement of cash flows. Here's the "
+     "question: what is the FY2015 unadjusted EBITDA % margin for Netflix? Calculate "
+     "unadjusted EBITDA using unadjusted operating income and D&A (from cash flow "
+     "statement)."),
+    ("NIKE_2018_10K",
+     "We need to calculate a reasonable approximation (or exact number if possible) of a "
+     "financial metric. Basing your judgment by information plainly provided in the "
+     "statement of income, what is Nike's three year average of cost of goods sold as a "
+     "% of revenue from FY2016 to FY2018? Answer in units of percents and round to one "
+     "decimal place."),
+    ("NIKE_2021_10K",
+     "When primarily referencing the income statement and the statement of financial "
+     "position, what is the FY2021 inventory turnover ratio for Nike? Inventory turnover "
+     "ratio is defined as: (FY2021 COGS) / (average inventory between FY2020 and "
+     "FY2021). Round your answer to two decimal places."),
+    ("WALMART_2018_10K",
+     "What is FY2018 days payable outstanding (DPO) for Walmart? DPO is defined as: "
+     "365 * (average accounts payable between FY2017 and FY2018) / (FY2018 COGS + "
+     "change in inventory between FY2017 and FY2018). Round your answer to two decimal "
+     "places. Please base your judgments on the information provided primarily in the "
+     "statement of financial position and the P&L statement."),
+    ("WALMART_2019_10K",
+     "Based on the information provided primarily in the statement of income, what is "
+     "the FY2018 - FY2019 change in unadjusted operating income % margin for Walmart? "
+     "Answer in units of percents and round to one decimal place."),
+    ("WALMART_2020_10K",
+     "What is the FY2018 - FY2020 3 year average unadjusted EBITDA % margin for "
+     "Walmart? Define unadjusted EBITDA as unadjusted operating income + depreciation "
+     "and amortization from the cash flow statement. Answer in units of percents and "
+     "round to one decimal place. Calculate what was asked by utilizing the line items "
+     "clearly shown in the P&L statement and the cash flow statement."),
 ]
 
 
