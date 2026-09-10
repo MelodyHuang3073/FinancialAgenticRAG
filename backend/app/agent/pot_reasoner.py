@@ -2464,7 +2464,7 @@ def _gen_formula_code(
         lines.append(f"print(f'{label}: {{result}}%')")
     elif unit == "x":
         lines.append(f"result = round({expr}, 4)")
-        lines.append(f"print(f'{label}: {{result}}x')")
+        lines.append(f"print(f'{label}: {{result}}')")
     else:
         # Round even here — formulas with no "%"/"x" unit (e.g. DPO's
         # day-count, unadjusted EBITDA's dollar sum) still routinely get
@@ -3103,14 +3103,14 @@ def _build_calculation_code(
                     year_exprs.append((yr, f"{ca['code_key']} / {cl['code_key']}"))
                 if len(year_exprs) >= 2:
                     code_lines.append("# Current Ratio = Current Assets / Current Liabilities")
-                    _emit_multi_year_ratio(code_lines, "Current Ratio", "x", year_exprs)
+                    _emit_multi_year_ratio(code_lines, "Current Ratio", "", year_exprs)
                     return True
             ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
             cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
             code_lines.append(f"# Current Ratio = Current Assets / Current Liabilities")
             code_lines.append(f"result = round({ca['code_key']} / {cl['code_key']}, 4)")
             yr = ca['year']
-            code_lines.append(f"print(f'Current Ratio ({yr}): {{result}}x')")
+            code_lines.append(f"print(f'Current Ratio ({yr}): {{result}}')")
             return True
 
     # ── Quick Ratio ───────────────────────────────────────────────────────────
@@ -3140,7 +3140,7 @@ def _build_calculation_code(
                 if len(year_exprs) >= 2:
                     label = "Quick Ratio (approx, no inventory data)" if any_degraded else "Quick Ratio"
                     code_lines.append("# Quick Ratio = (Current Assets - Inventory) / Current Liabilities")
-                    _emit_multi_year_ratio(code_lines, label, "x", year_exprs)
+                    _emit_multi_year_ratio(code_lines, label, "", year_exprs)
                     if any_degraded and degraded_notes is not None:
                         degraded_notes.append(
                             "Quick Ratio could not be computed for at least one year (no "
@@ -3169,7 +3169,7 @@ def _build_calculation_code(
                         "true Quick Ratio and will read higher than the real figure."
                     )
             yr = ca['year']
-            code_lines.append(f"print(f'Quick Ratio ({yr}): {{result}}x')")
+            code_lines.append(f"print(f'Quick Ratio ({yr}): {{result}}')")
             return True
 
     # ── Margin / Ratio ────────────────────────────────────────────────────────
