@@ -15,6 +15,22 @@ import os
 import re
 from typing import List, Dict, Any, Optional
 
+
+def _is_reasoning_model(model_name: str) -> bool:
+    """
+    True for OpenAI's reasoning-tier models (gpt-5 family, o1/o3/o4), which
+    reject any non-default `temperature` value and spend part of
+    `max_completion_tokens` on internal reasoning before the visible
+    answer -- calling them with gpt-4o-mini's params (temperature=0,
+    max_tokens=512) either 400s on temperature or, if temperature were
+    dropped but the token budget left at 512, can return an EMPTY message
+    (reasoning alone consumed the whole budget). Duplicated from
+    llm_client.py (same rationale as this module's other small duplicated
+    helpers) since there's no shared client-config module to import from.
+    """
+    m = (model_name or "").lower()
+    return m.startswith(("gpt-5", "o1", "o3", "o4"))
+
 # Canonical metric → display name used in retrieval queries
 # Keeps both English and Chinese variants so BM25 can match linearized table content
 _METRIC_NAMES: Dict[str, str] = {
@@ -188,15 +204,24 @@ class QueryDecomposer:
         try:
             if hasattr(client, "chat") and hasattr(client.chat, "completions"):
                 # OpenAI
-                response = client.chat.completions.create(
-                    model=self._llm_model,
-                    messages=[
+                reasoning = _is_reasoning_model(self._llm_model)
+                create_kwargs: Dict[str, Any] = {
+                    "model": self._llm_model,
+                    "messages": [
                         {"role": "system", "content": self._SYSTEM_PROMPT},
                         {"role": "user", "content": user_content},
                     ],
-                    temperature=0,
-                    max_tokens=512,
-                )
+                    # Reasoning models spend part of this budget on
+                    # invisible internal reasoning tokens before the JSON
+                    # output -- 512 (fine for gpt-4o-mini's direct output)
+                    # can be entirely consumed by reasoning alone, leaving
+                    # an empty message. Generous since these tokens are
+                    # free under the daily complimentary-token allowance.
+                    "max_completion_tokens": 512 if not reasoning else 2000,
+                }
+                if not reasoning:
+                    create_kwargs["temperature"] = 0
+                response = client.chat.completions.create(**create_kwargs)
                 raw = response.choices[0].message.content or ""
             else:
                 # Gemini

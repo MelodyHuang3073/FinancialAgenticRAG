@@ -89,14 +89,24 @@ DOC_TO_FILE = {
     "GENERALMILLS_2022_10K": ("GENERALMILLS_2022_10K.pdf", "General Mills"),
     "JOHNSON_JOHNSON_2022_10K": ("JOHNSON_JOHNSON_2022_10K.pdf", "Johnson & Johnson"),
     "KRAFTHEINZ_2019_10K": ("KRAFTHEINZ_2019_10K.pdf", "Kraft Heinz"),
+    "LOCKHEEDMARTIN_2020_10K": ("LOCKHEEDMARTIN_2020_10K.pdf", "Lockheed Martin"),
+    "LOCKHEEDMARTIN_2021_10K": ("LOCKHEEDMARTIN_2021_10K.pdf", "Lockheed Martin"),
+    "LOCKHEEDMARTIN_2022_10K": ("LOCKHEEDMARTIN_2022_10K.pdf", "Lockheed Martin"),
     "MGMRESORTS_2018_10K": ("MGMRESORTS_2018_10K.pdf", "MGM Resorts"),
+    "MGMRESORTS_2020_10K": ("MGMRESORTS_2020_10K.pdf", "MGM Resorts"),
     "MGMRESORTS_2022_10K": ("MGMRESORTS_2022_10K.pdf", "MGM Resorts"),
     "MICROSOFT_2016_10K": ("MICROSOFT_2016_10K.pdf", "Microsoft"),
+    "NETFLIX_2015_10K": ("NETFLIX_2015_10K.pdf", "Netflix"),
     "NETFLIX_2017_10K": ("NETFLIX_2017_10K.pdf", "Netflix"),
+    "NIKE_2018_10K": ("NIKE_2018_10K.pdf", "Nike"),
     "NIKE_2019_10K": ("NIKE_2019_10K.pdf", "Nike"),
+    "NIKE_2021_10K": ("NIKE_2021_10K.pdf", "Nike"),
     "PEPSICO_2021_10K": ("PEPSICO_2021_10K.pdf", "PepsiCo"),
     "PEPSICO_2022_10K": ("PEPSICO_2022_10K.pdf", "PepsiCo"),
     "ULTABEAUTY_2023_10K": ("ULTABEAUTY_2023_10K.pdf", "Ulta Beauty"),
+    "WALMART_2018_10K": ("WALMART_2018_10K.pdf", "Walmart"),
+    "WALMART_2019_10K": ("WALMART_2019_10K.pdf", "Walmart"),
+    "WALMART_2020_10K": ("WALMART_2020_10K.pdf", "Walmart"),
 }
 
 #: Allows an optional '$' between the sign and the digits (in EITHER
@@ -133,11 +143,35 @@ def _expand_fy_shorthand(text: str) -> str:
     return _FY_SHORT_RE.sub(lambda m: "FY20" + m.group(1), text or "")
 
 
+#: A gold answer that enumerates a short list inline ("...during FY 2022:
+#: (1) Current Health Ltd and (2) Two Peaks, LLC...") uses "(1)"/"(2)" as
+#: pure list-item numbering, not a financial fact -- but _NUM_RE has no
+#: way to tell that apart from a real parenthesized figure. Left in, this
+#: silently makes "1" and "2" part of the gold "facts to check", and a
+#: model answer that correctly lists BOTH companies with their real
+#: dollar amounts (no coincidental bare "1"/"2" of its own) fails the
+#: check for having "missed a fact" that was never a fact in the first
+#: place. Distinguished from a genuine footnote/citation marker (e.g.
+#: "$147 million(1)") by requiring a space then a capital letter right
+#: after the closing paren -- the shape of "(N) <New List Item>", which a
+#: footnote reference attached directly to a number never has. Confirmed
+#: real case: Best Buy's acquisitions gold answer ("(1) Current Health
+#: Ltd and (2) Two Peaks, LLC...") reduced check_nums to exactly [1, 2]
+#: after year-stripping, so a fully correct, evidence-grounded model
+#: answer (both companies + correct $389M/$79M amounts) still failed
+#: because it had no reason to ever produce a bare standalone "1" or "2".
+_LIST_MARKER_RE = re.compile(r"\(\d{1,2}\)(?=\s+[A-Z])")
+
+
+def _strip_list_markers(text: str) -> str:
+    return _LIST_MARKER_RE.sub("", text or "")
+
+
 def _numbers_in(text: str):
     """Extract all numeric tokens (commas and '$' stripped) from a string
     as floats."""
     out = []
-    for m in _NUM_RE.findall(_expand_fy_shorthand(text)):
+    for m in _NUM_RE.findall(_strip_list_markers(_expand_fy_shorthand(text))):
         try:
             out.append(float(m.replace(",", "").replace("$", "")))
         except ValueError:

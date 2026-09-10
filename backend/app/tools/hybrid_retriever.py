@@ -414,6 +414,18 @@ class HybridFinancialRetriever:
             words.append(wl)
         return ' '.join(words).strip()
 
+    @staticmethod
+    def _extract_company_filing_year(name: str) -> Optional[str]:
+        """First bare 4-digit year (optionally with a Q1-4 suffix, e.g.
+        "2023q2") found in a raw company/doc id string, or None if it has
+        none. Used only to DEMOTE `_company_match_score`'s top tier when
+        two DIFFERENT fiscal years of the SAME company are both in the
+        corpus -- see that method's docstring for the confirmed real
+        case this fixes.
+        """
+        m = re.search(r'(?:19|20)\d{2}(?:q[1-4])?', name, flags=re.IGNORECASE)
+        return m.group(0).lower() if m else None
+
     def _company_match_score(self, doc_company: str, entity: str) -> float:
         """
         Returns a multiplier based on how well doc_company matches entity.
@@ -445,8 +457,34 @@ class HybridFinancialRetriever:
         if not norm_doc or not norm_ent:
             return 1.0
 
-        # Exact normalised match
+        # Exact normalised match. _normalise_company deliberately STRIPS
+        # the fiscal year (see its own docstring — needed to fix Best
+        # Buy's word-boundary bug), which means it can no longer tell
+        # apart two DIFFERENT fiscal years of the SAME company once both
+        # are in the corpus — "MGMRESORTS_2022_10K" and
+        # "MGMRESORTS_2018_10K" both normalise to "mgmresorts" and would
+        # otherwise tie at this same top tier. Demote to 1.5 (still well
+        # above the 0.05 different-company penalty and the 1.0 neutral
+        # tier, but below the exact-right-year match below it AND below
+        # the 1.8 substring/word-overlap tiers) whenever BOTH sides carry
+        # a detectable year that DIFFERS — a real disambiguating signal
+        # this project's own doc-id convention (COMPANY_YEAR_10K) always
+        # carries. Left at the full 2.0 boost whenever either side has no
+        # detectable year (a generic entity like "company", or a doc-id
+        # convention without one) — unchanged from before, since there is
+        # then no year signal to disambiguate with at all. Confirmed real
+        # case: "Has MGM Resorts paid dividends to common shareholders in
+        # FY2022?" — the real answer's own "Dividend Policy" paragraph
+        # (MGMRESORTS_2022_10K) ranked #8, just outside the top-6 sent to
+        # the LLM, while two malformed, blank-period rows from
+        # MGMRESORTS_2018_10K (a completely different filing year) rode
+        # this same 2.0 tier into #2/#3 purely because "mgmresorts" ==
+        # "mgmresorts" post year-stripping.
         if norm_doc == norm_ent:
+            doc_year = self._extract_company_filing_year(doc_company)
+            ent_year = self._extract_company_filing_year(entity)
+            if doc_year and ent_year and doc_year != ent_year:
+                return 1.5
             return 2.0
 
         # One is a substring of the other
