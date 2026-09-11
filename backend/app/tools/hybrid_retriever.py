@@ -129,9 +129,60 @@ _GEOGRAPHIC_SECTION_RE = re.compile(
     r'geographic\s+(?:operations|information)\b', re.IGNORECASE
 )
 
+#: Not every filing labels its geography breakdown with the word
+#: "geographic" at all -- PepsiCo's own "geographies primarily operated
+#: in" answer lives entirely inside Item 1 Business's "Our Divisions"
+#: segment-by-segment description ("...Africa, the Middle East and South
+#: Asia...", "...Asia Pacific, Australia and New Zealand, and China
+#: region...") without the word "geographic" appearing anywhere in it, so
+#: _GEOGRAPHIC_SECTION_RE above (which requires that literal phrase)
+#: never fires for it -- confirmed real case: that passage ranked ~155th
+#: out of 200 candidates for the geography query, nowhere near the top-6
+#: that reaches the LLM. Region NAMES themselves are the signal instead:
+#: a passage mentioning several of them close together is very likely to
+#: be an actual geography enumeration regardless of company or filing
+#: structure, whereas a single incidental mention (e.g. "...Europe also
+#: manufactures...") isn't -- so this only counts as a match at 3+
+#: DISTINCT region names in the same passage, not a bare single hit.
+_GEOGRAPHIC_REGION_NAME_RE = re.compile(
+    r'\b(?:north america|latin america|south america|asia pacific|'
+    r'middle east|south asia|africa|europe|australia|new zealand)\b',
+    re.IGNORECASE,
+)
+
+
+def _has_dense_geographic_region_names(content: str, min_distinct: int = 3) -> bool:
+    matches = {m.group(0).lower() for m in _GEOGRAPHIC_REGION_NAME_RE.finditer(content)}
+    return len(matches) >= min_distinct
+
 
 def is_geography_query(text: str) -> bool:
     return bool(_GEOGRAPHY_QUERY_RE.search(text))
+
+
+#: A question asking about ongoing legal battles/litigation has one
+#: specific, SEC-mandated source every 10-K carries under the exact same
+#: heading: "Item 3. Legal Proceedings." -- a far more reliable structural
+#: signal than any keyword overlap, since the heading text itself is
+#: standardized across every filer regardless of company or industry.
+#: Existing topic-query text alone ("Item 3 Legal Proceedings litigation
+#: lawsuit claims") isn't enough of a ranking signal on its own when a
+#: filing's OTHER pages also score reasonably on the same bag-of-words
+#: query -- confirmed real case: PepsiCo's real Item 3 page ranked 23rd
+#: among its own 2022 filing's pages (score 30.2) for that exact topic
+#: query, well outside the top-5 per-sub-query cutoff, even after
+#: eliminating the wrong-fiscal-year competition from PEPSICO_2021_10K.
+_LEGAL_QUERY_RE = re.compile(
+    r'\blegal\s+(?:battle|proceeding|matter)s?\b|\blitigation\b|\blawsuit\b',
+    re.IGNORECASE,
+)
+_LEGAL_PROCEEDINGS_SECTION_RE = re.compile(
+    r'item\s*3\.?\s*legal\s+proceedings', re.IGNORECASE
+)
+
+
+def is_legal_query(text: str) -> bool:
+    return bool(_LEGAL_QUERY_RE.search(text))
 
 
 def _combined_pattern(terms: List[str]) -> "re.Pattern":
@@ -215,6 +266,22 @@ class HybridFinancialRetriever:
         "provision for income taxes", "income tax", "dividends paid",
         "net cash provided by operating activities", "property and equipment",
         "property, plant and equipment",
+        # The cash-flow statement's own line for acquisition spend --
+        # present in every filing whether or not any acquisition
+        # actually happened that year, unlike a narrative "Acquisitions
+        # and Divestitures" note (which only exists for a filer that HAD
+        # one to write about). Without this, a table_row candidate like
+        # this one gets NO boost at all under prefer_narrative (only
+        # text_note passages do, via the narrative-content boost below),
+        # so a company with no acquisitions to narrate about — whose
+        # only real evidence IS this bare table row — loses to unrelated
+        # prose that merely shares generic vocabulary. Confirmed real
+        # case: Ulta Beauty's own "Acquisitions, net of cash acquired"
+        # cash-flow row (proving zero acquisitions in FY2023/FY2022)
+        # ranked outside the top 5 under an acquisitions-topic query,
+        # losing to MD&A/results-of-operations prose that never
+        # mentions acquisitions at all.
+        "acquisitions, net of cash acquired", "acquisitions net of cash acquired",
     ]
 
     #: A row whose own Line Item label starts with "Total" (e.g. "Total
@@ -258,6 +325,55 @@ class HybridFinancialRetriever:
         r'\bas\s+a\s+result\s+of\b|\battributable\s+to\b|\bresulted\s+from\b',
         re.IGNORECASE,
     )
+
+    #: A table_row's own Line Item label is often a far more reliable
+    #: signal for which financial statement it belongs to than the
+    #: page-level `section`/`statement_type` tag the parser assigned at
+    #: ingestion time — that tag is a coarse, page-range heuristic that
+    #: can mis-fire for a filing's own unusual layout (e.g. a "Financial
+    #: Highlights"/MD&A summary page placed right before the real
+    #: statements), silently excluding the correct row from the
+    #: statement_type_hint boost below while an unrelated page elsewhere
+    #: (mis-tagged with the matching label) still gets it purely by
+    #: document-level metadata. Confirmed real case: MGM Resorts' own
+    #: "Net revenues" row (the real consolidated FY2018-2020 total) was
+    #: tagged section="general_mda" instead of "income_statement", so an
+    #: "income_statement" hint gave it no boost at all — while a
+    #: completely unrelated revenue-RECOGNITION accounting-policy
+    #: footnote (prose explaining casino/hotel revenue recognition
+    #: rules, no dollar figures) was tagged section="income_statement"
+    #: and got the full 1.5x boost instead, burying the real total below
+    #: narrative noise and a segment note's own smaller "Reportable
+    #: segment net revenues" sub-total, which then won retrieval by
+    #: default with no real competition.
+    _CORE_STATEMENT_LINE_ITEMS: Dict[str, List[str]] = {
+        "income_statement": [
+            "revenue", "net revenue", "net sales", "total revenue",
+            "cost of revenue", "cost of goods sold", "cost of sales",
+            "gross profit", "operating income", "net income", "net earnings",
+        ],
+        "balance_sheet": [
+            "total assets", "total liabilities", "total current assets",
+            "total current liabilities", "total stockholders equity",
+            "total shareholders equity",
+        ],
+        "cash_flow_statement": [
+            "capital expenditures", "net cash provided by operating activities",
+            "net cash used in operating activities", "net increase in cash",
+            "net decrease in cash",
+        ],
+    }
+    _LINE_ITEM_LABEL_RE = re.compile(r'Line Item:\s*([^|]+)', re.IGNORECASE)
+
+    def _matches_core_statement_line_item(self, content: str, hint: str) -> bool:
+        terms = self._CORE_STATEMENT_LINE_ITEMS.get(hint)
+        if not terms:
+            return False
+        m = self._LINE_ITEM_LABEL_RE.search(content)
+        if not m:
+            return False
+        label = m.group(1).lower().strip()
+        return any(_term_present(t, label) for t in terms)
 
     def __init__(self, corpus: List[Dict[str, Any]]):
         self.corpus = corpus
@@ -540,6 +656,8 @@ class HybridFinancialRetriever:
         prefer_narrative: bool = False,
         is_attribution: bool = False,
         is_geography: bool = False,
+        is_legal: bool = False,
+        query_years: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search the corpus with BM25 + overlap scoring.
@@ -586,6 +704,19 @@ class HybridFinancialRetriever:
                                  what geographies/regions a company
                                  operates in -- see is_geography_query's
                                  module-level docstring.
+            query_years         : years the classifier extracted from the
+                                 ORIGINAL question (classification["years"]),
+                                 used to disambiguate between multiple
+                                 fiscal years of the SAME company's filings
+                                 when `entity` itself is a bare, year-less
+                                 company name (e.g. "PepsiCo", from
+                                 question_classifier's hardcoded fast-path
+                                 lookup) -- _company_match_score's own
+                                 same-company-different-year demotion only
+                                 fires when BOTH sides carry a detectable
+                                 year, so it's a no-op here. See the
+                                 "Preferred-year boost" below for the
+                                 confirmed real case this fixes.
         """
         exclude_ids = set(exclude_ids or [])
         query_tokens = self._tokenize(query)
@@ -599,6 +730,17 @@ class HybridFinancialRetriever:
         # boost without needing to pass is_attribution/is_geography explicitly.
         attribution_active = is_attribution or is_attribution_query(query)
         geography_active = is_geography or is_geography_query(query)
+        legal_active = is_legal or is_legal_query(query)
+        # The LATEST year mentioned, not just any of them -- matches this
+        # project's established convention of sourcing a multi-year
+        # question from that single filing's own comparative columns
+        # (e.g. Boeing's gross-margin-trend question is answered entirely
+        # from BOEING_2022_10K alone, never a separate BOEING_2021_10K),
+        # so when a question spans several years, only the most recent
+        # filing gets the boost -- not every year mentioned, which would
+        # boost multiple competing fiscal years equally and never actually
+        # break the tie it exists to break.
+        preferred_filing_year = max(query_years) if query_years else None
 
         scored_results = []
         for doc in self.corpus:
@@ -657,6 +799,49 @@ class HybridFinancialRetriever:
             # "Geographic Operations" table otherwise).
             if prefer_narrative and geography_active and _GEOGRAPHIC_SECTION_RE.search(content):
                 multiplier *= 1.4
+            # ── Dense region-name boost (geography questions only) ─────────────
+            # Catches the case above's own literal-heading requirement can't:
+            # a passage enumerating a company's own operating geographies
+            # without ever using the word "geographic" at all -- see
+            # _has_dense_geographic_region_names's docstring for the
+            # confirmed PepsiCo real case.
+            elif prefer_narrative and geography_active and _has_dense_geographic_region_names(content):
+                multiplier *= 1.4
+
+            # ── Legal-proceedings-section boost (legal questions only) ──────────
+            # See _LEGAL_PROCEEDINGS_SECTION_RE's docstring for the
+            # confirmed PepsiCo real case -- a stronger, more targeted
+            # boost than the geography one above (1.8x, not 1.4x) since
+            # the section heading itself is SEC-mandated and identical
+            # across every filer, a much more reliable signal than any
+            # bag-of-words topic query alone.
+            if prefer_narrative and legal_active and _LEGAL_PROCEEDINGS_SECTION_RE.search(content):
+                multiplier *= 1.5
+
+            # ── Preferred-year boost (bare, year-less entity only) ──────────────
+            # Applies regardless of prefer_narrative. entity is frequently a
+            # bare human-readable company name with no fiscal year at all
+            # (question_classifier's hardcoded "pepsico" -> "PepsiCo"
+            # fast-path lookup, not "PEPSICO_2022_10K"), so
+            # _company_match_score's own same-company-different-year
+            # demotion never fires (it requires a detectable year on BOTH
+            # sides) -- two fiscal years of the same company's filings tie
+            # at the same top entity-match tier, competing for the same
+            # top-k slots on nothing but raw content similarity, which is
+            # often nearly identical boilerplate year over year. This
+            # breaks that tie using the year(s) the classifier already
+            # extracted from the question itself. Confirmed real case:
+            # "Has Pepsico reported any materially important ongoing legal
+            # battles from FY2022 and FY2021?" needed PEPSICO_2022_10K's
+            # own Item 3 Legal Proceedings page, but PEPSICO_2021_10K's
+            # near-identical boilerplate page narrowly outscored it under
+            # a bare "PepsiCo" entity match with top_k=5, pushing the
+            # right filing's own page out of the retrieved evidence
+            # entirely.
+            if preferred_filing_year and not self._extract_company_filing_year(entity or ""):
+                doc_filing_year = self._extract_company_filing_year(doc.get("company", ""))
+                if doc_filing_year == preferred_filing_year:
+                    multiplier *= 1.3
 
             # ── Low-confidence column penalty ─────────────────────────────────
             # Applies regardless of prefer_narrative -- a mis-parsed year
@@ -695,7 +880,9 @@ class HybridFinancialRetriever:
             # A matching document gets a 1.5x boost; non-matching docs are unchanged.
             if statement_type_hint and statement_type_hint != "unknown":
                 doc_stmt_type = doc.get("statement_type", "") or doc.get("section", "")
-                if doc_stmt_type == statement_type_hint:
+                if doc_stmt_type == statement_type_hint or self._matches_core_statement_line_item(
+                    content, statement_type_hint
+                ):
                     multiplier *= 1.5
 
             final_score = (bm25 * 0.7 + overlap_count * 0.3) * multiplier

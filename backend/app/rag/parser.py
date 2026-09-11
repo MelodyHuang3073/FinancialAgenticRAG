@@ -1588,6 +1588,135 @@ class FinancialFileParser:
                 groups.append([t])
         return groups
 
+    #: A raw pdfplumber cell is treated as a genuine VALUE cell (for
+    #: building this table's column-position clusters below) only when
+    #: its own extracted text already looks numeric — reusing
+    #: _LAYOUT_VALUE_RE-shaped intent without importing Tier 2's own
+    #: pattern, since a label cell's text ("Cost of sales") must never
+    #: contribute a column anchor.
+    _RULED_CELL_VALUE_RE = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.?\d*%?\)?$')
+
+    def _recover_ruled_row_cells(
+        self, page, table
+    ) -> List[List[Optional[str]]]:
+        """
+        pdfplumber's ruled-line cell detector sometimes finds no bounded
+        cell at all for MOST of a sub-item row — the ruled grid only has
+        lines drawn around "total"/header rows, leaving sub-item rows in
+        between with just ONE bounded cell (usually only the latest
+        year's value) instead of the full label + every year's value.
+        table.extract() then returns None for every other cell in that
+        row even though the real text is genuinely printed on the page
+        at that row's own y-position, because extract() only ever reads
+        text from WITHIN a cell it could actually bound. Confirmed real
+        case: Nike's FY2018 income statement — "Cost of sales",
+        "Demand creation expense", "Total selling and administrative
+        expense", "Other expense (income), net", "Income tax expense",
+        and "Basic" (EPS) each kept only their FY2018 value and lost
+        both their own label AND their FY2017/FY2016 values, because
+        none of those cells were ever bounded by a ruled line for that
+        particular row — every ALTERNATING row in the whole statement,
+        even though the numbers on rows that DID get fully ruled are
+        perfectly correct.
+
+        Recovering by raw pdfplumber cell INDEX doesn't work: a real
+        10-K's own ruled grid places a blank '$'-sign gutter cell at a
+        DIFFERENT column index on different rows (the same reason
+        _compact_row_cells() exists at all), so "column index 2" on one
+        row is a real value while on another it's just a '$' gutter —
+        naively filling every row's missing index-N cell from whichever
+        OTHER row happens to have a real bbox there silently duplicates
+        one column's value into an unrelated neighboring column.
+
+        Instead clusters every genuinely NUMERIC bounded cell across
+        the WHOLE table by x1 (right edge) position — right-aligned
+        numbers in the same real column line up almost exactly there
+        regardless of which raw index pdfplumber happened to assign
+        them, the same coordinate-based approach Tier 2's own
+        _cluster_value_column_anchors() uses. For a row with only one
+        (or zero) bounded cells, this recovers the label (crop from the
+        table's own left edge out to the leftmost value cluster) and
+        each value column (crop to that cluster's own x-range and this
+        row's own y-range, taken from whichever cell the row DOES have)
+        directly from the page, independent of pdfplumber's own
+        unreliable per-row column count.
+        """
+        pdf_rows = table.rows
+        extracted = table.extract()
+        if not pdf_rows or not extracted:
+            return extracted
+
+        numeric_x1s: List[float] = []
+        for r, vals in zip(pdf_rows, extracted):
+            for ci, c in enumerate(r.cells):
+                if c and ci < len(vals) and vals[ci] and self._RULED_CELL_VALUE_RE.match(str(vals[ci]).strip()):
+                    numeric_x1s.append(c[2])
+        if len(numeric_x1s) < 2:
+            return extracted
+
+        tolerance = self._adaptive_x1_gap_threshold(numeric_x1s)
+        xs = sorted(numeric_x1s)
+        clusters: List[List[float]] = [[xs[0]]]
+        for x in xs[1:]:
+            if x - clusters[-1][-1] <= tolerance:
+                clusters[-1].append(x)
+            else:
+                clusters.append([x])
+        # (left_x, right_x1) per value column, left-to-right — left edge
+        # is the previous cluster's own right edge (or the table's own
+        # left edge for the first), so cropping a cluster never bleeds
+        # into its neighbor.
+        cluster_x1s = [sum(c) / len(c) for c in clusters]
+
+        # The label/value0 boundary is NOT the table's own left edge —
+        # it's wherever the label column's real bboxes (from whichever
+        # rows DO have one) actually end. Falls back to the table's own
+        # left edge only when literally no row has a bounded label cell
+        # at all (extremely unusual — every "total"/header row on a
+        # real financial statement has one).
+        label_bboxes = [r.cells[0] for r in pdf_rows if r.cells and r.cells[0]]
+        label_x1 = max(c[2] for c in label_bboxes) if label_bboxes else table.bbox[0]
+
+        col_ranges: List[Tuple[float, float]] = []
+        prev_x1 = label_x1
+        for x1 in cluster_x1s:
+            col_ranges.append((prev_x1, x1))
+            prev_x1 = x1
+        if not col_ranges:
+            return extracted
+
+        # A row only NEEDS this reconstruction when pdfplumber bounded
+        # fewer real cells than this table has value columns — a fully-
+        # ruled row (every column already populated) is left untouched,
+        # so this can only ever ADD recovered data, never override a
+        # cell pdfplumber genuinely got right.
+        min_expected_cells = 1 + len(col_ranges)  # label + every value column
+        out_rows: List[List[Optional[str]]] = []
+        for pdf_row, vals in zip(pdf_rows, extracted):
+            present = [c for c in pdf_row.cells if c]
+            if len(present) >= min_expected_cells or not present:
+                out_rows.append(list(vals))
+                continue
+            row_top = min(c[1] for c in present)
+            row_bottom = max(c[3] for c in present)
+
+            def _crop_text(x0: float, x1: float) -> Optional[str]:
+                if x1 <= x0:
+                    return None
+                try:
+                    text = page.crop((x0, row_top, x1, row_bottom)).extract_text() or ""
+                except Exception:
+                    return None
+                text = " ".join(text.split())
+                return text or None
+
+            label = _crop_text(table.bbox[0], label_x1)
+            new_row: List[Optional[str]] = [label]
+            for x0, x1 in col_ranges:
+                new_row.append(_crop_text(x0, x1))
+            out_rows.append(new_row)
+        return out_rows
+
     def _ruled_line_tables_and_prose(self, page) -> Tuple[List[str], str]:
         """
         Tier 1: ruled vector-line tables via pdfplumber's find_tables(),
@@ -1627,7 +1756,11 @@ class FinancialFileParser:
             try:
                 rows: list = []
                 for t in group:
-                    rows.extend(self._compact_row_cells(r) for r in t.extract())
+                    try:
+                        recovered_rows = self._recover_ruled_row_cells(page, t)
+                    except Exception:
+                        recovered_rows = t.extract()
+                    rows.extend(self._compact_row_cells(r) for r in recovered_rows)
                 # pdfplumber's own grid detection can find a table's OUTER
                 # boundary via ruled/shaded lines while finding NO internal
                 # vertical separators at all — every row then comes back
