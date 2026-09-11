@@ -819,6 +819,40 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
     },
 
     # ── Multi-Year Average Ratios ────────────────────────────────────────────
+    "cogs_ratio": {
+        # Was entirely unregistered -- "cost of goods sold as a % of
+        # revenue" (FinanceBench's own recurring phrasing) matched NO
+        # formula at all, so retrieval fell to the LLM-decomposed path
+        # (no guarantee every requested year's cost_of_sales/revenue pair
+        # gets fetched) and, when no formula matched, PoT codegen's
+        # "Direct lookup" fallback just returned revenue itself as if
+        # that were the answer -- see pot_reasoner._MARGIN_MAP's own
+        # "cost of goods sold as a % of revenue" trigger addition, added
+        # alongside this formula for the SAME confirmed real case: Nike's
+        # "three year average of cost of goods sold as a % of revenue
+        # from FY2016 to FY2018" (gold 55.1%) returned $36,397 (FY2018's
+        # own revenue, a dollar figure) with zero ratio computed at all.
+        # Registering the formula here fixes retrieval determinism (every
+        # requested year's cost_of_sales AND revenue both get their own
+        # sub-query); the _MARGIN_MAP trigger fixes calculation as a
+        # fallback for whenever this doesn't match first.
+        "keywords_zh": ["銷貨成本佔營收比", "銷貨成本占營收比", "營業成本率"],
+        "keywords_en": ["cost of goods sold as a % of revenue",
+                         "cost of goods sold as a percentage of revenue",
+                         "cost of sales as a % of revenue",
+                         "cost of revenue as a % of revenue"],
+        # abs(cogs): same sign convention as capex_to_revenue below -- COGS
+        # is occasionally presented as a parenthesised/negative figure.
+        "formula_expr": "abs(cogs) / revenue",
+        "required_vars": {
+            "cogs":    ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales",
+                        "cost of revenue"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+        },
+        "result_label": "Cost of Revenue Ratio",
+        "unit": "%",
+        "period_average": True,
+    },
     "capex_to_revenue": {
         # "period_average" (unlike "multi_year") isn't a pick-one-of-two-years
         # ratio — it's the average of capex/revenue computed separately for

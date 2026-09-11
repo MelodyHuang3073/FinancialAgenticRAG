@@ -367,6 +367,14 @@ Available Evidence:
     ratio, etc.), state the number by itself (e.g. "17.98") -- do NOT
     append a trailing "x" ("17.98x"). Percentages still get a trailing
     "%" as usual; this rule is only about the "x" multiple suffix.
+11. If the question asks what GEOGRAPHIES/regions a company operates in,
+    and the evidence uses a combined internal segment label whose own
+    definition spans multiple actual places (e.g. "AMESA" defined as
+    "Africa, the Middle East and South Asia"; "APAC" defined as "Asia
+    Pacific, Australia and New Zealand, and China"), list the individual
+    places the evidence itself names, not just the abbreviation -- a
+    "geographies" question is asking for actual regions, and an internal
+    reporting-segment code is not itself a geography.
 """
 
         try:

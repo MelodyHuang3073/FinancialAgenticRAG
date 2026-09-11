@@ -20,7 +20,7 @@ from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import LLMAnswerGenerator
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
-from app.tools.hybrid_retriever import is_attribution_query, is_geography_query
+from app.tools.hybrid_retriever import is_attribution_query, is_geography_query, is_legal_query
 
 
 class FinAgentRAGOrchestrator:
@@ -346,6 +346,7 @@ class FinAgentRAGOrchestrator:
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=effective_hint,
+                            query_years=classification.get("years"),
                         )
                         hits = self._deduplicate_hits(hits)
 
@@ -383,6 +384,7 @@ class FinAgentRAGOrchestrator:
                                 exclude_ids=list(retrieved_ids),
                                 entity=classification.get("entity"),
                                 statement_type_hint=statement_type_hint,  # Step 4
+                                query_years=classification.get("years"),
                             )
                             for hit in self._deduplicate_hits(hits):
                                 retrieved_ids.add(hit["id"])
@@ -399,6 +401,7 @@ class FinAgentRAGOrchestrator:
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=statement_type_hint,  # Step 4
+                            query_years=classification.get("years"),
                         )
                     )
                     for hit in new_hits:
@@ -500,6 +503,7 @@ class FinAgentRAGOrchestrator:
             # -- see hybrid_retriever.is_attribution_query's docstring.
             is_attribution = is_attribution_query(query)
             is_geography = is_geography_query(query)
+            is_legal = is_legal_query(query)
             new_hits = []
             for sq in search_queries:
                 new_hits.extend(self.vector_store.search(
@@ -510,6 +514,8 @@ class FinAgentRAGOrchestrator:
                     prefer_narrative=prefer_narrative,
                     is_attribution=is_attribution,
                     is_geography=is_geography,
+                    is_legal=is_legal,
+                    query_years=classification.get("years"),
                 ))
             new_hits = self._deduplicate_hits(new_hits)
             for hit in new_hits:
