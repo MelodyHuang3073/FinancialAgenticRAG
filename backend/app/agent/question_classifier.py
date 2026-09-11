@@ -148,9 +148,22 @@ _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
     # for filers who use ASC 805's own term instead) measurably improved
     # ranking for both Amcor's and Best Buy's real acquisitions passages
     # in isolated retrieval testing.
+    # "Acquisitions, net of cash acquired" is the cash-flow-statement's
+    # OWN line for this concept, present in every filing whether or not
+    # any acquisition actually happened (a dash/zero for a year with none,
+    # a real figure for a year with one) -- the narrative-note phrasing
+    # above only ever exists for a filer that HAD an acquisition to write
+    # a note about, so a company with NONE to report has no narrative
+    # match at all, and the question falls back to a bare "I couldn't
+    # find the note" non-answer instead of citing this positive
+    # confirmation. Confirmed real case: Ulta Beauty's correct "no
+    # acquisitions in FY2023/FY2022" answer never cited the cash-flow
+    # statement's own "Acquisitions, net of cash acquired | 2023: — |
+    # 2022: —" row (the actual, retrievable proof), because that row
+    # never made evidence at all under the narrative-only topic query.
     (["major acquisitions", "acquisitions that", "acquisitions has"],
      "business combinations acquisitions and divestitures completed "
-     "acquisition equity interest"),
+     "acquisition equity interest acquisitions, net of cash acquired"),
 ]
 
 

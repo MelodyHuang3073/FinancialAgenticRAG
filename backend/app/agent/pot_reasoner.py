@@ -116,7 +116,26 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
         _ALIAS_TO_CANONICAL[_a.lower()] = _canonical
 
 
-_NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+|change(?:s|d)?\s+in\s+)$')
+#: "reportable segment "/"segment " added alongside the original
+#: negation/timing/delta prefixes: a "Reportable segment X" row is a
+#: narrower sub-breakdown of the consolidated "X" a plain canonical
+#: lookup wants, not an equivalent alternate phrasing of it -- same
+#: underlying principle as "deferred revenue" != "revenue" above, just a
+#: partial-total mismatch instead of a different-concept one. Confirmed
+#: real case: MGM Resorts' capex_to_revenue formula alternated between
+#: the real cash-flow-statement total ("Capital expenditures, net of
+#: construction payable": 1,486,843/739,006/270,579 for FY2018-2020) and
+#: a segment note's own sub-total ("Reportable segment capital
+#: expenditures": 964,121/618,986/237,319, EXCLUDING corporate/
+#: unallocated capex) depending on the year, because both rows match the
+#: same "capital expenditures" alias and the segment row's shorter label
+#: even won the length tie-break in _pick_best_in_group over the real,
+#: longer "...net of construction payable" row -- a 3-year average that
+#: silently mixed two different-scope sources per year.
+_NEGATION_PREFIX_RE = re.compile(
+    r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+|change(?:s|d)?\s+in\s+|'
+    r'(?:reportable\s+)?segment\s+)$'
+)
 
 # A generic "X attributable to " alias (e.g. "net income attributable to",
 # "net earnings attributable to") matches EVERY row of that shape
@@ -782,6 +801,25 @@ _SUPPLEMENTARY_SCHEDULE_MARKERS = (
     "previously held equity interest", "previously held equity investment",
     "purchase price allocation", "assets acquired and liabilities assumed",
     "recognized amounts of identified assets",
+    # ASC 805's required "pro forma" disclosure for a business
+    # combination presents a HYPOTHETICAL combined-company figure "as
+    # if" the acquisition had closed at the start of the earlier
+    # comparative period, reusing the SAME line-item labels ("Total
+    # revenues", "Income from continuing operations") as the real
+    # consolidated statements — same failure mode as the guarantor/PPA
+    # cases above (an equally "clean" exact-label match, just for a
+    # hypothetical/adjusted figure instead of the actual reported GAAP
+    # number for that fiscal year). Confirmed real case: CVS Health's
+    # FY2018 10-K Note 2 (Aetna acquisition) pro forma table states
+    # "Total revenues | 243,398 | 236,000" — a pro forma combined
+    # figure — while the real consolidated "Total revenues" (194,579 /
+    # 184,786) sits on a completely different, unrelated page; once
+    # both entered the same evidence set, nothing previously
+    # distinguished "this row is a hypothetical pro forma adjustment"
+    # from a genuine reported total, inflating CVS's FY2018 fixed asset
+    # turnover from the real 17.98 to 22.49.
+    "pro forma results", "pro forma revenue", "pro forma information",
+    "unaudited pro forma", "supplemental pro forma",
 )
 
 #: A SEC "Exhibit 99.X" filed alongside the parent's own 10-K is
@@ -2915,8 +2953,24 @@ _MARGIN_MAP: List[Tuple[List[str], str, str, str]] = [
     (["sg&a", "sga", "推銷"],       "sga",           "revenue",    "SG&A % of Revenue"),
     (["d&a", "depreciation and amortization", "depreciation & amortization",
       "折舊攤銷佔"],                "depreciation",  "revenue",    "D&A % of Revenue"),
+    # "X as a % of revenue"/"X as a percentage of revenue" is FinanceBench's
+    # own recurring phrasing for this ratio (not just the shorter "X %"/"X
+    # margin" forms already listed) -- without it, a question worded this
+    # way matches NO trigger here and falls through several levels further
+    # to the "Direct lookup" bare-canonical-name fallback, which has no
+    # concept of "ratio" at all and just returns revenue itself as if that
+    # were the answer. Confirmed real case: Nike's "three year average of
+    # cost of goods sold as a % of revenue from FY2016 to FY2018" produced
+    # PoT code that was just "result = val_2018_revenues" (36,397 -- a
+    # dollar figure, not a percentage) -- the LLM's own prose text still
+    # stated the correct 55.1% margin from mentally computing it off the
+    # raw evidence, which is exactly the "LLM mental arithmetic" failure
+    # mode the sandbox exists to prevent (a right-looking answer with zero
+    # actual verification behind it).
     (["cost ratio", "cogs ratio", "cogs margin", "cogs %", "cost of goods sold margin",
-      "cost of goods sold %"],      "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
+      "cost of goods sold %", "cost of goods sold as a % of revenue",
+      "cost of goods sold as a percentage of revenue"],
+                                    "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
     (["capex%", "capex ratio"],     "capex",          "revenue",   "CapEx % of Revenue"),
 ]
 
@@ -3050,6 +3104,7 @@ def _build_calculation_code(
     preferred_year: Optional[str] = None,
     query_years: Optional[List[str]] = None,
     degraded_notes: Optional[List[str]] = None,
+    detected_unit: Optional[List[str]] = None,
 ) -> bool:
     """
     Build the calculation section of the PoT code.
@@ -3230,6 +3285,18 @@ def _build_calculation_code(
     # ── Margin / Ratio ────────────────────────────────────────────────────────
     if _kw_match(["毛利率", "gross margin"], q_lower):
         groups = _synthesize_gross_profit(code_lines, groups, degraded_notes)
+    # "X-year average Y margin" wants a SINGLE blended number (the mean
+    # of each year's own ratio), never a year-by-year trend/delta -- but
+    # _emit_multi_year_ratio() below (used for the "did margin improve"
+    # trend-comparison case) always sets result to the LAST year's own
+    # ratio, not an average of all of them. Same gating already applied
+    # to formula-library period_average formulas (see
+    # _extract_formula_guided's is_period_average): only average when the
+    # query text actually asks for one. Confirmed real case: Nike's
+    # "three year average of cost of goods sold as a % of revenue from
+    # FY2016 to FY2018" (gold 55.1%, the mean of 53.8/55.5/56.2) would
+    # otherwise have returned 56.2% (FY2018's own ratio alone).
+    wants_average = any(kw in q_lower for kw in ("average", "avg", "平均"))
     for triggers, num_c, den_c, label in _MARGIN_MAP:
         if _kw_match(triggers, q_lower):
             distinct_years = sorted(set(query_years or []))
@@ -3241,7 +3308,21 @@ def _build_calculation_code(
                         year_exprs.append((yr, f"margin({n_yr['code_key']}, {d_yr['code_key']})"))
                 if len(year_exprs) >= 2:
                     code_lines.append(f"# {label} = {num_c} / {den_c}")
-                    _emit_multi_year_ratio(code_lines, label, "%", year_exprs)
+                    if wants_average:
+                        var_names = []
+                        for yr, expr in year_exprs:
+                            var = f"{_sanitize(label)}_{yr}"
+                            code_lines.append(f"{var} = round({expr}, 4)")
+                            code_lines.append(f"print(f'{label} ({yr}): {{{var}}}%')")
+                            var_names.append(var)
+                        code_lines.append(
+                            f"result = round(({' + '.join(var_names)}) / {len(var_names)}, 2)"
+                        )
+                        code_lines.append(
+                            f"print(f'{label} ({len(var_names)}-yr avg): {{result}}%')"
+                        )
+                    else:
+                        _emit_multi_year_ratio(code_lines, label, "%", year_exprs)
                     return True
             n, d = _find_pair_for_margin(groups, num_c, den_c, preferred_year)
             if n and d:
@@ -3292,6 +3373,8 @@ def _build_calculation_code(
             expr = f"({expr}) * {scale}"
         code_lines.append(f"result = {expr}")
         code_lines.append(f"print(f'{item_label} ({yr}): {{result}}')")
+        if detected_unit is not None:
+            detected_unit.append("$")
         return True
 
     return False
@@ -3341,6 +3424,21 @@ class ProgramOfThoughtReasoner:
 
         used_extraction = "formula"
         degraded_notes: List[str] = []
+        # Populated by _build_calculation_code()'s Direct-lookup fallback
+        # (PATH 2/2.5, taken when no formula_entry matched at all) so the
+        # frontend's headline result card can show a "$" prefix instead of
+        # a bare, unit-less number -- result_unit below otherwise only
+        # ever comes from formula_entry.get("unit"), which is None on
+        # this path. Every successful Direct-lookup return is a raw
+        # dollar-denominated line item (revenue, dividends paid, PP&E,
+        # cash, etc.) -- the Margin/Ratio/CAGR/YoY branches earlier in
+        # _build_calculation_code() all `return True` before ever
+        # reaching Direct-lookup, so this is never wrongly tagged "$" for
+        # an actual %/x result. Confirmed real case: "Has CVS Health paid
+        # dividends...Q2 of FY2022?" showed a bare "2,907" in the
+        # frontend's result card with no indication it's a dollar figure
+        # (in millions) at all.
+        detected_unit: List[str] = []
 
         if formula_entry and resolved_formula:
             # PATH 1: Formula library
@@ -3378,7 +3476,7 @@ class ProgramOfThoughtReasoner:
                 # Build the calculation
                 success_calc = _build_calculation_code(
                     code_lines, extracted_table, query, q_lower, preferred_year, query_years,
-                    degraded_notes,
+                    degraded_notes, detected_unit,
                 )
                 if not success_calc:
                     # The evidence DID contain some structured table data,
@@ -3407,7 +3505,7 @@ class ProgramOfThoughtReasoner:
                     code_lines.append("# Calculation (from narrative text)")
                     success_calc = _build_calculation_code(
                         code_lines, free_text_extracted, query, q_lower, preferred_year, query_years,
-                        degraded_notes,
+                        degraded_notes, detected_unit,
                     )
                     if not success_calc:
                         # Same fix as the extracted_table branch above: no
@@ -3521,5 +3619,5 @@ class ProgramOfThoughtReasoner:
             "result_series": result_series,
             "result_delta": result_delta,
             "result_direction": result_direction,
-            "result_unit": formula_entry.get("unit", "") if formula_entry else "",
+            "result_unit": (formula_entry.get("unit", "") if formula_entry else "") or (detected_unit[0] if detected_unit else ""),
         }

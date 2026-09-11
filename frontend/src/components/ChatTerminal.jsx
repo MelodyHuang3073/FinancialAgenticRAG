@@ -235,6 +235,14 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
   // number in a large headline font instead of read as "times" — only
   // show the unit suffix for the case that's actually unambiguous.
   const displayUnit = unit === '%' ? unit : '';
+  // "$" reads naturally PREPENDED to a number ("$2,907"), never appended
+  // — a bare, unit-less number in this card (e.g. a dividends-paid
+  // total with no "$" or scale indicator at all) reads as if the figure
+  // itself might be wrong, even when the text answer below it is
+  // correct. Confirmed real case: "Has CVS Health paid dividends...Q2
+  // of FY2022?" showed a bare "2,907" here with nothing marking it as a
+  // dollar amount.
+  const displayPrefix = unit === '$' ? unit : '';
 
   return (
     <div style={{
@@ -254,7 +262,7 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
             <span key={pt.year} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
               {i > 0 && <span style={{ fontSize: 20, color: '#6ee7b7' }}>→</span>}
               <span style={{ fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-                {formatResultValue(pt.value)}{displayUnit}
+                {displayPrefix}{formatResultValue(pt.value)}{displayUnit}
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#059669', marginLeft: 4 }}>
                   ({pt.year})
                 </span>
@@ -264,13 +272,13 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
         </div>
       ) : (
         <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-          {formatResultValue(value)}{displayUnit}
+          {displayPrefix}{formatResultValue(value)}{displayUnit}
         </div>
       )}
       {hasSeries && delta !== null && delta !== undefined && (
         <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: '#047857' }}>
           {direction === 'increased' ? '↑' : direction === 'decreased' ? '↓' : '—'}{' '}
-          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}{displayUnit}
+          {direction || 'changed'} by {displayPrefix}{formatResultValue(Math.abs(delta))}{displayUnit}
         </div>
       )}
       <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
