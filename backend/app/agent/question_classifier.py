@@ -539,6 +539,16 @@ class FinanceBenchClassifier:
             "mgm resorts": "MGM Resorts", "mgm": "MGM Resorts",
             "american express": "American Express", "amex": "American Express",
             "ulta beauty": "Ulta Beauty", "ulta": "Ulta Beauty",
+            # Same gap as the MGM/AmEx/Ulta entries above: PDFs for these
+            # were added to the corpus but the company name was never
+            # registered here, leaving entity resolution dependent on the
+            # fragile "grab a capitalized token" fallback below. Confirmed
+            # real case: "Has Verizon increased its debt on balance
+            # sheet...?" resolved entity to something that failed to
+            # discriminate Verizon's own filing from 3M's (both loaded in
+            # the same corpus), pulling in 3M's total debt figures for a
+            # question entirely about Verizon.
+            "verizon": "Verizon",
         }
         # Plain "if keyword in q" substring matching lets a short key match
         # INSIDE an unrelated word — confirmed real case: the "ge" key

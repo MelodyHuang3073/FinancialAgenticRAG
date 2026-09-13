@@ -10,12 +10,13 @@ FinAgent-RAG Orchestrator
   6. LLM 回答綜合（llm_client）
 """
 
+import re
 from typing import Dict, Any, List, Optional
 
 from app.rag.vector_store import FinancialVectorStoreManager
 from app.agent.question_classifier import FinanceBenchClassifier, _detect_narrative_topic_query
 from app.agent.decomposer import QueryDecomposer
-from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year
+from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import LLMAnswerGenerator
@@ -311,8 +312,32 @@ class FinAgentRAGOrchestrator:
                             for ev in evidence_buffer:
                                 if ev.get("type") != "table_row":
                                     continue
-                                c = ev.get("content", "").lower()
-                                if year in c and metric.replace("_", " ") in c:
+                                c = ev.get("content", "") or ""
+                                if year not in c:
+                                    continue
+                                # Bare substring co-occurrence of the metric
+                                # NAME anywhere in the row's whole serialized
+                                # content (company/report prefix included)
+                                # false-positives whenever an UNRELATED row
+                                # happens to share a word with the target
+                                # metric -- e.g. a "Deferred revenue" row
+                                # satisfying a "revenue" sub-query, or a
+                                # "Total borrowings of long-term debt" row
+                                # satisfying a "debt" sub-query for a
+                                # different line item entirely. Classify the
+                                # row's OWN "Line Item: ..." label through
+                                # the same canonical-mapping logic used
+                                # everywhere else in this codebase (handles
+                                # the "Deferred"/"non-" negation-prefix cases
+                                # already) and require it to actually BE the
+                                # target canonical, not merely mention it.
+                                m = re.search(r"Line Item:\s*([^|]+?)\s*\|", c)
+                                if not m:
+                                    continue
+                                row_canonical = _get_canonical(
+                                    m.group(1), ev.get("company", "") or ""
+                                )
+                                if row_canonical == metric:
                                     return True
                             return False
 
@@ -621,8 +646,31 @@ class FinAgentRAGOrchestrator:
 
         q_lower = query.lower()
         # Normalise helper: strip year tokens, underscores, hyphens
+        #
+        # \b only fires at a word/non-word transition, and both "_" and
+        # digits count as word characters to regex -- so \b2022\b never
+        # matches inside "3M_2022_10K" (underscore on both sides) at
+        # all, silently leaving the year token in norm_corpus. Every
+        # OTHER same-year company's filing then ALSO keeps its own
+        # literal year token, and a query merely mentioning that year
+        # (as a two-year comparison like "between 2022 and 2021"
+        # routinely does) scores a spurious match against EVERY one of
+        # them equally via the "corpus words appear in query" signal
+        # below -- ties broken by nothing but iteration order once the
+        # real classifier-entity-based scores (which correctly stay at
+        # 0 for a company genuinely not yet in uploaded_files) can't
+        # break them. (?<!\d)...(?!\d) checks for a DIGIT boundary
+        # instead, matching the same fix already applied to this
+        # method's own query_years extraction just below (_YEAR_RE) --
+        # underscore isn't a digit, so this correctly strips the year
+        # out of "3M_2022_10K" too. Confirmed real case: "Has Verizon
+        # increased its debt...between 2022 and the 2021 fiscal
+        # period?" resolved matched-entity to "3M_2022_10K" -- the
+        # first 2022-year filing in upload order -- because "2022"
+        # survived normalisation on every 2022 filing's own company
+        # string, tying all of them at the same score.
         def _normalise(s: str) -> str:
-            s = _re.sub(r'\b(20|19)\d{2}\b', '', s)   # strip years
+            s = _re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', s)   # strip years
             s = _re.sub(r'[_\-]+', ' ', s)             # underscores → spaces
             return s.lower().strip()
 
