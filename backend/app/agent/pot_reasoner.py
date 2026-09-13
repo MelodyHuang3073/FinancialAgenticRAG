@@ -105,6 +105,30 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     # existed to route a direct-lookup answer to it, so the sandbox fell
     # back to a generic dump with result=0.0.
     ("dividends_paid", ["dividends paid", "cash dividends paid", "dividends", "股利"]),
+    # A "Has X paid dividends...?" question is really asking about the
+    # PER-SHARE rate a shareholder actually received, not the aggregate
+    # cash outflow — but the aggregate ("Dividends paid", a cash-flow-
+    # statement line) and this per-share rate ("Dividends declared per
+    # share", an income-statement line) are two DIFFERENT real rows, and
+    # only the aggregate had a canonical to route to before this entry
+    # existed. Every alias here deliberately contains "per share" so
+    # _score_row_match()'s existing per-share exclusion filter (which
+    # would otherwise reject any row shaped like an EPS/per-unit figure
+    # for every OTHER canonical) treats this as the one canonical a
+    # per-share row is legitimately allowed to match. Confirmed real
+    # case: CVS Health's own FY2022 "Dividends declared per share" row
+    # (2.20, from which the quarterly $0.55 rate derives) was already
+    # being extracted successfully into the PoT variable dump the whole
+    # time, but nothing ever routed a "has paid dividends" question's
+    # answer to it — the frontend's headline result card showed the
+    # aggregate $2,907.0 million instead of the $0.55/share rate a
+    # shareholder actually cares about.
+    ("dividends_per_share", [
+        "dividends declared per share", "dividends declared per common share",
+        "cash dividends declared per share", "dividends per common share",
+        "dividends per share", "dividend per share",
+        "每股股利", "每股現金股利",
+    ]),
     # Misc
     ("data_center_rev",["data center revenue", "data center"]),
 ]
@@ -253,6 +277,220 @@ _CARVEOUT_ANYWHERE_RE = re.compile(
 #: check right after "share" would never fire there at all (confirmed
 #: real case: Coca-Cola's own "BASIC NET INCOME PER SHARE1" row).
 _PER_SHARE_ANYWHERE_RE = re.compile(r'per\s+(?:common\s+|diluted\s+|basic\s+)?share')
+
+#: A "Has X paid dividends to common shareholders...?" question is a
+#: Yes/No lookup — the number a shareholder actually cares about there
+#: is the per-share rate, not the aggregate cash outflow (a company can
+#: pay a materially different aggregate purely from a share-count
+#: change with an unchanged per-share rate, or vice versa). Kept
+#: strictly to this "has ... paid" phrasing so an explicit amount
+#: request ("How much did X pay in cash dividends for FY2020?", "what
+#: is the aggregate dividends paid") keeps using the real aggregate —
+#: this must never widen to match those, or it would silently swap the
+#: correct dollar-total answer for a cents-per-share one. See the
+#: dividends_per_share canonical's own docstring in _ITEM_TAXONOMY for
+#: the confirmed real case this exists for.
+_YESNO_DIVIDEND_QUERY_RE = re.compile(r'\bhas\b[^.?]{0,60}\bpaid\s+dividends?\b', re.IGNORECASE)
+
+#: Not every filer states its dividend rate as a clean standalone
+#: "Dividends declared per share" table row the way CVS does — many
+#: only ever state it in a narrative sentence (e.g. "we paid dividends
+#: of $0.0025 per share [in each of several months], totaling $X
+#: million for <year>"), which the dividends_per_share canonical above
+#: (row-label matching only) can never see. A dollar amount ending in
+#: "per share" within one SENTENCE that also names the target year is
+#: a reliable enough anchor — a filing routinely restates a PRIOR
+#: year's now-superseded rate elsewhere for context (e.g. "we reduced
+#: our dividend to $X per share in <earlier year>"), so requiring the
+#: target year inside the SAME sentence, not just the same page/chunk,
+#: is what keeps this from grabbing a stale rate.
+#:
+#: The "any char but a period" sentence-boundary idiom ([^.]*) is
+#: WRONG for financial text specifically: a dollar amount's own decimal
+#: point ("$0.55") is also a literal ".", so [^.]* stops dead at the
+#: FIRST dollar amount's decimal point and can never reach a LATER one
+#: in the same sentence — e.g. "...dividend was $0.55, $0.50 and $0.50
+#: per share, respectively" would never match at all, since crossing
+#: from "dividend" to "per share" requires passing three separate
+#: decimal points. _NOT_SENTENCE_END matches any character (including
+#: newlines) that ISN'T a period immediately followed by whitespace —
+#: a decimal point is always followed by a digit, never whitespace, so
+#: it's transparently crossed, while a genuine sentence-ending period
+#: (always followed by a space in PDF-extracted text) still stops the
+#: scan.
+_NOT_SENTENCE_END = r'(?:(?!\.\s)[\s\S])'
+_DIVIDEND_PER_SHARE_SENTENCE_RE = re.compile(
+    rf'({_NOT_SENTENCE_END}*?\$\s*(\d+\.\d+)\s*per\s+share{_NOT_SENTENCE_END}*\.)', re.IGNORECASE
+)
+
+#: A standard, generic SEC-filing convention for stating several years'
+#: dividend rate in ONE sentence: a list of years and a list of dollar
+#: amounts, tied together only by a trailing "respectively" and
+#: matching LIST ORDER -- e.g. "During 2022, 2021 and 2020, the
+#: quarterly cash dividend was $0.55, $0.50 and $0.50 per share,
+#: respectively" (years-then-amounts) or "...was $0.55 and $0.50 per
+#: share in 2022 and 2021, respectively" (amounts-then-years). Neither
+#: shape is reachable by _DIVIDEND_PER_SHARE_SENTENCE_RE above, which
+#: requires a dollar amount immediately adjacent to "per share" --
+#: here only the LAST amount in the list sits next to that phrase, so
+#: that regex alone would silently grab an EARLIER year's now-
+#: superseded rate instead of the target year's own. Not specific to
+#: CVS -- stating N years' rates in one sentence via "respectively" is
+#: a routine, generic SEC drafting convention for any recurring metric,
+#: not just dividends.
+_DIVIDEND_RESPECTIVELY_SENTENCE_RE = re.compile(
+    rf'({_NOT_SENTENCE_END}*?\bdividends?\b{_NOT_SENTENCE_END}*?\brespectively\b{_NOT_SENTENCE_END}*\.)', re.IGNORECASE
+)
+_YEAR_TOKEN_RE = re.compile(r'\b(?:19|20)\d{2}\b')
+_DOLLAR_AMOUNT_TOKEN_RE = re.compile(r'\$\s*(\d+\.\d+)')
+
+
+def _parse_respectively_dividend_sentence(sentence: str) -> List[Tuple[str, float]]:
+    """
+    Extract (year, value) pairs from one "...$A, $B and $C per share
+    [...] <year1>, <year2> and <year3>, respectively"-shaped sentence
+    (or the amounts-after-years variant) by zipping the years and
+    dollar amounts found IN THEIR OWN LEFT-TO-RIGHT ORDER — matching
+    list length is what confirms this sentence really is the "N years,
+    N amounts, respectively" shape rather than some other unrelated
+    construction that happens to contain both a year and a dollar
+    amount. See _DIVIDEND_RESPECTIVELY_SENTENCE_RE's docstring.
+    """
+    years = _YEAR_TOKEN_RE.findall(sentence)
+    amounts = _DOLLAR_AMOUNT_TOKEN_RE.findall(sentence)
+    if not years or len(years) != len(amounts):
+        return []
+    pairs = []
+    for yr, amt in zip(years, amounts):
+        val = _to_float(amt)
+        if val is not None and val > 0:
+            pairs.append((yr, val))
+    return pairs
+
+#: A rate INCREASE the Board authorizes near a fiscal year's end
+#: routinely doesn't take effect until the FOLLOWING year (e.g. "In
+#: December 2022, the Board authorized a 10% increase in the quarterly
+#: cash dividend to $0.605 per share effective in 2023") -- the target
+#: year appears in the sentence (the authorization date), but the rate
+#: itself was never actually paid during that year. A trailing
+#: "effective (in) <year>" naming a DIFFERENT year than the one being
+#: asked about is a reliable, generic signal this candidate describes
+#: a future rate, not the target year's own.
+_DIVIDEND_EFFECTIVE_YEAR_RE = re.compile(
+    r'effective\s+(?:in\s+|as\s+of\s+)?(?:[A-Za-z]+\s+\d{1,2},?\s+)?(\d{4})', re.IGNORECASE
+)
+
+#: A question naming a specific QUARTER ("Q2 of FY2022", "the second
+#: quarter of 2022") wants that quarter's own per-share rate, not the
+#: full year's total -- a filing's clean structured "Dividends declared
+#: per share" row is always the ANNUAL figure, so this is checked
+#: separately from _YESNO_DIVIDEND_QUERY_RE to route those questions
+#: straight to the narrative rate instead (see the dividends_paid ->
+#: dividends_per_share swap site).
+_QUARTER_QUERY_RE = re.compile(
+    r'\bq[1-4]\b|\b(?:first|second|third|fourth)\s+quarter\b', re.IGNORECASE
+)
+
+
+def _extract_narrative_dividend_per_share(
+    evidence_list: List[Dict[str, Any]], target_year: Optional[str],
+    prefer_quarterly: bool = False,
+) -> Optional[Tuple[float, str]]:
+    """
+    Last-resort scan of narrative evidence for a dividend-per-share rate
+    tied to `target_year`, for filers with no clean structured
+    "Dividends declared per share" row at all (or, when
+    `prefer_quarterly` is set, for a per-QUARTER rate no structured row
+    ever states at all — see _QUARTER_QUERY_RE's docstring). See
+    _DIVIDEND_PER_SHARE_SENTENCE_RE's docstring for why the year must
+    be inside the SAME sentence as the dollar amount.
+
+    A filing routinely states BOTH a per-QUARTER rate ("we paid
+    dividends of $0.0025 per share [in each of four months]") and the
+    already-annualized total ("we maintained an annual dividend of
+    $0.01 per share throughout <year>") for the SAME year — the two
+    aren't interchangeable, and which one a "Has X paid dividends...?"
+    question wants depends on whether it named a specific quarter.
+    Collects every matching sentence across all evidence first and
+    prefers whichever granularity was asked for over the other, rather
+    than returning on the first match found — retrieval order is non-
+    deterministic, so "first found" would otherwise flip between the
+    two per run for the exact same underlying filing.
+    """
+    if not target_year:
+        return None
+    # (matches_granularity, is_positionally_verified, val, detail) --
+    # is_positionally_verified is True only for a _respectively_-parsed
+    # candidate, which pairs its value with the target year by INDEX
+    # POSITION in two same-length lists (see
+    # _parse_respectively_dividend_sentence), a strictly more reliable
+    # signal than the single-value regex's "nearest number before 'per
+    # share'" heuristic -- the SAME "N years, N amounts, respectively"
+    # sentence also satisfies the single-value regex (it too contains a
+    # literal "$X.XX per share"), but that regex has no way to know
+    # WHICH of several amounts in the list actually belongs to the
+    # target year, so it always grabs the LAST one. Without this as an
+    # explicit tie-break, Python's stable sort would keep whichever
+    # candidate was inserted first regardless of which is actually
+    # correct. Confirmed real case: CVS Health's own "During 2022, 2021
+    # and 2020, the quarterly cash dividend was $0.55, $0.50 and $0.50
+    # per share, respectively" -- the single-value regex's own "nearest
+    # number" grab returned 2020's $0.50 for a 2022 question, tying
+    # in matches_granularity with the correctly year-paired $0.55 and
+    # winning by insertion order alone.
+    candidates: List[Tuple[bool, bool, float, str]] = []
+    for ev in evidence_list:
+        content = ev.get("parent_content") or ev.get("content", "")
+        if not content or "dividend" not in content.lower():
+            continue
+        for sentence, amount in _DIVIDEND_PER_SHARE_SENTENCE_RE.findall(content):
+            # "dividend" must be checked against THIS sentence, not just
+            # somewhere on the same page/chunk -- a financing-activities
+            # page routinely discusses both dividends AND an unrelated
+            # share-repurchase/treasury-stock transaction that ALSO
+            # states its own "$X.XX per share" price, and the page-wide
+            # check above can't tell those two "per share" sentences
+            # apart. Confirmed real case: CVS Health's own "6 million
+            # shares at a price of $103.34 per share, which were placed
+            # into treasury stock in January 2022" sentence was returned
+            # as the dividend rate purely because the word "dividend"
+            # appeared elsewhere on the same page.
+            if "dividend" not in sentence.lower():
+                continue
+            if target_year not in sentence:
+                continue
+            eff_match = _DIVIDEND_EFFECTIVE_YEAR_RE.search(sentence)
+            if eff_match and eff_match.group(1) != target_year:
+                continue
+            val = _to_float(amount)
+            if val is None or val <= 0:
+                continue
+            is_annual = "annual" in sentence.lower()
+            is_quarterly = bool(re.search(r'\bquarter(?:ly)?\b', sentence, re.IGNORECASE))
+            matches_granularity = is_quarterly if prefer_quarterly else is_annual
+            candidates.append((matches_granularity, False, val, " ".join(sentence.split())[:200]))
+
+        # "$A, $B and $C per share ... <year1>, <year2> and <year3>,
+        # respectively"-shaped sentences (see
+        # _DIVIDEND_RESPECTIVELY_SENTENCE_RE's docstring) aren't
+        # reachable by the single-value regex above at all — handled as
+        # a separate pass rather than folded into it, since this one
+        # genuinely needs the WHOLE sentence to positionally pair each
+        # year with its own amount, not just the text immediately
+        # around a single "$X.XX per share" match.
+        for sentence in _DIVIDEND_RESPECTIVELY_SENTENCE_RE.findall(content):
+            for yr, val in _parse_respectively_dividend_sentence(sentence):
+                if yr != target_year:
+                    continue
+                is_annual = "annual" in sentence.lower()
+                is_quarterly = bool(re.search(r'\bquarter(?:ly)?\b', sentence, re.IGNORECASE))
+                matches_granularity = is_quarterly if prefer_quarterly else is_annual
+                candidates.append((matches_granularity, True, val, " ".join(sentence.split())[:200]))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+    _, _, val, detail = candidates[0]
+    return val, detail
 
 
 def _is_negated_match(item_lower: str, match_start: int) -> bool:
@@ -2683,7 +2921,7 @@ def _infer_target_canonical(query_lower: str) -> Optional[str]:
 #: retention_ratio/free_cash_flow's formula_expr (abs(dividends_paid),
 #: abs(capex)) — extended here to the Direct-lookup path, which builds its
 #: own "result = {code_key}" line independently of any formula_expr.
-_MAGNITUDE_ONLY_CANONICALS = {"dividends_paid", "capex", "income_tax"}
+_MAGNITUDE_ONLY_CANONICALS = {"dividends_paid", "dividends_per_share", "capex", "income_tax"}
 
 #: (regex-friendly trigger, multiplier applied to a value that is natively
 #: reported in MILLIONS — the near-universal SEC 10-K convention). Detects
@@ -3105,6 +3343,7 @@ def _build_calculation_code(
     query_years: Optional[List[str]] = None,
     degraded_notes: Optional[List[str]] = None,
     detected_unit: Optional[List[str]] = None,
+    evidence_list: Optional[List[Dict[str, Any]]] = None,
 ) -> bool:
     """
     Build the calculation section of the PoT code.
@@ -3359,6 +3598,51 @@ def _build_calculation_code(
     # explicit "could not find structured financial data" message,
     # instead of confidently stating a number that has nothing to do
     # with what was asked.
+    # A "Has X paid dividends...?" Yes/No question's headline number
+    # should be the per-share rate, not the aggregate cash outflow —
+    # see _YESNO_DIVIDEND_QUERY_RE's docstring. Only swaps target_
+    # canonical when the per-share canonical actually has data (a
+    # filing without a clean "Dividends declared per share" row keeps
+    # using the aggregate exactly as before).
+    if target_canonical == "dividends_paid" and _YESNO_DIVIDEND_QUERY_RE.search(q_lower):
+        narrative_year = preferred_year or (query_years[-1] if query_years else None)
+        # A question naming a specific quarter ("Q2 of FY2022") wants
+        # THAT quarter's own rate -- a filing's structured "Dividends
+        # declared per share" row is always the ANNUAL figure, so it's
+        # the wrong granularity here even when it covers the right
+        # year. Skip straight to the narrative rate-quote scan (which
+        # can tell a quarterly rate from an annual one via the
+        # sentence's own wording) rather than ever trusting the
+        # structured row for a quarter-specific question. Confirmed
+        # real case: CVS Health's own "Has ... paid dividends to common
+        # shareholders in Q2 of FY2022?" showed the full-year $2.20/
+        # share total in the headline result card instead of the
+        # $0.55/share quarterly rate the question actually asked about
+        # (and the answer text itself already correctly worked out).
+        wants_quarter = bool(_QUARTER_QUERY_RE.search(q_lower))
+        per_share_group = [] if wants_quarter else (groups.get("dividends_per_share") or [])
+        # A stale OTHER YEAR's per-share rate (e.g. a same-company
+        # earlier filing's own row, entity-matched loosely across
+        # years) is actively misleading here, unlike the aggregate --
+        # only trust this canonical when one of its candidates actually
+        # covers the year being asked about.
+        if per_share_group and (not narrative_year or any(v.get("year") == narrative_year for v in per_share_group)):
+            target_canonical = "dividends_per_share"
+        elif evidence_list is not None:
+            # No clean structured per-share row for the RIGHT
+            # year/granularity -- last resort, scan the SAME evidence
+            # for a narrative "$X.XX per share" sentence naming the
+            # target year. See _extract_narrative_dividend_per_share's
+            # docstring.
+            found = _extract_narrative_dividend_per_share(evidence_list, narrative_year, prefer_quarterly=wants_quarter)
+            if found:
+                val, source_detail = found
+                code_lines.append(f"result = {val}  # dividends per share (narrative) <- {source_detail}")
+                code_lines.append(f"print(f'Dividends per share ({narrative_year}): {{result}}')")
+                if detected_unit is not None:
+                    detected_unit.append("$")
+                return True
+
     vars_to_use = groups.get(target_canonical, []) if target_canonical else []
 
     if vars_to_use:
@@ -3476,7 +3760,7 @@ class ProgramOfThoughtReasoner:
                 # Build the calculation
                 success_calc = _build_calculation_code(
                     code_lines, extracted_table, query, q_lower, preferred_year, query_years,
-                    degraded_notes, detected_unit,
+                    degraded_notes, detected_unit, evidence_list,
                 )
                 if not success_calc:
                     # The evidence DID contain some structured table data,
@@ -3505,7 +3789,7 @@ class ProgramOfThoughtReasoner:
                     code_lines.append("# Calculation (from narrative text)")
                     success_calc = _build_calculation_code(
                         code_lines, free_text_extracted, query, q_lower, preferred_year, query_years,
-                        degraded_notes, detected_unit,
+                        degraded_notes, detected_unit, evidence_list,
                     )
                     if not success_calc:
                         # Same fix as the extracted_table branch above: no
