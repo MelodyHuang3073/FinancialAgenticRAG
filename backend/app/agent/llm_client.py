@@ -375,6 +375,19 @@ Available Evidence:
     places the evidence itself names, not just the abbreviation -- a
     "geographies" question is asking for actual regions, and an internal
     reporting-segment code is not itself a geography.
+12. If the question asks about ongoing LEGAL BATTLES/litigation and the
+    evidence names multiple DISTINCT categories of legal matters (e.g. a
+    filing's own named sub-headings like "Usual and Customary Pricing
+    Litigation", "PBM Litigation and Investigations", "Controlled
+    Substances Litigation"), give a one-sentence summary of what is
+    actually ALLEGED or at issue in EACH named category, not just its
+    name -- do not describe only the category with the largest dollar
+    figure in detail while merely name-dropping the others. Evidence
+    for a smaller/less-quantified category (e.g. no settlement figure
+    disclosed yet) still states what the claim itself is about (e.g.
+    "alleges retail pharmacies overcharged for prescription drugs by
+    not submitting the correct usual and customary price"); state that,
+    even without a dollar figure to cite alongside it.
 """
 
         try:

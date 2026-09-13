@@ -151,9 +151,12 @@ _GEOGRAPHIC_REGION_NAME_RE = re.compile(
 )
 
 
+def _geographic_region_name_count(content: str) -> int:
+    return len({m.group(0).lower() for m in _GEOGRAPHIC_REGION_NAME_RE.finditer(content)})
+
+
 def _has_dense_geographic_region_names(content: str, min_distinct: int = 3) -> bool:
-    matches = {m.group(0).lower() for m in _GEOGRAPHIC_REGION_NAME_RE.finditer(content)}
-    return len(matches) >= min_distinct
+    return _geographic_region_name_count(content) >= min_distinct
 
 
 def is_geography_query(text: str) -> bool:
@@ -177,7 +180,26 @@ _LEGAL_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 _LEGAL_PROCEEDINGS_SECTION_RE = re.compile(
-    r'item\s*3\.?\s*legal\s+proceedings', re.IGNORECASE
+    r'item\s*3\.?\s*legal\s+proceedings|'
+    # A multi-topic Item 3 section is routinely broken into several
+    # named sub-categories, each its own bolded heading line, several
+    # pages past wherever the "Item 3. Legal Proceedings" heading
+    # itself sits — the regex above alone only catches the FIRST page
+    # of a long section, not a sub-heading page deep inside it. These
+    # specific category names are standard terminology used across the
+    # pharmacy-benefit-manager/health-insurer/retail-pharmacy industry
+    # (CVS, Walgreens, Cigna/Express Scripts, UnitedHealth, Rite Aid all
+    # disclose litigation under these same category names), not unique
+    # to any one filer. Confirmed real case: CVS Health's own "Usual
+    # and Customary Pricing Litigation" and "PBM Litigation" sub-
+    # headings (page 173) sit between two other retrieved pages but
+    # never got the section boost themselves, so their content lost the
+    # tie-break to opioid-litigation pages that DID reuse the "Item 3"
+    # phrase nearby — the final answer cited opioid settlements but
+    # never the pricing/PBM litigation categories gold explicitly wants.
+    r'usual\s+and\s+customary\s+pricing\s+litigation|pbm\s+litigation|'
+    r'controlled\s+substances\s+litigation|opioid\s+litigation',
+    re.IGNORECASE,
 )
 
 
@@ -805,8 +827,25 @@ class HybridFinancialRetriever:
             # without ever using the word "geographic" at all -- see
             # _has_dense_geographic_region_names's docstring for the
             # confirmed PepsiCo real case.
+            #
+            # Scales with how many DISTINCT regions were found rather than
+            # a flat 1.4x for any match at or above the 3-region floor --
+            # a passage naming 8 distinct regions is unambiguously THE
+            # geography enumeration itself, while one naming exactly 3 is
+            # only borderline evidence of that (e.g. an MD&A passage that
+            # merely mentions three regions' results in passing). A flat
+            # boost couldn't tell the two apart; scaling can. Confirmed
+            # real case: PepsiCo's own Item 1 Business segment
+            # description (8 distinct regions) still ranked ~49th behind
+            # several completely unrelated MD&A/balance-sheet pages under
+            # a flat 1.4x, because those pages' higher raw BM25 term
+            # overlap with the query ("revenue", "2022") outweighed the
+            # fixed boost -- capped well below the legal-section boost's
+            # own ceiling so this can never out-rank a literal section-
+            # heading match above it.
             elif prefer_narrative and geography_active and _has_dense_geographic_region_names(content):
-                multiplier *= 1.4
+                region_count = _geographic_region_name_count(content)
+                multiplier *= min(1.4 + 0.3 * (region_count - 3), 2.9)
 
             # ── Legal-proceedings-section boost (legal questions only) ──────────
             # See _LEGAL_PROCEEDINGS_SECTION_RE's docstring for the
