@@ -307,6 +307,43 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "unit": "%",
         "period_average": True,
     },
+    "ebitda_unadjusted_less_capex": {
+        # Registered BEFORE the plain "ebitda_unadjusted" below (same
+        # "more specific must be checked first" convention as
+        # fixed_asset_turnover/asset_turnover elsewhere in this
+        # library) — a question asking for "unadjusted EBITDA less
+        # capex" is a DIFFERENT, three-variable metric, not the same
+        # two-variable "unadjusted EBITDA" with an extra clause the
+        # formula happens to ignore. Without its own entry, "unadjusted
+        # ebitda" alone matches first, resolves successfully with just
+        # op_income+depreciation, and the whole "less capex" half of
+        # the question is silently dropped — the formula never even
+        # tries to retrieve capex, since it isn't one of ITS required
+        # vars. Confirmed real case: PepsiCo's own "What is the FY2022
+        # unadjusted EBITDA less capex...?" (gold $9,068M) matched
+        # ebitda_unadjusted and returned bare EBITDA ($14,275M) with
+        # the model's own answer stating capex "is not shown in the
+        # provided cash flow extract" — capex was never searched for
+        # at all, not merely missing from evidence.
+        "keywords_zh": ["未調整EBITDA減資本支出", "未調整EBITDA扣除資本支出"],
+        "keywords_en": ["unadjusted ebitda less capex", "unadjusted ebitda minus capex",
+                         "unadjusted ebitda - capex"],
+        # abs(capex): same sign convention as capex_to_revenue elsewhere
+        # in this library -- a cash-flow-statement capex line is
+        # routinely a parenthesised/negative outflow figure.
+        "formula_expr": "op_income + depreciation - abs(capex)",
+        "required_vars": {
+            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+                              "income from operations"],
+            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+                              "depreciation", "amortization", "d&a"],
+            "capex":        ["capital expenditures", "capital expenditure", "purchases of property",
+                              "purchases of property and equipment",
+                              "purchases of property, plant and equipment", "資本支出"],
+        },
+        "result_label": "Unadjusted EBITDA less CapEx",
+        "unit": "",
+    },
     "ebitda_unadjusted": {
         # A plain "operating income + D&A" sum — distinct from ebitda_margin
         # above (a ratio) and from a fully-adjusted EBITDA (which would add
@@ -522,6 +559,60 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "result_label": "Debt-to-Assets Ratio",
         "unit": "%",
     },
+    "debt_change_yoy": {
+        # "Has X increased its debt on balance sheet...?" has no formula
+        # of its own before this entry existed at all -- it isn't a
+        # ratio, so debt_to_equity/debt_to_assets above never match it,
+        # and the question fell through to an ungrounded LLM guess that
+        # happened to print a hollow "0.0" alongside a coincidentally-
+        # correct Yes/No. required_vars are placeholder names deliberately
+        # DISTINCT from "total_debt" (used by debt_to_equity/debt_to_assets
+        # for "total liabilities") -- this question means actual
+        # borrowings (loans/notes/bonds), a much smaller, different
+        # figure -- see _COMPOSITE_ITEM_ALIASES's own
+        # "total_borrowings_old"/"total_borrowings_new" entries in
+        # pot_reasoner.py for why this needs summing TWO separate
+        # balance-sheet rows ("Long-term debt" + "Current portion of
+        # long-term debt") rather than a single alias match. multi_year
+        # (not period_average): this is a two-point comparison with a
+        # direction, the same shape as any other YoY trend question.
+        "keywords_zh": ["負債是否增加", "負債是否減少", "舉債增加", "舉債減少"],
+        "keywords_en": ["increased its debt", "increased debt on balance sheet",
+                         "decreased its debt", "debt on balance sheet"],
+        "formula_expr": "total_borrowings_new - total_borrowings_old",
+        # "long-term debt" is deliberately NOT one of this formula's own
+        # required_vars aliases (only "total debt" is), even though it
+        # IS one of the composite fallback's sub-item aliases in
+        # pot_reasoner.py's _COMPOSITE_ITEM_ALIASES above -- a filer
+        # that discloses an explicit "Total debt" total (most do,
+        # typically in its own debt note) states it ALONGSIDE several
+        # OTHER rows that also happen to contain the substring
+        # "long-term debt" ("Long-term debt" on the balance sheet
+        # itself, "Total long-term debt", "Total long-term debt,
+        # including current maturities" in the note) -- if "long-term
+        # debt" were also a primary alias here, its higher matched
+        # FREQUENCY (several same-labeled rows) can outrank the single,
+        # correctly-scoped "Total debt" row in the extraction
+        # reduction's tie-break, even though "Total debt" is the exact,
+        # authoritative figure. Confirmed real case: Verizon's own debt
+        # note states "Total debt $150,639 $150,868" (change -229,
+        # matching gold's own "$229 million decrease" exactly), but
+        # with "long-term debt" also in this list, extraction picked
+        # the balance sheet's narrower "Long-term debt" row (140,676 /
+        # 143,425, change -2,749) instead purely on higher frequency.
+        # Keeping "long-term debt" ONLY in the composite fallback (used
+        # exclusively when this primary alias finds nothing at all)
+        # still correctly resolves a filer like Microsoft that has NO
+        # "Total debt" row anywhere, only "Long-term debt" + "Current
+        # portion of long-term debt" as two separate lines.
+        "required_vars": {
+            "total_borrowings_old": ["total debt"],
+            "total_borrowings_new": ["total debt"],
+        },
+        "multi_year": True,
+        "result_label": "Change in Total Debt",
+        "unit": "$",
+    },
     "interest_coverage": {
         "keywords_zh": ["利息保障倍數", "利息覆蓋率"],
         "keywords_en": ["interest coverage", "times interest earned", "interest coverage ratio"],
@@ -590,6 +681,37 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "result_label": "Asset Turnover",
         "unit": "x",
         "multi_year": True,
+    },
+    "capital_intensity_ratio": {
+        # "Is X a capital-intensive business...?" (an ASSESSMENT-mode
+        # question, not a bare numeric one) previously matched NO
+        # formula at all -- ASSESSMENT questions still route through
+        # detect_formula() when one exists (see orchestrator.py's
+        # non_numeric_formula check), which drives formula-guided
+        # retrieval for the SPECIFIC values needed instead of a generic
+        # topic-keyword search. Without this entry, "capital-intensive"
+        # retrieval fell back to the generic ASSESSMENT fallback_suffix
+        # ("capital expenditure assets depreciation"), which doesn't
+        # reliably surface a company's OWN total assets/revenue
+        # together -- confirmed real case: 3M's and CVS Health's own
+        # "Is X a capital-intensive business...?" questions answered
+        # "I cannot conclude... the filing excerpts lack CapEx and PP&E
+        # figures" despite those figures existing in the corpus.
+        # total_assets / revenue (single year, NOT averaged) matches
+        # FinanceBench's own definition verbatim -- Verizon's gold
+        # answer states "capital intensity ratio was approximately
+        # 2.774729 ... $2.77 of assets to generate $1 of revenue",
+        # i.e. assets/revenue for one fiscal year, the reciprocal of
+        # (and a DIFFERENT placeholder set from) asset_turnover above.
+        "keywords_zh": ["資本密集度", "資本密集"],
+        "keywords_en": ["capital-intensive", "capital intensive", "capital intensity ratio"],
+        "formula_expr": "total_assets / revenue",
+        "required_vars": {
+            "total_assets": ["總資產", "total assets", "assets"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+        },
+        "result_label": "Capital Intensity Ratio",
+        "unit": "x",
     },
     "cash_conversion_cycle": {
         # Must be registered BEFORE inventory_turnover/receivables_turnover/

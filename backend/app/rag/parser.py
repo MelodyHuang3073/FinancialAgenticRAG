@@ -1233,8 +1233,26 @@ class FinancialFileParser:
         # equipment," sitting in the first value slot — no alias for
         # "property and equipment, net" could ever match a label of just
         # "net $", so fixed-asset-turnover fell back to guessing.
+        # Bounded to AT MOST ONE reclaim, matching the single-stray-
+        # fragment scenario this is actually meant to fix (documented
+        # above) — an unbounded `while` here would also fire on a genuine
+        # multi-column HEADER row whose cells are non-numeric date/period
+        # strings ("January 28, 2023", "January 29, 2022", "January 30,
+        # 2021") rather than a wrapped label fragment: with no numeric
+        # cell to stop at, every column gets popped and PREPENDED in turn,
+        # which both destroys the header's column structure AND reverses
+        # the columns' left-to-right order in the process (each pop
+        # prepends, so the LAST cell ends up first). Confirmed real case:
+        # Best Buy's FY2023 cash-flow statement header row ("Fiscal Years
+        # Ended January 28, 2023 | January 29, 2022 | January 30, 2021")
+        # collapsed to a single garbled label "January 30, 2021 January
+        # 29, 2022 January 28, 2023 Fiscal Years Ended" — the subsequent
+        # year-header extraction then read the reversed text left-to-right
+        # and labeled the table's three columns "2021 | 2022 | 2023"
+        # instead of the real "2023 | 2022 | 2021", silently swapping
+        # FY2023's and FY2021's data on every row of the statement.
         _numeric_cell_re = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.?\d*\)?%?$')
-        while (
+        if (
             merged
             and merged[0].strip() not in ("—", "-", "–")
             and not _numeric_cell_re.match(merged[0].strip())
