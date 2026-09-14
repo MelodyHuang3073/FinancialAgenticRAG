@@ -1,4 +1,7 @@
+import json
 import os
+import sys
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from app.tools.table_parser import is_markdown_separator_row
@@ -13,6 +16,73 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 if load_dotenv is not None and os.path.exists(ENV_PATH):
     load_dotenv(ENV_PATH)
+
+
+# ── Daily free-token-quota tracker ──────────────────────────────────────────
+# OpenAI's response body/headers never say "this call was billed against
+# your paid balance instead of the free daily grant" -- there is no direct
+# per-call signal for that (confirmed via OpenAI's own docs/help center: the
+# only usage data a response carries is its OWN token counts, not a running
+# daily total or free/paid split). The account still has funds, so a call
+# past the free daily allowance succeeds exactly like any other call --
+# nothing fails, nothing looks different -- so this has to be tracked
+# locally: sum each call's own `usage.total_tokens` into a small per-day
+# file and flag once the known daily free-tier cap for mini/nano models
+# (10,000,000 tokens/day, confirmed by the user against their own OpenAI
+# account) is crossed. Notifies once per day, not on every call after.
+_USAGE_TRACK_PATH = os.path.join(BASE_DIR, ".llm_daily_usage.json")
+DAILY_FREE_TOKEN_CAP = 10_000_000
+
+# How many of the retrieved evidence items (sorted by relevance_score)
+# actually get formatted into the prompt text the LLM sees -- see
+# generate_answer()'s own use of this below for the full history/
+# reasoning. Exposed as a named module constant (not just a literal
+# slice index) so orchestrator.py can import it and report to the
+# frontend EXACTLY this same subset as "evidence_sources", instead of
+# the full unfiltered evidence_buffer (which can hold up to
+# RETRIEVAL_MAX_TOTAL=45 items) -- the frontend's own Source Evidence
+# panel was showing candidates the LLM never actually saw, making it
+# impossible to tell from the UI alone whether an answer's evidence
+# panel and its actual grounding agreed.
+EVIDENCE_PROMPT_CAP = 12
+
+
+def _record_daily_usage(model: str, total_tokens: int) -> None:
+    if not total_tokens:
+        return
+    today = date.today().isoformat()
+    state = {"date": today, "total_tokens": 0, "notified": False}
+    try:
+        if os.path.exists(_USAGE_TRACK_PATH):
+            with open(_USAGE_TRACK_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if loaded.get("date") == today:
+                state = loaded
+    except Exception:
+        pass  # a corrupt/unreadable tracker file just resets for today
+
+    state["date"] = today
+    state["total_tokens"] = state.get("total_tokens", 0) + total_tokens
+
+    crossed_now = (
+        not state.get("notified")
+        and state["total_tokens"] >= DAILY_FREE_TOKEN_CAP
+    )
+    if crossed_now:
+        state["notified"] = True
+        print(
+            f"[LLM DAILY FREE QUOTA] model='{model}' has used "
+            f"{state['total_tokens']:,} tokens today, past the "
+            f"{DAILY_FREE_TOKEN_CAP:,}-token/day free-tier cap -- further "
+            f"calls today are being billed against your paid balance.",
+            file=sys.stderr, flush=True,
+        )
+
+    try:
+        with open(_USAGE_TRACK_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
+        pass  # tracking is best-effort; never let it break a real LLM call
 
 
 def _is_reasoning_model(model_name: str) -> bool:
@@ -178,23 +248,45 @@ class LLMAnswerGenerator:
         sorted_evidence = sorted(
             evidence, key=lambda item: item.get("relevance_score") or 0, reverse=True
         )
-        # 6, not 4 -- a genuinely multi-page narrative topic (e.g. a
+        # 12, not 6 -- a genuinely multi-page narrative topic (e.g. a
         # litigation/legal-proceedings discussion, or a list of several
         # acquisitions each described on its own page) routinely has its
         # relevant content spread across MORE than 4 distinct pages, each
-        # scoring close to the others. Confirmed real case: Boeing's FY2022
+        # scoring close to the others. Confirmed real case (the ORIGINAL
+        # reason this was already raised from 4 to 6): Boeing's FY2022
         # "materially important ongoing legal battles" question has
         # relevant evidence on pages 4, 19, 113, 128, 146, 148, and 149 --
         # the one page naming the Lion Air/Ethiopian Airlines litigation
         # specifically (page 113) ranked 5th by score, just outside a
-        # 4-item cut, even though every one of those pages is genuinely
-        # about the same legal-proceedings topic. Each item can be up to
-        # 4000 chars (see max_chars above), so 6 items is still a modest
-        # ~24K-char evidence budget for a single LLM call.
+        # 4-item cut.
+        #
+        # Raised again from 6 to 12 for the SAME reason, a rank further
+        # out: two more confirmed real cases where the one genuinely
+        # correct passage scored close to, but just past, a 6-item cut --
+        # Boeing's OWN "who are Boeing's primary customers" question (the
+        # sentence stating "Revenues from the U.S. government... 40%...
+        # of consolidated revenues" ranked #9, edged out by several
+        # higher-scoring but topically-adjacent passages -- e.g. a
+        # DIFFERENT true statistic, "non-U.S. customers = 41% of
+        # revenues", answering a related but distinct question); and
+        # Johnson & Johnson's "what drove gross margin change" question
+        # (the passage listing the actual named drivers -- "One-time
+        # COVID-19 vaccine manufacturing exit related costs...", "driven
+        # by:" -- shares no literal "gross margin" wording at all, so it
+        # depends entirely on OTHER matched terms to rank, landing well
+        # outside a 6-item window even after a companion retrieval-layer
+        # fix (see orchestrator.py's RETRIEVAL_TOP_K_NARRATIVE) got it
+        # into the evidence buffer in the first place -- raising THIS cap
+        # too was still needed since a passage present in the buffer but
+        # cut from the prompt here is exactly as invisible to the LLM as
+        # one retrieval never found. Each item can be up to 4000 chars
+        # (see max_chars above), so 12 items is a still-reasonable ~48K-
+        # char evidence budget for a single LLM call on a modern context
+        # window.
         evidence_text = "\n".join(
             f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] "
             f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=4000)}"
-            for item in sorted_evidence[:6]
+            for item in sorted_evidence[:EVIDENCE_PROMPT_CAP]
         )
 
         pot_summary = ""
@@ -388,6 +480,21 @@ Available Evidence:
     "alleges retail pharmacies overcharged for prescription drugs by
     not submitting the correct usual and customary price"); state that,
     even without a dollar figure to cite alongside it.
+13. Before concluding that the evidence does NOT contain something the
+    question asks for (an acquisition, a litigation category, a specific
+    figure, a named note like "Acquisitions and Divestitures"), you MUST
+    actually scan every evidence item listed above first -- there are up
+    to 12 of them, and the one that answers the question is not always
+    the first or the most prominent-looking one. Do not conclude
+    "not disclosed in the provided excerpts" / "the relevant note is not
+    included" while an evidence item literally contains that note's own
+    heading and content -- this has been a confirmed real failure mode,
+    denying evidence that was directly present in the prompt. Confirmed
+    real case: Amcor's own "Note 5 - Acquisitions and Divestitures" note
+    (naming a Czech Republic plant, a Shanghai facility, and a New
+    Zealand manufacturer by name, with dollar amounts) was evidence
+    item #1 of 12, yet the answer claimed no such note was supplied at
+    all.
 """
 
         try:
@@ -402,6 +509,10 @@ Available Evidence:
                 if not _is_reasoning_model(self._model):
                     create_kwargs["temperature"] = 0.2
                 response = client.chat.completions.create(**create_kwargs)
+                usage = getattr(response, "usage", None)
+                total_tokens = getattr(usage, "total_tokens", None) if usage else None
+                if total_tokens:
+                    _record_daily_usage(self._model, total_tokens)
                 if response and getattr(response, "choices", None):
                     first_choice = response.choices[0]
                     message = getattr(first_choice, "message", None)
@@ -421,7 +532,35 @@ Available Evidence:
                                 parts.append(part.text)
                         if parts:
                             return "".join(parts).strip()
-        except Exception:
+        except Exception as e:
+            # Surface a quota/rate-limit failure loudly instead of silently
+            # returning None like every other failure here -- the caller's
+            # fallback behavior is unchanged (still just gets None either
+            # way), but without this, a daily free-tier quota running out
+            # mid-run (e.g. gpt-5-mini's own daily cap) looked identical to
+            # any other transient LLM hiccup: answers quietly got worse/
+            # emptier for the REST of a long test run with no visible sign
+            # of the actual cause in the console output. Detected via the
+            # OpenAI SDK's own error code/type when available, falling
+            # back to a substring check on the error text for whichever
+            # provider client is in use (openai vs. Google GenAI both
+            # raise their own exception types here).
+            err_code = getattr(e, "code", None) or getattr(getattr(e, "body", None), "get", lambda *_: None)("code")
+            err_text = str(e).lower()
+            is_quota_or_rate_limit = (
+                err_code in ("insufficient_quota", "rate_limit_exceeded")
+                or type(e).__name__ in ("RateLimitError",)
+                or "insufficient_quota" in err_text
+                or "quota" in err_text
+                or "rate_limit" in err_text
+                or "rate limit" in err_text
+                or "429" in err_text
+            )
+            if is_quota_or_rate_limit:
+                print(
+                    f"[LLM QUOTA/RATE-LIMIT] model='{self._model}' call failed: {e}",
+                    file=sys.stderr, flush=True,
+                )
             return None
 
         return None
