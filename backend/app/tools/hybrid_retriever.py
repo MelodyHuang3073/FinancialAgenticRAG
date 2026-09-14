@@ -1,3 +1,4 @@
+import math
 import re
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -412,8 +413,51 @@ class HybridFinancialRetriever:
         # much shorter, less informative passage that merely says "refer
         # to Note 5" without any of the real content, purely because it's
         # longer -- not because it's less relevant.
-        doc_lens = [len(self._tokenize(d.get('content', ''))) for d in corpus]
+        # Document-frequency table for BM25's IDF term -- without it, every
+        # matching token (a rare, meaningful word like "margin"/"jnj" OR an
+        # ultra-common stopword like "a"/"of"/"is"/"not"/"this", which
+        # appears in nearly every passage in the corpus) contributed
+        # EXACTLY the same score per occurrence. When a query's real
+        # content words don't literally appear in the one passage that
+        # actually answers it (common: a filing says "cost of products
+        # sold increased" where the question says "gross margin"), ranking
+        # degenerated into noise -- whichever unrelated candidate happened
+        # to also contain more incidental stopword substrings won, with no
+        # connection to topical relevance at all. Confirmed real case:
+        # Johnson & Johnson's FY2022 "what drove gross margin change"
+        # question -- the ONE passage containing the exact gold-answer
+        # bullet list ("driven by: One-time COVID-19 vaccine manufacturing
+        # exit related costs...") ranked #24, behind an unrelated page
+        # about an $0.8bn drug-compound acquisition, because neither
+        # passage shared any real content word with the query and the
+        # acquisition page merely contained a few more incidental stopword
+        # hits ("is", "not", "this"). Built in the same corpus pass as
+        # doc_lens (one tokenize() call per document, not two) since both
+        # need every document's own token list.
+        doc_freq: Dict[str, int] = {}
+        doc_lens: List[int] = []
+        for d in corpus:
+            toks = self._tokenize(d.get('content', ''))
+            doc_lens.append(len(toks))
+            for t in set(toks):
+                doc_freq[t] = doc_freq.get(t, 0) + 1
         self._avg_doc_len = (sum(doc_lens) / len(doc_lens)) if doc_lens else 50.0
+        self._doc_freq = doc_freq
+        self._n_docs = len(corpus) or 1
+
+    def _idf(self, token: str) -> float:
+        """
+        Standard Okapi-BM25 IDF, the "+1 inside the log" (BM25+-style)
+        variant specifically so it can never go negative for an
+        ultra-common token (plain BM25's classic IDF formula goes negative
+        once a term appears in over half the corpus, which would ACTIVELY
+        penalize a document for containing a stopword rather than just
+        failing to reward it -- not the intended fix here, and a much
+        bigger behavior change than closing the stopword-noise gap this
+        was added for).
+        """
+        df = self._doc_freq.get(token, 0)
+        return math.log((self._n_docs - df + 0.5) / (df + 0.5) + 1)
 
     # ──────────────────────────────────────────────────────────────
     # Tokenisation (handles Chinese characters + English/numbers)
@@ -448,7 +492,10 @@ class HybridFinancialRetriever:
     # BM25-style scoring
     # ──────────────────────────────────────────────────────────────
 
-    def _bm25_score(self, query_tokens: List[str], doc_tokens: List[str]) -> float:
+    def _bm25_score(
+        self, query_tokens: List[str], doc_tokens: List[str],
+        query_idf: Optional[Dict[str, float]] = None,
+    ) -> float:
         score = 0.0
         doc_len = len(doc_tokens)
         if doc_len == 0:
@@ -458,7 +505,26 @@ class HybridFinancialRetriever:
         for token in query_tokens:
             if token in doc_set:
                 tf = doc_tokens.count(token)
-                score += (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * (doc_len / avgdl)))
+                tf_component = (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * (doc_len / avgdl)))
+                # IDF weighting -- see _idf()'s docstring. Without this, a
+                # stopword hit ("a", "of", "is") scored identically to a
+                # rare, meaningful term hit ("margin", "jnj"), which let
+                # incidental stopword overlap dominate ranking whenever the
+                # query's real content words weren't literally present in
+                # the one genuinely relevant passage.
+                # query_idf, when given, is precomputed ONCE per search()
+                # call for that query's own (small) token set -- calling
+                # self._idf() fresh here instead would repeat the same
+                # dict-lookup+log() for every one of the ~30 query tokens
+                # on EVERY one of the corpus's ~60,000 documents each
+                # search() call, a 10-20x per-call slowdown confirmed via
+                # direct profiling (one question that used to take under a
+                # minute never finished in 10+ minutes). Falls back to a
+                # fresh per-token lookup only for a caller that doesn't
+                # have a query_idf table handy (e.g. a unit test calling
+                # this directly).
+                idf = query_idf[token] if query_idf is not None else self._idf(token)
+                score += tf_component * idf
         return score
 
     # ──────────────────────────────────────────────────────────────
@@ -742,6 +808,12 @@ class HybridFinancialRetriever:
         """
         exclude_ids = set(exclude_ids or [])
         query_tokens = self._tokenize(query)
+        # Computed ONCE per search() call (this query's own token set is
+        # small, ~10-30 tokens) and reused for every one of the corpus's
+        # ~60,000 documents below -- see _bm25_score's query_idf param
+        # docstring for the confirmed 10-20x per-call slowdown this avoids
+        # versus calling self._idf() fresh per document per token.
+        query_idf = {t: self._idf(t) for t in set(query_tokens)}
         query_years = _extract_years(query)
         query_quarters = set(re.findall(r'q[1-4]', query.lower()))
         # Computed ONCE per search() call, not per candidate document --
@@ -771,8 +843,17 @@ class HybridFinancialRetriever:
 
             content = doc['content']
             doc_tokens = self._tokenize(content)
-            bm25 = self._bm25_score(query_tokens, doc_tokens)
-            overlap_count = sum(1 for q in query_tokens if q in content.lower())
+            bm25 = self._bm25_score(query_tokens, doc_tokens, query_idf)
+            # IDF-weighted, not a flat count -- same reasoning as
+            # _bm25_score's own IDF fix just above: a plain `1 for q in
+            # query_tokens if q in content.lower()` counted a "not"/"is"/
+            # "this" substring hit exactly the same as a "margin"/"jnj"
+            # hit, so this secondary signal was just as vulnerable to
+            # stopword noise dominating the final ranking as bm25 was
+            # before its own fix. Reuses the precomputed query_idf table
+            # (see just above) rather than calling self._idf() fresh here.
+            content_lower = content.lower()
+            overlap_count = sum(query_idf[q] for q in query_tokens if q in content_lower)
 
             multiplier = 1.0
 

@@ -19,7 +19,7 @@ from app.agent.decomposer import QueryDecomposer
 from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
-from app.agent.llm_client import LLMAnswerGenerator
+from app.agent.llm_client import LLMAnswerGenerator, EVIDENCE_PROMPT_CAP
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
 from app.tools.hybrid_retriever import is_attribution_query, is_geography_query, is_legal_query
 
@@ -37,6 +37,31 @@ class FinAgentRAGOrchestrator:
     # shareowners" row at all, leaving only mis-scoped rows to choose
     # from no matter how good the downstream tie-break logic is.
     RETRIEVAL_TOP_K = 5
+    # A wider top_k used ONLY for the non-numeric/narrative retrieval path
+    # (prefer_narrative=True) below -- a genuinely qualitative question
+    # ("who are Boeing's primary customers", "what drove JnJ's gross
+    # margin change", "is 3M capital-intensive") only ever issues 1-2
+    # search queries total (a topic query plus the bare question text),
+    # nowhere near RETRIEVAL_MAX_TOTAL/CONTEXT_CHUNK_LIMIT's headroom, so
+    # there's no accumulation-cap risk in widening just this path the way
+    # there would be for a composite NUMERIC formula's 8-placeholder fan-
+    # out. Confirmed real, repeated pattern across three separate
+    # questions: the genuinely correct passage consistently ranked
+    # #8-#24 -- comfortably inside a wider window, but always just
+    # outside the narrower RETRIEVAL_TOP_K=5 this shared constant used to
+    # apply everywhere -- while a topically-adjacent but wrong passage
+    # (a same-company statistic about a DIFFERENT metric, an unrelated
+    # accounting-policy note, a different business segment's own
+    # sub-table) narrowly won the 5 available slots instead. Confirmed
+    # cases: Boeing's "primary customers" question retrieved a real
+    # "non-U.S. customers = 41% of revenue" sentence (rank ~1, a true
+    # statistic about a DIFFERENT metric) while the actual gold-relevant
+    # "U.S. government = 40% of revenue" sentence (rank ~8-9) never made
+    # the cut; Johnson & Johnson's "what drove gross margin change"
+    # question needed a passage with zero direct "gross margin" wording
+    # at all (rank ~2-24 depending on phrasing) that always lost to
+    # shorter, more topically-generic prose.
+    RETRIEVAL_TOP_K_NARRATIVE = 15
     # Hard ceiling on total evidence buffer size. Must comfortably fit every
     # sub-query a single formula's own required_vars can generate (top_k=5
     # each) — a composite formula like cash_conversion_cycle needs 8
@@ -71,6 +96,31 @@ class FinAgentRAGOrchestrator:
         self.verifier = TriCheckSelfVerifier()
         self.refiner = QueryRefiner()
         self.llm_generator = LLMAnswerGenerator()
+
+    def _top_evidence(self, evidence_buffer: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        The CONTEXT_CHUNK_LIMIT-item slice of evidence_buffer that actually
+        reaches verification/answer synthesis -- sorted by relevance_score
+        (highest first) and THEN capped, never a plain `[-N:]` insertion-
+        order slice. evidence_buffer accumulates hits from every retrieval
+        sub-query in the order those sub-queries happened to run, not in
+        score order -- a plain `[-CONTEXT_CHUNK_LIMIT:]` slice keeps
+        whichever sub-queries ran LAST, silently dropping a genuinely
+        top-scoring item from an EARLIER sub-query the instant later
+        sub-queries together contribute CONTEXT_CHUNK_LIMIT-or-more items
+        of their own -- regardless of how low those later items scored.
+        Confirmed real case: Amcor's "what are major acquisitions" question
+        (HYBRID strategy, 3 sub-queries) retrieved its own "Note 5 -
+        Acquisitions and Divestitures" note as the #1-scoring passage
+        overall (from the FIRST sub-query), but the 2nd and 3rd sub-queries
+        together still contributed CONTEXT_CHUNK_LIMIT-or-more MORE items
+        afterward, so the plain insertion-order slice dropped it entirely
+        -- the model then denied the note was ever supplied, when it had
+        simply never been shown it despite retrieval finding it perfectly.
+        """
+        return sorted(
+            evidence_buffer, key=lambda item: item.get("relevance_score") or 0, reverse=True
+        )[:self.CONTEXT_CHUNK_LIMIT]
 
     def _build_evidence_info(self, hit: Dict[str, Any], sub_question: str = None) -> Dict[str, Any]:
         """
@@ -532,7 +582,23 @@ class FinAgentRAGOrchestrator:
             new_hits = []
             for sq in search_queries:
                 new_hits.extend(self.vector_store.search(
-                    sq, top_k=self.RETRIEVAL_TOP_K,
+                    # This whole retrieval block only ever runs for the
+                    # non-numeric answer_mode branch (ASSESSMENT/
+                    # EXPLANATION/EXCLUSION) -- always uses the wider
+                    # narrative top_k here regardless of prefer_narrative
+                    # (which only controls search()'s internal SCORING
+                    # boost, not how many candidates get through at all).
+                    # Confirmed real case beyond the pure-narrative ones
+                    # RETRIEVAL_TOP_K_NARRATIVE was first added for: 3M's
+                    # FY2022 "is 3M capital-intensive" question (a
+                    # formula-backed non-numeric question, so
+                    # prefer_narrative=False) needed its real "Net sales"
+                    # row, which ranked #6 for its own dedicated revenue
+                    # sub-query -- just one past the base
+                    # RETRIEVAL_TOP_K=5 cutoff, with several unrelated
+                    # accounting-policy notes from the SAME filing
+                    # occupying the 5 available slots instead.
+                    sq, top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
                     exclude_ids=list(retrieved_ids),
                     entity=classification.get("entity"),
                     statement_type_hint=statement_type_hint,  # Step 4
@@ -587,7 +653,7 @@ class FinAgentRAGOrchestrator:
             iter_trace["sandbox_output"] = pot_res.get("output_log", "")
             iter_trace["result_value"] = pot_res.get("result_value")
 
-            verification_res = self.verifier.verify(query, evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:], pot_res)
+            verification_res = self.verifier.verify(query, self._top_evidence(evidence_buffer), pot_res)
             iter_trace["verification"] = verification_res
             trace_steps.append({
                 "step_name": "Evidence Retrieval & Analysis",
@@ -596,7 +662,7 @@ class FinAgentRAGOrchestrator:
             })
 
         # ── Step 4: Final Answer Synthesis ──
-        final_context = evidence_buffer[-self.CONTEXT_CHUNK_LIMIT:]
+        final_context = self._top_evidence(evidence_buffer)
         final_answer = self._synthesize_final_answer(
             query, final_context, pot_res or {}, verification_res or {},
             classification, sub_questions
@@ -621,10 +687,31 @@ class FinAgentRAGOrchestrator:
             "result_delta": pot_res.get("result_delta") if pot_res else None,
             "result_direction": pot_res.get("result_direction") if pot_res else None,
             "result_unit": pot_res.get("result_unit", "") if pot_res else "",
-            # Return ALL evidence items (with sub_question tag) so the frontend
-            # can display every data point that contributed to the calculation
-            "evidence_sources": evidence_meta if evidence_meta else [
-                self._build_evidence_info(h) for h in evidence_buffer
+            # Return ONLY the subset of evidence that actually reached the
+            # LLM's prompt (see llm_client.generate_answer's own sort +
+            # EVIDENCE_PROMPT_CAP slice, applied here identically to
+            # final_context -- the SAME list generate_answer received),
+            # not every candidate retrieval ever pulled in. evidence_meta/
+            # evidence_buffer can hold up to RETRIEVAL_MAX_TOTAL=45 items
+            # across every sub-query; only EVIDENCE_PROMPT_CAP of the
+            # highest-scoring ones ever got FORMATTED into the prompt text
+            # the model actually read. Returning the full unfiltered list
+            # here made the frontend's Source Evidence panel show
+            # candidates the LLM never saw, so there was no way to tell
+            # from the UI alone whether an answer's citations and its
+            # actual grounding evidence agreed. Falls back to rebuilding
+            # via _build_evidence_info for any final_context item that
+            # (unexpectedly) has no matching evidence_meta entry by id.
+            "evidence_sources": [
+                next(
+                    (m for m in evidence_meta if m.get("id") == h.get("id")),
+                    None,
+                ) or self._build_evidence_info(h)
+                for h in sorted(
+                    final_context,
+                    key=lambda item: item.get("relevance_score") or 0,
+                    reverse=True,
+                )[:EVIDENCE_PROMPT_CAP]
             ],
             "reasoning_steps": trace_steps,
             "execution_trace": trace_steps,
@@ -766,6 +853,36 @@ class FinAgentRAGOrchestrator:
             unique.append(hit)
         return unique
 
+    # Retrieval-only synonym terms, appended to a placeholder's own search
+    # query TEXT but deliberately NEVER fed into required_vars/extraction
+    # (pot_reasoner._extract_formula_guided() still scores candidate rows
+    # against the formula library's own unmodified alias lists). A real
+    # filing routinely discusses what moved a DERIVED metric entirely in
+    # terms of its own COST-side line ("cost of products sold increased
+    # as a percent to sales driven by...") without ever literally saying
+    # "gross profit"/"gross margin" in that passage -- a direct accounting
+    # equivalence (gross margin moves inversely to cost-of-sales-as-%-of-
+    # revenue), but with zero real word overlap against a query built
+    # purely from gross_profit's own aliases. Widening the retrieval query
+    # alone (not the extraction-time alias list) is deliberate: adding
+    # "cost of products sold" etc. AS an extraction alias for gross_profit
+    # would make _extract_formula_guided() treat a COGS row's own VALUE as
+    # if it WERE gross profit for a NUMERIC gross-margin calculation --
+    # wrong by definition (COGS is revenue MINUS gross profit, not gross
+    # profit itself) and a correctness regression risk for every
+    # already-passing NUMERIC gross_margin question. This dict only ever
+    # widens what evidence gets RETRIEVED for a qualitative/EXPLANATION-
+    # mode "what drove X change" question to read from; it changes
+    # nothing about what value gets treated as gross_profit. Confirmed
+    # real case: Johnson & Johnson's FY2022 "what drove gross margin
+    # change" question -- the filing's own driver bullets ("One-time
+    # COVID-19 vaccine manufacturing exit related costs...") sit entirely
+    # under a "Cost of products sold... driven by:" heading with the
+    # words "gross"/"margin"/"profit" nowhere in it.
+    _RETRIEVAL_SYNONYM_TERMS: Dict[str, List[str]] = {
+        "gross_profit": ["Cost of Products Sold", "Cost of Goods Sold", "Cost of Sales", "COGS"],
+    }
+
     def _build_formula_subquestions(
         self, formula_entry: Dict[str, Any], entity: str, years: List[str],
     ) -> List[Dict[str, Any]]:
@@ -776,6 +893,9 @@ class FinAgentRAGOrchestrator:
         rows against, so retrieval and extraction are guaranteed to be
         looking for the same thing, deterministically (see the call site
         for why this replaces LLM decomposition for formula questions).
+        Retrieval-only synonym terms (see _RETRIEVAL_SYNONYM_TERMS) are
+        appended to the query text for specific placeholders, WITHOUT
+        being added to the alias list extraction itself scores against.
 
         Year targeting mirrors _extract_formula_guided()'s own picking
         rule for each formula shape:
@@ -831,6 +951,9 @@ class FinAgentRAGOrchestrator:
             primary_alias = " ".join(dict.fromkeys(ascii_aliases[:3])) if ascii_aliases else (
                 aliases[0] if aliases else placeholder
             )
+            extra_terms = self._RETRIEVAL_SYNONYM_TERMS.get(placeholder)
+            if extra_terms:
+                primary_alias = f"{primary_alias} {' '.join(extra_terms)}"
             if is_period_average and sorted_years:
                 target_years = sorted_years
             elif is_multi_year and len(sorted_years) >= 2:

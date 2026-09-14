@@ -365,8 +365,8 @@ function TriCheckBadge({ verification }) {
 /* ─── Single Message Bubble ─── */
 function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
   const isOpen = openTrace === idx;
-  const [showDetails, setShowDetails] = useState(true);
-  const [showReasoning, setShowReasoning] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(false);
   const [showTraceDetails, setShowTraceDetails] = useState(false);
   const [expandedEvidence, setExpandedEvidence] = useState(null);
   const [evidenceViewMode, setEvidenceViewMode] = useState({}); // { [index]: 'table' | 'markdown' }
