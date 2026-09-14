@@ -777,8 +777,27 @@ class FinanceBenchClassifier:
         # Map canonical metric keys to actual financial line item names
         metric_names = {
             "revenue":          "Revenue Net Revenue 營業收入 營收",
-            "gross_profit":     "Gross Profit 營業毛利 毛利",
-            "gross_margin":     "Gross Margin 毛利率 Gross Profit Revenue",
+            # "Cost of Products/Goods Sold" and "Cost of Sales" (and their
+            # COGS abbreviation) added alongside the direct "Gross
+            # Profit"/"Gross Margin" terms below -- a real filing routinely
+            # discusses what moved gross margin entirely in terms of ITS
+            # cost line ("cost of products sold increased as a percent to
+            # sales driven by...") without ever literally saying "gross
+            # profit"/"gross margin" in that passage, since the two are a
+            # direct accounting equivalence (gross margin moves inversely
+            # to cost-of-sales-as-%-of-revenue). Without this, the query
+            # built for a gross-margin question shares NO real content word
+            # with that kind of passage at all, so retrieval never finds it
+            # regardless of how the passage is otherwise ranked. Confirmed
+            # real case: Johnson & Johnson's FY2022 "what drove gross
+            # margin change" question -- the filing's own driver bullets
+            # ("One-time COVID-19 vaccine manufacturing exit related
+            # costs...") sit entirely under a "Cost of products sold...
+            # driven by:" heading with the words "gross"/"margin" nowhere
+            # in it, so the un-expanded query never retrieved it at all
+            # (not even outside the top 200 candidates).
+            "gross_profit":     "Gross Profit 營業毛利 毛利 Cost of Products Sold Cost of Goods Sold Cost of Sales COGS",
+            "gross_margin":     "Gross Margin 毛利率 Gross Profit Revenue Cost of Products Sold Cost of Goods Sold Cost of Sales COGS",
             "op_income":        "Operating Income Operating Profit 營業利益",
             "op_expense":       "Operating Expense 營業費用",
             "op_margin":        "Operating Margin 營業利益率 Operating Income Revenue",

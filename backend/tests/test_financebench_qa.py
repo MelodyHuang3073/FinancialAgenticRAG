@@ -200,11 +200,35 @@ def _split_bullet_dash(text: str) -> str:
 
 def _numbers_in(text: str):
     """Extract all numeric tokens (commas and '$' stripped) from a string
-    as floats."""
+    as floats.
+
+    A leading '-' is dropped (read as positive) whenever it's immediately
+    preceded by a LETTER in the source text -- that's a hyphenated word
+    ("COVID-19", "Q1-2022", "Type-2"), not a minus sign, and _NUM_RE alone
+    can't tell the two apart. Checked at the '-' character's own actual
+    position (not just the match's start), since the sign can land either
+    before or after a leading '$' ("-$1,561" vs "$-1,561" both appear in
+    the wild -- see _NUM_RE's own pattern). Confirmed real case: gold text
+    "One-time COVID-19 vaccine manufacturing exit related costs..."
+    extracted a fabricated -19.0 from "COVID-19", which then became the
+    ENTIRE numeric ground-truth check for that gold answer (the only
+    other number found was the bare year "FY22") -- a model answer
+    correctly citing every one of the gold answer's real qualitative
+    facts still failed, because nothing in it was ever going to contain a
+    literal "-19" (no such negative fact exists in this question at all).
+    A genuine negative number is untouched: "-$1,561" or "$-1,561" is
+    preceded by whitespace/start at the '-' itself, not a letter.
+    """
     out = []
-    for m in _NUM_RE.findall(_split_bullet_dash(_strip_list_markers(_expand_fy_shorthand(text)))):
+    cleaned = _split_bullet_dash(_strip_list_markers(_expand_fy_shorthand(text)))
+    for m in _NUM_RE.finditer(cleaned):
+        s = m.group(0)
+        if "-" in s:
+            dash_idx = m.start() + s.index("-")
+            if dash_idx > 0 and cleaned[dash_idx - 1].isalpha():
+                s = s.replace("-", "", 1)
         try:
-            out.append(float(m.replace(",", "").replace("$", "")))
+            out.append(float(s.replace(",", "").replace("$", "")))
         except ValueError:
             continue
     return out
