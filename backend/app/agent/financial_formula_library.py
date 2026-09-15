@@ -1001,6 +1001,89 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "unit": "%",
         "period_average": True,
     },
+
+    # ── Additional Standard Ratios ───────────────────────────────────────────
+    # Textbook-standard ratios (Ittelson's "Financial Statements"; Penman's
+    # "Financial Statement Analysis and Security Valuation") not yet asked
+    # by any of FinanceBench's own 150 questions, added proactively so a
+    # FUTURE question phrased this way has a deterministic formula to match
+    # instead of falling through to the less reliable generic LLM-
+    # decomposition path. English keywords only (this benchmark's filings
+    # and questions are entirely English; no Chinese trigger phrases are
+    # needed for terms that will never appear in a Chinese-language query
+    # here). All placed AFTER cash_conversion_cycle above, which must keep
+    # winning the "first match wins" scan for General Mills' own FY2019 CCC
+    # question (its own text spells out "DIO is defined as..."/"DSO is
+    # defined as..." verbatim, which would otherwise hijack formula
+    # selection away from CCC — see cash_conversion_cycle's own comment).
+    "days_sales_outstanding": {
+        "keywords_en": ["days sales outstanding", "dso"],
+        "formula_expr": "365 * accounts_receivable / revenue",
+        "required_vars": {
+            "accounts_receivable": ["accounts receivable", "trade receivables", "receivables", "receivable"],
+            "revenue": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "Days Sales Outstanding (DSO)",
+        "unit": "",
+    },
+    "days_inventory_outstanding": {
+        "keywords_en": ["days inventory outstanding", "dio"],
+        # abs(cogs): same sign convention as inventory_turnover above.
+        "formula_expr": "365 * inventory / abs(cogs)",
+        "required_vars": {
+            "inventory": ["inventory", "inventories"],
+            "cogs": ["cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
+        },
+        "result_label": "Days Inventory Outstanding (DIO)",
+        "unit": "",
+    },
+    "equity_multiplier": {
+        "keywords_en": ["equity multiplier"],
+        "formula_expr": "total_assets / shareholders_equity",
+        "required_vars": {
+            "total_assets":        ["total assets", "assets"],
+            "shareholders_equity": ["shareholders equity", "stockholders equity", "equity", "total equity"],
+        },
+        "result_label": "Equity Multiplier",
+        "unit": "x",
+    },
+    "book_value_per_share": {
+        "keywords_en": ["book value per share"],
+        "formula_expr": "shareholders_equity / shares_outstanding",
+        "required_vars": {
+            "shareholders_equity": ["shareholders equity", "stockholders equity", "equity", "total equity"],
+            "shares_outstanding":  ["shares outstanding", "weighted average shares", "diluted shares",
+                                     "common shares outstanding"],
+        },
+        "result_label": "Book Value Per Share",
+        "unit": "",
+    },
+    "operating_expense_ratio": {
+        "keywords_en": ["operating expense ratio", "operating expenses as a % of revenue",
+                         "operating expenses as a percentage of revenue"],
+        # abs(): an income statement occasionally presents opex as a signed
+        # subtraction step rather than a plain positive magnitude, same
+        # rationale as cogs_ratio/capex_to_revenue above.
+        "formula_expr": "abs(operating_expenses) / revenue",
+        "required_vars": {
+            "operating_expenses": ["operating expenses", "total operating expenses", "operating expense"],
+            "revenue":            ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "Operating Expense Ratio",
+        "unit": "%",
+        "period_average": True,
+    },
+    "long_term_debt_to_capitalization": {
+        "keywords_en": ["long-term debt to capitalization", "long term debt to capitalization",
+                         "debt to capitalization ratio", "debt-to-capitalization"],
+        "formula_expr": "long_term_debt / (long_term_debt + shareholders_equity)",
+        "required_vars": {
+            "long_term_debt":      ["long-term debt", "long term debt"],
+            "shareholders_equity": ["shareholders equity", "stockholders equity", "equity", "total equity"],
+        },
+        "result_label": "Long-Term Debt to Capitalization",
+        "unit": "%",
+    },
 }
 
 

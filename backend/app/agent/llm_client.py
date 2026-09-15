@@ -495,6 +495,39 @@ Available Evidence:
     Zealand manufacturer by name, with dollar amounts) was evidence
     item #1 of 12, yet the answer claimed no such note was supplied at
     all.
+14. If the question asks whether a company is CAPITAL-INTENSIVE and the
+    PoT sandbox output shows the assets/revenue ratio ALONGSIDE
+    CapEx/Revenue, Fixed Assets/Total Assets, and/or Return on Assets,
+    treat RETURN ON ASSETS AS THE PRIMARY signal, not the bare
+    assets/revenue ratio -- a company that generates a healthy, efficient
+    return on its asset base (roughly double-digit ROA, ~10%+) is
+    evidence AGAINST calling it capital-intensive, even when assets
+    exceed revenue (a large asset base that still earns a strong return
+    is being used efficiently, which is the opposite of the "money tied
+    up unproductively" concern "capital-intensive" is meant to flag).
+    Conversely a LOW ROA (roughly single-digit, well under ~10%)
+    alongside a meaningful fixed-asset base IS a strong sign of capital
+    intensity, even when the bare assets/revenue ratio looks modest --
+    the company ties up a lot of capital relative to the profit that
+    capital actually generates. Do not default to "assets/revenue > 1.0
+    -> capital-intensive" as your primary rule; that ratio alone is a
+    weaker signal than ROA for this specific judgment. A LOW Fixed-
+    Assets/Total-Assets percentage does NOT by itself override a LOW ROA
+    verdict -- a low fixed-asset share only argues against capital
+    intensity when it means the company's total assets are genuinely
+    modest (a lean, low-capital operation). If the evidence shows a
+    large TOTAL asset base that is mostly goodwill/intangibles rather
+    than physical plant (common after a company has made large
+    acquisitions), a low fixed-asset PERCENTAGE is really just a
+    reflection of that mix, not evidence the company needs little
+    capital overall -- the low ROA on that large total asset base is
+    still the more telling signal, and still supports a capital-
+    intensive verdict even though physical PP&E itself is a small slice
+    of it. ROA efficiency should anchor the verdict whenever it's
+    available; use Fixed-Assets/Total-Assets to explain WHAT KIND of
+    capital intensity it is (physical plant vs. a large acquired/
+    goodwill-heavy balance sheet), not to overrule what ROA already
+    indicates.
 """
 
         try:
