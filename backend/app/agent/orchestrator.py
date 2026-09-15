@@ -554,12 +554,34 @@ class FinAgentRAGOrchestrator:
             # "Total current assets"/"Total current liabilities" (both of
             # which retrieve cleanly on their own).
             non_numeric_formula = detect_formula(query)
+            # Evaluated against the ORIGINAL question, not each individual
+            # sub-query below (a keyword-stuffed sub-query like "AMD
+            # Revenue Net Revenue" never repeats "what drove" phrasing even
+            # when the overall question plainly is an attribution question)
+            # -- see hybrid_retriever.is_attribution_query's docstring.
+            is_attribution = is_attribution_query(query)
             if non_numeric_formula:
                 formula_query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
                 search_queries = [
                     step["query"] for step in
                     self._build_formula_subquestions(non_numeric_formula, formula_query_entity, classification["years"])
                 ]
+                # _build_formula_subquestions() only ever emits ONE query
+                # PER PLACEHOLDER (e.g. "3M op income 2022", "3M revenue
+                # 2022") -- unlike classification["retrieval_queries"]
+                # below (which always appends the bare question text as a
+                # fallback), it has no equivalent, so a "what DROVE X
+                # change" attribution question whose metric X happens to
+                # match a registered ratio formula NEVER actually searches
+                # for the causal narrative itself -- only the bare numbers
+                # that go into computing X. Confirmed real case: 3M's own
+                # "what drove operating margin change" question matched
+                # the operating_margin formula and only ever searched "3M
+                # op income 2022"/"3M revenue 2022", never surfacing the
+                # MD&A page naming the real drivers (Combat Arms Earplugs
+                # litigation, PFAS manufacturing exit costs) at all.
+                if is_attribution:
+                    search_queries.append(query)
             else:
                 search_queries = classification["retrieval_queries"]
             # No registered formula matched at all — this is reached ONLY
@@ -569,14 +591,16 @@ class FinAgentRAGOrchestrator:
             # instead), so it's safe to bias ranking toward prose content
             # here without touching anything a numeric/formula answer
             # depends on — see hybrid_retriever.search()'s prefer_narrative
-            # docstring for the confirmed real case this fixes.
-            prefer_narrative = non_numeric_formula is None
-            # Evaluated against the ORIGINAL question, not each individual
-            # sub-query below (a keyword-stuffed sub-query like "AMD
-            # Revenue Net Revenue" never repeats "what drove" phrasing even
-            # when the overall question plainly is an attribution question)
-            # -- see hybrid_retriever.is_attribution_query's docstring.
-            is_attribution = is_attribution_query(query)
+            # docstring for the confirmed real case this fixes. Also
+            # widened to attribution questions even when a formula DID
+            # match, for the same reason the bare query got appended just
+            # above -- the narrative-content and causal-language boosts
+            # (see hybrid_retriever.search()'s own prefer_narrative/
+            # attribution_active handling) only ever activate together
+            # under prefer_narrative=True, so without this the bare query
+            # just appended would compete on equal footing with dense
+            # table rows and rarely win anyway.
+            prefer_narrative = non_numeric_formula is None or is_attribution
             is_geography = is_geography_query(query)
             is_legal = is_legal_query(query)
             new_hits = []
@@ -687,6 +711,8 @@ class FinAgentRAGOrchestrator:
             "result_delta": pot_res.get("result_delta") if pot_res else None,
             "result_direction": pot_res.get("result_direction") if pot_res else None,
             "result_unit": pot_res.get("result_unit", "") if pot_res else "",
+            "is_comparison_answer": pot_res.get("is_comparison_answer", False) if pot_res else False,
+            "is_qualitative_characterization": pot_res.get("is_qualitative_characterization", False) if pot_res else False,
             # Return ONLY the subset of evidence that actually reached the
             # LLM's prompt (see llm_client.generate_answer's own sort +
             # EVIDENCE_PROMPT_CAP slice, applied here identically to
@@ -843,15 +869,39 @@ class FinAgentRAGOrchestrator:
         return self._match_entity_to_corpus("company", query)
 
     def _deduplicate_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        seen = set()
-        unique: List[Dict[str, Any]] = []
+        """
+        Keeps the HIGHEST-scoring occurrence of a passage id, not just the
+        first one encountered. `hits` here is the concatenation of every
+        sub-query's own results in whichever order those sub-queries ran
+        (see the `for sq in search_queries: new_hits.extend(...)` call
+        site) -- the SAME passage routinely gets found by more than one
+        sub-query with a DIFFERENT score each time (BM25 scores depend on
+        the exact query text), and a plain first-seen-wins dedup locks in
+        whichever score its EARLIEST matching sub-query happened to give
+        it, discarding a later, more-targeted sub-query's much higher
+        score for the exact same passage. Confirmed real case: AMD's
+        FY2022 "what drove revenue change" question retrieves its own
+        real driver passage ("...driven by a 64% increase in Data Center
+        segment revenue... EPYC...") via TWO sub-queries -- a generic
+        "AMD Revenue Net Revenue" alias query (which only weakly matches
+        it, score ~97) that happens to run FIRST, and the bare question
+        text itself (which matches it strongly via the causal-language
+        boost, score ~195) that runs second. First-seen-wins kept the
+        weak 97 score, which then ranked the passage outside the top-12
+        evidence cap the LLM actually sees -- even though its own
+        genuinely-best score would have ranked it comfortably inside.
+        """
+        best_by_id: Dict[str, Dict[str, Any]] = {}
+        order: List[str] = []
         for hit in hits:
             hit_id = hit.get("id") or hit.get("content")
-            if hit_id in seen:
-                continue
-            seen.add(hit_id)
-            unique.append(hit)
-        return unique
+            existing = best_by_id.get(hit_id)
+            if existing is None:
+                best_by_id[hit_id] = hit
+                order.append(hit_id)
+            elif (hit.get("relevance_score") or 0) > (existing.get("relevance_score") or 0):
+                best_by_id[hit_id] = hit
+        return [best_by_id[hit_id] for hit_id in order]
 
     # Retrieval-only synonym terms, appended to a placeholder's own search
     # query TEXT but deliberately NEVER fed into required_vars/extraction
