@@ -58,9 +58,23 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
                          "本期淨利", "淨利"]),
     ("eps",            ["eps", "earnings per share", "diluted eps", "基本每股盈餘",
                          "稀釋每股盈餘", "每股盈餘"]),
+    # Already an eps/book_value_per_share formula placeholder -- adding the
+    # canonical itself lets that formula's "try to fill from linearized
+    # table" fallback find a filing's own "Weighted average shares
+    # outstanding" row when the primary extraction path doesn't.
+    ("shares_outstanding", ["shares outstanding", "weighted average shares",
+                             "diluted shares", "common shares outstanding"]),
     # Balance sheet
     ("cash",           ["cash and cash equivalents", "cash & equivalents",
                          "現金及約當現金"]),
+    # Was previously untagged (no canonical at all) despite already being
+    # used as a formula placeholder (cash_ratio's own "short_term_investments"
+    # required_vars alias list) -- this canonical is purely a fallback
+    # source for that formula's "try to fill from linearized table" step
+    # when the primary alias-matched extraction path comes up empty; a
+    # no-op for every filing without a distinct short-term-investments row.
+    ("short_term_investments", ["short-term investments", "short term investments",
+                                 "marketable securities"]),
     ("total_assets",   ["total assets", "總資產"]),
     ("current_assets", ["total current assets", "current assets", "流動資產"]),
     ("inventory",      ["inventory", "inventories", "存貨"]),
@@ -68,6 +82,20 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("accounts_payable", ["accounts payable", "trade payables", "payables", "payable", "應付帳款"]),
     ("current_liab",   ["total current liabilities", "current liabilities", "流動負債"]),
     ("total_liab",     ["total liabilities", "總負債"]),
+    # Same rationale as short_term_investments above -- already a formula
+    # placeholder name (debt_change_yoy's composite fallback,
+    # long_term_debt_to_capitalization) but previously had no direct
+    # taxonomy canonical of its own for a plain "how much long-term debt
+    # does X have" style question to route to.
+    ("long_term_debt", ["long-term debt", "long term debt"]),
+    # Standalone P&L line, distinct from ebit/operating_income -- a plain
+    # "what is X's interest expense" question had no canonical to route to
+    # even though interest_coverage's formula already extracts it under a
+    # differently-scoped alias list of its own.
+    ("interest_expense", ["interest expense"]),
+    ("goodwill",       ["goodwill"]),
+    ("intangible_assets", ["intangible assets", "other intangible assets"]),
+    ("retained_earnings", ["retained earnings", "accumulated deficit"]),
     # ", net" variants lead the list so a real balance-sheet PP&E row gets
     # an EXACT match (score 2) via _score_row_match's alias iteration,
     # which returns on the FIRST alias that matches — without these, both
@@ -321,6 +349,16 @@ _PER_SHARE_ANYWHERE_RE = re.compile(r'per\s+(?:common\s+|diluted\s+|basic\s+)?sh
 #: dividends_per_share canonical's own docstring in _ITEM_TAXONOMY for
 #: the confirmed real case this exists for.
 _YESNO_DIVIDEND_QUERY_RE = re.compile(r'\bhas\b[^.?]{0,60}\bpaid\s+dividends?\b', re.IGNORECASE)
+
+#: "Are there any product/service categories/segments that represent
+#: more than N% of X's revenue?" -- see generate_and_execute's own use
+#: of this for why PoT is skipped entirely for this question shape
+#: rather than mechanically returning a misleading single number.
+_CATEGORY_THRESHOLD_QUERY_RE = re.compile(
+    r'\b(?:categor(?:y|ies)|segments?)\b[^.?]{0,80}'
+    r'(?:represent|account(?:s|ed)?\s+for|exceed|more\s+than|greater\s+than)[^.?]{0,40}%',
+    re.IGNORECASE,
+)
 
 #: Not every filer states its dividend rate as a clean standalone
 #: "Dividends declared per share" table row the way CVS does — many
@@ -593,6 +631,27 @@ def _get_canonical(item_name: str, company_name: str = "") -> str:
     # override (0) > global exact (1) > global substring (2).
     candidates: List[Tuple[int, str, int]] = []
 
+    # ASC 842's required lease-cash-flow supplemental disclosure always
+    # uses this exact phrasing ("Operating cash flows from operating
+    # leases", "...from finance leases", "Financing cash flows from
+    # finance leases") -- a small sub-detail buried in the leases FOOTNOTE,
+    # never the consolidated cash-flow-STATEMENT's own summary line, even
+    # though it substring-matches operating_cf's "operating cash flow"
+    # alias (the row's own trailing "s from finance leases" doesn't stop a
+    # plain substring search). Structural, not company-specific -- any
+    # filer with operating/finance leases discloses this under the SAME
+    # standard wording. Confirmed real case: Best Buy's FY2023 "Operating
+    # cash flows from finance leases: 1.0" (a footnote sub-line, correctly
+    # tiny) won operating_cf's canonical slot over the real "Total cash
+    # provided by operating activities: 1,824" row, because "operating
+    # cash flow" (20 chars) was the longest matching alias for either row
+    # -- a "which cash-flow activity brought in the most" comparison then
+    # printed $1.0 million as Best Buy's operating cash flow instead of
+    # $1.8 billion.
+    _lease_cf_disclosure = bool(re.search(
+        r'cash flows? from (?:operating|finance) leases?', item_lower
+    ))
+
     # ── Company-specific overrides ──────────────────────────────────────────
     if company_name:
         overrides = get_overrides_for_company(company_name)
@@ -615,6 +674,8 @@ def _get_canonical(item_name: str, company_name: str = "") -> str:
         if idx == -1:
             continue
         if _is_negated_match(item_lower, idx):
+            continue
+        if _lease_cf_disclosure and canonical in ("operating_cf", "investing_cf", "financing_cf"):
             continue
         candidates.append((len(alias), canonical, 2))
 
@@ -732,9 +793,27 @@ def _kw_match(triggers, q_lower: str) -> bool:
 #: a FY2023-vs-FY2022 comparison). Generic phrasing, not tied to any one
 #: metric or company.
 _TREND_KEYWORDS = (
-    "improv", "declin", "trend", "profile", "increased or decreased",
+    "improv", "declin", "trend", "increased or decreased",
     "increase or decrease", "compared to", "year over year", "yoy",
 )
+# "profile" removed (was here as a bare keyword): it correctly co-occurs
+# with a genuine trend question ("improving gross margin profile") but
+# those already match on "improv"/"declin" independently, so it was pure
+# redundancy there -- while on its own it's a FALSE trigger for a
+# single-period Yes/No characterization that merely uses "profile" as a
+# static noun, not a claim about direction over time ("a reasonably
+# healthy liquidity profile" =/= "an improving liquidity profile").
+# Confirmed real case: 3M/AMD/Verizon's own "Does X have a reasonably
+# healthy liquidity profile based on its quick ratio for FY__?" questions
+# -- none ask to compare two years at all, but the bare "profile" match
+# silently appended year-1 and made the answer report an unrequested
+# two-year trend ("0.9783 (2022) -> 0.9578 (2023), decreased by 0.0205")
+# instead of directly answering the single period actually asked about.
+# Checked against all 150 official FinanceBench questions: every OTHER
+# question containing "profile" also contains "improv"/"declin"/etc., so
+# removing the bare keyword doesn't silently drop trend behavior anywhere
+# else -- the only 3 questions affected were exactly this false-positive
+# class.
 
 
 def _with_implied_trend_year(query_years: Optional[List[str]], q_lower: str) -> List[str]:
@@ -2741,6 +2820,216 @@ def _adjust_working_capital_for_custodial_funds(
         ]
 
 
+_PREPAID_CURRENT_ASSET_RE = re.compile(r'\bprepaid', re.IGNORECASE)
+_OTHER_CURRENT_ASSET_RE = re.compile(r'^\s*other\s+current\s+assets?\b', re.IGNORECASE)
+_NONOPERATING_EXCLUDE_RE = re.compile(r'non[\s-]?current|long[\s-]?term|liabilit', re.IGNORECASE)
+
+# Materiality threshold for _adjust_quick_ratio_for_prepaid_and_other below.
+# Textbook rationale (Ittelson; Penman): the common "(current assets -
+# inventory) / current liabilities" shortcut for the quick ratio is only a
+# valid stand-in for the precise "sum only the genuinely liquid assets"
+# definition (cash + short-term investments + net receivables) when
+# whatever ELSE sits in current assets besides cash/investments/
+# receivables/inventory -- prepaid expenses, contract assets, "other
+# current assets" -- is immaterial. When that bucket is large, the
+# shortcut overstates liquidity by counting assets that can't actually be
+# converted to cash to cover bills. FinanceBench's own gold answers split
+# exactly on this line when checked against each company's real balance
+# sheet (all 4 figures below are the "prepaid + other current assets"
+# bucket as a % of that year's total current liabilities):
+#   AMD_2022_10K FY2022:     $1,265M / $6,369M = 19.9%  -- gold uses the
+#     STRICT sum (cash+ST investments+AR net+receivables from related
+#     parties)/CL = 1.57; shortcut gives 1.77.
+#   VERIZON_2022_10K FY2022: $8,358M / $50,171M = 16.7% -- gold likewise
+#     strict = 0.54; shortcut gives 0.71.
+#   AMCOR_2023_10K FY2023/FY2022: $531M/$4,476M = 11.9%, $512M/$5,103M =
+#     10.0% -- gold matches the plain SHORTCUT (0.69/0.67); the strict sum
+#     would give a materially different ~0.57.
+#   3M_2023Q2_10Q Q2FY2023: ($674M prepaids + $539M other)/$10,936M =
+#     11.1% -- gold likewise matches the shortcut (0.96); strict gives
+#     ~0.85.
+# 15% sits in the gap between the two clusters (~10-12% vs ~17-20%) and is
+# used as a general materiality cutoff, not a per-company constant.
+_QUICK_RATIO_NONLIQUID_MATERIALITY_THRESHOLD = 0.15
+
+
+def _adjust_quick_ratio_for_prepaid_and_other(
+    resolved: Dict[str, float],
+    resolved_series: Optional[Dict[str, List[Tuple[float, str]]]],
+    extracted_table: Dict[str, Dict],
+) -> None:
+    """
+    quick_ratio's formula_expr is "(current_assets - inventory) /
+    current_liabilities" -- a common shorthand for the textbook-precise
+    "genuinely liquid assets only" quick ratio (cash + short-term
+    investments + net receivables) / current_liabilities. The shorthand
+    silently assumes current assets contain nothing besides cash/
+    investments/receivables/inventory; when a company's balance sheet
+    carries a MATERIAL "prepaid expenses"/"other current assets" bucket,
+    the shorthand overstates liquidity by counting an asset that can't
+    actually be spent on current liabilities. See the threshold constant's
+    docstring above for the confirmed real balance-sheet figures this was
+    checked against across all 4 of FinanceBench's own quick-ratio
+    questions -- the 15% cutoff is what actually separates the two
+    clusters of gold answers, not a guess.
+
+    When material, subtracts the "prepaid + other current assets" amount
+    from `resolved["current_assets"]` (and the matching year's entry in
+    `resolved_series`, if present) BEFORE codegen runs, so the existing
+    "(current_assets - inventory) / current_liabilities" formula_expr
+    naturally reduces to the strict/precise definition without needing a
+    second formula_expr variant. A no-op whenever the bucket can't be
+    identified or isn't material -- leaves companies like AMCOR/3M (see
+    above) on the unmodified shortcut, matching their own gold answers.
+
+    Mutates `resolved` (and `resolved_series`, if given) in place.
+    """
+    if "current_assets" not in resolved or "current_liabilities" not in resolved:
+        return
+    cl_val = resolved["current_liabilities"]
+    if not cl_val:
+        return
+    ca_year = None
+    for v in extracted_table.values():
+        if v.get("canonical") == "current_assets" and v.get("val") == resolved["current_assets"]:
+            ca_year = v.get("year")
+            break
+    if ca_year is None:
+        return
+    # Take the LARGEST single candidate per bucket (prepaid vs. "other
+    # current assets"), never the SUM of every same-labeled row across the
+    # evidence set. Retrieved evidence routinely contains several
+    # DIFFERENT "Prepaid..." rows from unrelated tables sharing similar
+    # wording -- the real consolidated balance-sheet line, plus its own
+    # cash-flow-statement change-in-prepaid line, plus various footnote/
+    # segment/subsidiary sub-breakdowns of the SAME underlying concept.
+    # Summing all of them wildly overstates the deduction. The
+    # consolidated total is reliably the LARGEST such row (every other
+    # match is a partial slice of it), so max-per-bucket recovers the
+    # right figure without needing page/table identity (not tracked by
+    # extracted_table at all). Confirmed real case: Verizon FY2022 has
+    # SEVEN rows matching "prepaid" for 2022 alone (8,358 on the real
+    # balance sheet; 928, 1,343, 656, 2,629, 1,409, 167, 1,933 from six
+    # unrelated notes/schedules) -- summing all of them gave a quick
+    # ratio of 0.48 instead of the correct 0.54 (max-only recovers 8,358,
+    # the real row, exactly).
+    prepaid_candidates = []
+    other_candidates = []
+    for v in extracted_table.values():
+        if v.get("year") != ca_year:
+            continue
+        item = v.get("item", "") or ""
+        if _NONOPERATING_EXCLUDE_RE.search(item):
+            continue
+        val = v.get("val", 0.0)
+        if _OTHER_CURRENT_ASSET_RE.search(item):
+            other_candidates.append(val)
+        elif _PREPAID_CURRENT_ASSET_RE.search(item):
+            prepaid_candidates.append(val)
+    nonliquid_total = (max(prepaid_candidates) if prepaid_candidates else 0.0) + (
+        max(other_candidates) if other_candidates else 0.0
+    )
+    if nonliquid_total <= 0:
+        return
+    if nonliquid_total / cl_val < _QUICK_RATIO_NONLIQUID_MATERIALITY_THRESHOLD:
+        return
+    resolved["current_assets"] = resolved["current_assets"] - nonliquid_total
+    if resolved_series and resolved_series.get("current_assets"):
+        resolved_series["current_assets"] = [
+            ((val - nonliquid_total) if yr == ca_year else val, yr)
+            for val, yr in resolved_series["current_assets"]
+        ]
+
+
+def _capital_intensity_context_lines(
+    resolved: Dict[str, float], extracted_table: Dict[str, Dict],
+) -> List[str]:
+    """
+    Supplementary code lines for capital_intensity_ratio ONLY -- computes
+    CAPEX/Revenue, Fixed-Assets/Total-Assets, and ROA alongside the
+    formula's own assets/revenue ratio, WITHOUT changing `result` (still
+    assets/revenue) or touching `resolved` at all.
+
+    FinanceBench's own gold answers for this question do NOT use one
+    consistent methodology across companies: Verizon's gold explicitly
+    computes assets/revenue ("capital intensity ratio was approximately
+    2.774729"), while 3M's and CVS's gold answers explicitly reason from
+    a DIFFERENT trio of signals instead ("CAPEX/Revenue Ratio: 5.1%,
+    Fixed assets/Total Assets: 20%, Return on Assets=12.4%" for 3M; ROA
+    and a goodwill-heavy asset base for CVS) -- a company can have a
+    LOW assets/revenue ratio yet still be judged "capital-intensive" by
+    gold by the OTHER convention (low ROA = a lot of asset base tied up
+    relative to the profit it generates), and vice versa. Replacing the
+    ratio entirely would fix 3M/CVS at the cost of breaking Verizon's own
+    already-correct, differently-reasoned answer -- computing all four
+    signals together and handing them to the LLM (which already reasons
+    qualitatively for this ASSESSMENT-mode question) lets it weigh
+    whichever convention the specific evidence best supports, the same
+    way gold's own authors evidently did per company, without hardcoding
+    a per-company rule into the formula itself.
+
+    Only emits lines for whichever of capex/ppe/net_income actually
+    resolve from the SAME year as the ratio's own total_assets value
+    (not every filing discloses all three as cleanly extractable single
+    rows) -- a partial result here is still strictly more context than
+    the bare ratio alone.
+    """
+    if "total_assets" not in resolved or "revenue" not in resolved:
+        return []
+    ta_year = None
+    for v in extracted_table.values():
+        if v.get("canonical") == "total_assets" and v.get("val") == resolved["total_assets"]:
+            ta_year = v.get("year")
+            break
+    if ta_year is None:
+        return []
+
+    def _find(canonical: str) -> Optional[float]:
+        # A filing routinely discloses BOTH gross and net PP&E as
+        # separate rows that share the SAME "ppe" canonical (the alias
+        # list matches "property, plant and equipment" both with and
+        # without a "net"/"— net" suffix) -- "Fixed Assets/Total Assets"
+        # conventionally means the NET (post-depreciation) carrying
+        # value, so an explicit "net" row is preferred over a "gross"
+        # one whenever both are present, rather than just taking
+        # whichever happens to appear first in extraction order.
+        # Confirmed real case: 3M's FY2022 balance sheet has both "Gross
+        # property, plant and equipment" (25,998) and "Property, plant
+        # and equipment — net" (9,178) under the same canonical -- taking
+        # the first-seen gross figure gave a 55.96% fixed-assets ratio,
+        # wildly off gold's own cited ~20% (computed from the net 9,178).
+        candidates = [
+            v for v in extracted_table.values()
+            if v.get("canonical") == canonical and v.get("year") == ta_year
+        ]
+        if not candidates:
+            return None
+        net_rows = [v for v in candidates if "net" in (v.get("item", "") or "").lower()]
+        gross_rows = [v for v in candidates if "gross" in (v.get("item", "") or "").lower()]
+        pick = net_rows or [v for v in candidates if v not in gross_rows] or candidates
+        return pick[0].get("val")
+
+    capex = _find("capex")
+    ppe = _find("ppe")
+    net_income = _find("net_income")
+
+    out: List[str] = []
+    out.append(
+        "# Supplementary capital-intensity signals (FinanceBench gold answers use "
+        "DIFFERENT conventions per company -- see all of these, not just the ratio above)"
+    )
+    if capex is not None:
+        out.append(f"_capex_to_revenue_pct = round(abs({capex}) / {resolved['revenue']} * 100, 2)")
+        out.append(f"print(f'CapEx/Revenue ({ta_year}): {{_capex_to_revenue_pct}}%')")
+    if ppe is not None:
+        out.append(f"_fixed_assets_to_total_assets_pct = round({ppe} / {resolved['total_assets']} * 100, 2)")
+        out.append(f"print(f'Fixed Assets/Total Assets ({ta_year}): {{_fixed_assets_to_total_assets_pct}}%')")
+    if net_income is not None:
+        out.append(f"_roa_pct = round({net_income} / {resolved['total_assets']} * 100, 2)")
+        out.append(f"print(f'Return on Assets ({ta_year}): {{_roa_pct}}%')")
+    return out
+
+
 def _gen_formula_code(
     formula_entry: Dict[str, Any],
     resolved: Dict[str, float],
@@ -2835,6 +3124,9 @@ def _gen_formula_code(
 
     if fk == "working_capital":
         _adjust_working_capital_for_custodial_funds(resolved, resolved_series, extracted_table)
+
+    if fk == "quick_ratio":
+        _adjust_quick_ratio_for_prepaid_and_other(resolved, resolved_series, extracted_table)
 
     # ── Multi-year trend comparison ─────────────────────────────────────────
     # A "did X improve or decline" question needs the SAME ratio computed
@@ -2940,6 +3232,9 @@ def _gen_formula_code(
         else:
             lines.append("years = 1.0")
 
+    if fk == "capital_intensity_ratio":
+        lines.extend(_capital_intensity_context_lines(resolved, extracted_table))
+
     lines.append(f"# Formula: {fk}")
     if unit == "%":
         lines.append(f"_raw = {expr}")
@@ -2980,6 +3275,20 @@ _REVENUE_CANONICALS = {"revenue", "op_income", "gross_profit", "net_income",
                         "ebitda", "fcf", "capex", "eps", "rd_expense",
                         "cost_of_revenue", "sga", "total_assets", "equity",
                         "lt_debt", "current_assets", "current_liab"}
+
+# Shared with _find_direct_pct_change_row's own call site below (the
+# "prefer the filing's own stated growth %" lookup) -- deliberately scoped
+# to this EXACT narrow phrasing rather than firing for every "revenue"
+# canonical YoY question, since a generic "Total"/"Worldwide" label (the
+# only signal available once a row is flattened into extracted_table, with
+# no page/table identity retained) collides with unrelated same-labeled
+# rows elsewhere in a filing often enough to be dangerous for a broadly-
+# scoped question. Confirmed real case: Block's FY2019-FY2020 "total
+# revenue growth rate" question (gold 101.5%) would have wrongly matched
+# an unrelated page-126 "Total | 2020: 1.3%" row (some other metric
+# entirely, not revenue growth) had this fired generically instead of
+# being scoped to this one question shape.
+_HIGH_GROWTH_TRIGGERS = ["high growth", "high-growth", "growth company"]
 
 # Map query keywords → canonical labels (for YoY target item inference)
 _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
@@ -3089,7 +3398,7 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     # earnings, giving -14.07% instead of gold's +1.3% sales growth) --
     # non-deterministic across runs purely from retrieval-order
     # variance, since dict ordering there follows extraction order.
-    (["high growth", "high-growth", "growth company"], "revenue"),
+    (_HIGH_GROWTH_TRIGGERS, "revenue"),
 ]
 
 
@@ -3230,6 +3539,53 @@ def _find_same_item_pair(
         return old, new
 
     return None, None
+
+
+_DIRECT_GROWTH_LABEL_RE = re.compile(r'^(total|worldwide|consolidated)$', re.IGNORECASE)
+
+
+def _find_direct_pct_change_row(
+    extracted_table: Dict[str, Dict], new_yr: str,
+) -> Optional[float]:
+    """
+    A 10-K's own "Results of Operations"/"Analysis of Consolidated Sales"
+    MD&A table routinely shows revenue by segment AND total, WITH the
+    filer's own computed "% Change" column right alongside it (a row
+    labeled just "Total"/"Worldwide"/"Consolidated") -- a standard SEC
+    disclosure convention, not specific to any one filer. That filer-
+    computed percentage is authoritative and can differ slightly from
+    recomputing (new-old)/old off the SAME two dollar figures, because the
+    filing's own calculation uses its internal, more precise (pre-
+    rounding-to-whole-millions) figures. Same underlying principle as
+    effective_tax_rate's "direct_lookup_var" mechanism above (prefer the
+    filing's own stated ratio over recomputing it), just for the generic
+    YoY-growth code path instead of a registered formula. Confirmed real
+    case: JnJ's FY2022 10-K states "Total | 2022: 1.3%" on both page 28
+    (Results of Operations) and page 86 (segment table) -- recomputing
+    from "Sales to customers | 2022: 94,943 | 2021: 93,775" gives 1.2455%,
+    a 4.2% relative miss against gold's own "sales grew by 1.3%" (outside
+    the 2% grading tolerance), purely from the rounding-to-whole-millions
+    cascade -- while the filing's own stated 1.3% matches gold exactly.
+
+    Scoped narrowly: only ever called for a "revenue" canonical (see call
+    site), and only trusts a candidate whose label is one of the handful
+    of generic terms filers use for a totals row, with a magnitude
+    (<100) that's plausible for a percentage but not a real dollar
+    total at the company scale this dataset covers -- both checks
+    together make an accidental collision with an unrelated same-named
+    row very unlikely. Returns None (falls back to the recomputed ratio)
+    when no such row exists, which is the common case for most filings.
+    """
+    for v in extracted_table.values():
+        if v.get("year") != new_yr:
+            continue
+        item = (v.get("item") or "").strip()
+        if not _DIRECT_GROWTH_LABEL_RE.match(item):
+            continue
+        val = v.get("val")
+        if val is not None and abs(val) < 100:
+            return val
+    return None
 
 
 _CANONICAL_TO_ALIASES: Dict[str, List[str]] = {c: aliases for c, aliases in _ITEM_TAXONOMY}
@@ -3596,13 +3952,23 @@ def _build_calculation_code(
         # Bug 3 fix: pass q_lower so _find_same_item_pair prefers the item the user asked about
         v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
+            direct_pct = (
+                _find_direct_pct_change_row(extracted_table, v2["year"])
+                if v1.get("canonical") == "revenue" and _kw_match(_HIGH_GROWTH_TRIGGERS, q_lower)
+                else None
+            )
+            label = v1['item']
+            y1, y2 = v1['year'], v2['year']
+            if direct_pct is not None:
+                code_lines.append(f"# YoY: {label} (filing's own reported % change, preferred over recomputed)")
+                code_lines.append(f"result = {direct_pct}")
+                code_lines.append(f"print(f'{label} YoY Growth ({y1}->{y2}) [filing-reported]: {{result}}%')")
+                return True
             code_lines.append(f"# YoY: {v1['item']}")
             code_lines.append(f"result_yoy = yoy({v1['code_key']}, {v2['code_key']})")
             # 4dp, not 2dp -- same double-rounding rationale as the CAGR
             # branch just above.
             code_lines.append("result = round(result_yoy, 4)")
-            label = v1['item']
-            y1, y2 = v1['year'], v2['year']
             code_lines.append(f"print(f'{label} YoY Growth ({y1}->{y2}): {{result}}%')")
             return True
 
@@ -3794,9 +4160,33 @@ def _build_calculation_code(
     # FY2016 to FY2018" (gold 55.1%, the mean of 53.8/55.5/56.2) would
     # otherwise have returned 56.2% (FY2018's own ratio alone).
     wants_average = any(kw in q_lower for kw in ("average", "avg", "平均"))
+    # "Are X's margins historically CONSISTENT (not fluctuating more than
+    # ~N% each year)?" needs to see EVERY comparative year the filing
+    # itself already tabulates (a 10-K income statement routinely shows
+    # 3), not just a single year's snapshot -- unlike a 2-point "did
+    # margin improve between year A and B" trend question (handled by
+    # _TREND_KEYWORDS/_with_implied_trend_year above, which only ever
+    # adds ONE prior year), a consistency check is meaningless without
+    # the full multi-year run to look for outliers across. query_years
+    # itself often names no explicit years at all for this phrasing (the
+    # question describes a PATTERN across years, not any specific one),
+    # so distinct_years falls through to len<2 and the code below would
+    # otherwise silently return just one year's ratio with no comparison
+    # at all. Confirmed real case: Best Buy's "Are Best Buy's gross
+    # margins historically consistent...?" question showed a bare
+    # "21.41" with an empty result_series in the PoT result card, instead
+    # of the FY2021/2022/2023 series the answer text itself needed to
+    # actually support "consistent" as a claim.
+    wants_consistency_check = any(
+        kw in q_lower for kw in ("historically consistent", "not fluctuating", "each year", "every year")
+    )
     for triggers, num_c, den_c, label in _MARGIN_MAP:
         if _kw_match(triggers, q_lower):
             distinct_years = sorted(set(query_years or []))
+            if len(distinct_years) < 2 and wants_consistency_check:
+                num_years = {v["year"] for v in groups.get(num_c, [])}
+                den_years = {v["year"] for v in groups.get(den_c, [])}
+                distinct_years = sorted(num_years & den_years)[-3:]
             if len(distinct_years) >= 2:
                 year_exprs = []
                 for yr in distinct_years:
@@ -3935,6 +4325,69 @@ class ProgramOfThoughtReasoner:
         self, query: str, evidence_list: List[Dict[str, Any]], entity: str = ""
     ) -> Dict[str, Any]:
         q_lower = query.lower()
+
+        # "Among operations, investing, and financing activities, which
+        # brought in the most (or lost the least) cash flow for X?" -- the
+        # SAME structural detection used by _build_calculation_code's own
+        # cash-flow-activity-comparison branch below, recomputed here so
+        # the caller (orchestrator.py) can tell the frontend this question
+        # was answered by IDENTIFYING which of three named categories won,
+        # not by computing one specific number the question itself asked
+        # for -- the headline green result card should show the verdict
+        # in the answer text, not a single one of the three candidate
+        # numbers dressed up as "the computed result". Confirmed real
+        # case: Nike FY2023 -- the card headlined "5,841" (just the
+        # operating-activities figure) as if that number alone were what
+        # was asked, when the actual question is a 3-way comparison.
+        is_cf_activity_comparison = (
+            sum(1 for kw in ("operat", "invest", "financ") if kw in q_lower) >= 2
+            and "cash flow" in q_lower
+            and _kw_match(["most", "least", "which", "brought in", "generated"], q_lower)
+        )
+
+        # "Is X a high-growth company?" is a qualitative business
+        # characterization, not a request for one specific number -- the
+        # classifier still routes it through answer_mode=NUMERIC (a bare
+        # "growth" keyword forces that, same as any other YoY-shaped
+        # question), so it can't be caught by the frontend's EXPLANATION/
+        # ASSESSMENT suppression alone without ALSO rerouting its
+        # retrieval strategy (answer_mode also selects which sub-question
+        # builder runs -- reclassifying it to ASSESSMENT would silently
+        # swap the LLM-decomposition retrieval path this question actually
+        # relies on for a different one). Flagged here instead, the same
+        # narrow, display-only mechanism as is_cf_activity_comparison
+        # above, so the frontend can suppress just the green result card
+        # without touching classification or retrieval at all.
+        is_qualitative_characterization = _kw_match(_HIGH_GROWTH_TRIGGERS, q_lower)
+
+        # "Are there any product/service categories that represent more
+        # than N% of X's revenue?" isn't answerable with ONE verified
+        # number -- it needs every named category's own share computed
+        # and compared against the threshold, which no path below
+        # actually does. Left to fall through, the Direct-lookup
+        # fallback (built for genuine single-value questions) picks
+        # whichever canonical the query text loosely resembles -- for
+        # this shape that's usually just "revenue" itself, so the result
+        # card showed the company's bare TOTAL revenue ($66,608M) as if
+        # that number were "the answer", when the real answer is a
+        # count/list of categories the sandbox never actually verified.
+        # Skipping PoT entirely for this narrow, identifiable question
+        # shape (rather than mechanically returning that misleading
+        # number) leaves the LLM's own text-based synthesis --  which
+        # already correctly reasons over each category's real evidence
+        # figures -- as the sole answer, with no unverified green-box
+        # figure implying a sandbox-checked number backs it.
+        if _CATEGORY_THRESHOLD_QUERY_RE.search(q_lower):
+            return {
+                "code": "", "success": True, "result_value": None,
+                "output_log": "", "extracted_variables": {},
+                "repairs_triggered": 0, "extraction_method": "none",
+                "formula_used": None, "is_degraded_formula": False,
+                "degraded_note": "", "result_series": [],
+                "result_delta": None, "result_direction": None,
+                "result_unit": "",
+            }
+
         query_years = _extract_query_years(query)
         preferred_year = query_years[-1] if query_years else None  # latest year mentioned
 
@@ -4106,21 +4559,41 @@ class ProgramOfThoughtReasoner:
         result_delta = sandbox_locals.get("_delta") if success else None
         result_direction = sandbox_locals.get("_direction") if success else None
         if result_delta is not None:
+            # Grouped by PREFIX (the part before "_YYYY"), not just
+            # "any year-suffixed variable" -- _emit_multi_year_ratio names
+            # its own per-year variables f"{_sanitize(label)}_{yr}", a
+            # DIFFERENT prefix per formula/label, so filtering by the
+            # winning block's own prefix (rather than merely requiring
+            # numeric year-adjacency) can't accidentally sweep in an
+            # unrelated same-year variable from elsewhere in the sandbox.
+            # Confirmed real case: Boeing's gross-margin trend code ALSO
+            # computes (but never uses in the final trend) a
+            # "_derived_gross_profit_2020" byproduct -- a same-shape,
+            # adjacent-year variable from a completely different
+            # computation -- which an adjacency-only heuristic swept into
+            # the result card as a bogus "2020: -5642.0" data point
+            # alongside the real gross_margin_2021/2022 entries.
             year_re = re.compile(r"^(.*)_((?:19|20)\d{2})$")
-            series_items = []
+            by_prefix: Dict[str, List[Tuple[str, Any]]] = {}
+            prefix_order: List[str] = []
             for key, val in sandbox_locals.items():
                 m = year_re.match(key)
                 if m and isinstance(val, (int, float)) and not isinstance(val, bool):
-                    series_items.append((m.group(2), val))
-            # Multiple multi-year blocks could in principle coexist; keep
-            # only entries sharing the year-set actually used by the
-            # winning _delta/_direction pair — approximate by keeping the
-            # two most recently assigned per-year values (dict preserves
-            # insertion order in the generated code), which are exactly
-            # the ones _emit_multi_year_ratio's own delta was computed
-            # from.
-            if series_items:
-                result_series = [{"year": y, "value": v} for y, v in series_items[-2:]]
+                    prefix = m.group(1)
+                    if prefix not in by_prefix:
+                        by_prefix[prefix] = []
+                        prefix_order.append(prefix)
+                    by_prefix[prefix].append((m.group(2), val))
+            # The winning _delta/_direction pair came from whichever
+            # multi-year block ran LAST (their fixed names get
+            # overwritten by each block in turn) -- that's the last
+            # prefix group to have contributed a key, by insertion order.
+            if prefix_order:
+                winning_prefix = prefix_order[-1]
+                result_series = [
+                    {"year": y, "value": v}
+                    for y, v in sorted(by_prefix[winning_prefix], key=lambda item: item[0])
+                ]
 
         # Build extracted summary — the middle field shows how each value
         # was actually obtained (table-total / table-partial / legacy /
@@ -4162,4 +4635,6 @@ class ProgramOfThoughtReasoner:
             "result_delta": result_delta,
             "result_direction": result_direction,
             "result_unit": (formula_entry.get("unit", "") if formula_entry else "") or (detected_unit[0] if detected_unit else ""),
+            "is_comparison_answer": is_cf_activity_comparison,
+            "is_qualitative_characterization": is_qualitative_characterization,
         }

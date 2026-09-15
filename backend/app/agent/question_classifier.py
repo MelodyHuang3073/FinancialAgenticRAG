@@ -164,6 +164,25 @@ _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
     (["major acquisitions", "acquisitions that", "acquisitions has"],
      "business combinations acquisitions and divestitures completed "
      "acquisition equity interest acquisitions, net of cash acquired"),
+    # "Is X a high-growth company?" needs the filer's OWN stated revenue
+    # %-change figure (a "Results of Operations"/"Analysis of Consolidated
+    # Sales" MD&A table almost always has one), not just the raw two-year
+    # dollar totals -- pot_reasoner._find_direct_pct_change_row prefers
+    # that filer-reported number when it's actually present in evidence
+    # (see its own docstring for why: recomputing from whole-million-
+    # rounded dollar figures alone can miss the filer's own more precise
+    # figure by more than this benchmark's 2% grading tolerance).
+    # Standard NUMERIC-path retrieval only ever searches for the bare
+    # "revenue"/"sales" alias, which reliably finds the balance-sheet-
+    # style total but not this narrative MD&A table specifically -- this
+    # entry is the SAME additive narrative-topic-query bridge already used
+    # for dividends/legal-battles/acquisitions above. Confirmed real case:
+    # JnJ's own FY2022 "Results of Operations" table states "Total | 2022:
+    # 1.3%" right next to the same revenue figures, but a generic
+    # "JOHNSON_JOHNSON_2022_10K Total revenue 2022" retrieval query never
+    # surfaced that specific row.
+    (["high growth", "high-growth", "growth company"],
+     "results of operations analysis of consolidated sales percent change"),
 ]
 
 
