@@ -416,8 +416,31 @@ class FinAgentRAGOrchestrator:
                         sub_hint = self.classifier._infer_statement_type_hint(sub_metrics)
                         effective_hint = sub_hint if sub_hint != "unknown" else statement_type_hint
 
+                        # A narrative_topic-sourced sub-question (see
+                        # _detect_narrative_topic_query) targets a PROSE/
+                        # narrative topic bridge, not a structured line
+                        # item -- the alias-matched NUMERIC sub-queries
+                        # around it already cover the structured value.
+                        # The narrower RETRIEVAL_TOP_K=5 used for every
+                        # OTHER sub-question here is tuned for a specific,
+                        # well-aliased line item that reliably ranks near
+                        # the top; a bridge query's TARGET is often a
+                        # terse, generic-labeled row (e.g. a filer's own
+                        # "Results of Operations" table literally printing
+                        # just "Total | 2022: 1.3%") with very little
+                        # distinctive vocabulary for BM25 to rank highly on
+                        # -- confirmed real case: JnJ's own stated revenue
+                        # %-change row ranked outside the top 8 for both
+                        # this bridge query AND the plain "Total revenue
+                        # 2022" query, so top_k=5 missed it entirely even
+                        # though a wider net would have caught it.
+                        step_top_k = (
+                            self.RETRIEVAL_TOP_K_NARRATIVE
+                            if sub_q.get("source") == "narrative_topic"
+                            else self.RETRIEVAL_TOP_K
+                        )
                         hits = self.vector_store.search(
-                            step_query, top_k=self.RETRIEVAL_TOP_K,
+                            step_query, top_k=step_top_k,
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=effective_hint,

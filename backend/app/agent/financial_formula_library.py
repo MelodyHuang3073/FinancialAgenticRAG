@@ -890,12 +890,45 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # it at all. Confirmed real case: Amazon FY2016->FY2017 revenue
         # change had no formula match, so the sandbox never computed it
         # despite "Net sales" being cleanly retrievable for both years.
+        # "high growth"/"growth company" (a qualitative business
+        # characterization, e.g. "Is X a high-growth company?") also
+        # fundamentally means "compute revenue YoY growth" in ordinary
+        # usage -- registering it HERE (not just as a bare-canonical hint
+        # in pot_reasoner.py, which it also has) routes the question
+        # through this formula's OWN targeted, few-query extraction
+        # instead of the generic LLM-decomposed 6-9-query path, the same
+        # reliability win effective_tax_rate's direct_lookup_var already
+        # gets (see that entry's own comment). Confirmed unique across
+        # FinanceBench's 150 questions -- only JnJ's own "high growth
+        # company" question contains this phrase, so this can't change
+        # routing for any other already-passing question.
         "keywords_en": ["revenue growth", "revenue yoy", "sales growth", "revenue increase",
-                         "change in revenue", "change in total revenue"],
+                         "change in revenue", "change in total revenue",
+                         "high growth", "high-growth", "growth company"],
         "formula_expr": "(revenue_new - revenue_old) / revenue_old * 100",
+        # A 10-K's own "Results of Operations"/"Analysis of Consolidated
+        # Sales" MD&A table routinely prints the filer's OWN computed
+        # revenue %-change (a row labeled just "Total"/"Worldwide"), which
+        # can differ slightly from recomputing off two whole-million-
+        # rounded dollar figures -- same rationale as effective_tax_rate's
+        # own direct_lookup_var above. Confirmed real case: JnJ's FY2022
+        # 10-K states "Total | 2022: 1.3%" directly; recomputing from
+        # "Sales to customers | 2022: 94,943 | 2021: 93,775" gives
+        # 1.2455%, a 4.2% relative miss against gold's own "grew by 1.3%"
+        # (outside the 2% grading tolerance) purely from rounding.
+        "direct_lookup_var": "revenue_pct_change_direct",
         "required_vars": {
             "revenue_new": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
             "revenue_old": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            # First alias becomes the actual retrieval query text (see
+            # orchestrator._build_formula_subquestions) -- empirically the
+            # single best-ranking phrasing found for this row's own
+            # extremely terse content (literally "Total | 2022: 1.3%"),
+            # not a grammatically "natural" description of it. See
+            # pot_reasoner._HIGH_GROWTH_TRIGGERS's own comment for the
+            # isolated retrieval-ranking testing this came from.
+            "revenue_pct_change_direct": ["total percent change results of operations",
+                                            "results of operations analysis of consolidated sales"],
         },
         "result_label": "Revenue YoY Growth",
         "unit": "%",
