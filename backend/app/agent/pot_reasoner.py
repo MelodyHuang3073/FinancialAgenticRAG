@@ -3364,9 +3364,27 @@ _HIGH_GROWTH_TRIGGERS = ["high growth", "high-growth", "growth company"]
 _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["net sales", "revenue", "net revenue", "total revenue", "sales",
       "營業收入", "營收"],                                    "revenue"),
-    (["gross profit", "毛利"],                              "gross_profit"),
-    (["operating income", "operating profit", "營業利益"],   "op_income"),
-    (["net income", "net earnings", "net profit", "淨利"],  "net_income"),
+    # "X margin" is included alongside "X profit"/"X income" -- a bare
+    # canonical-name match previously missed the very common "gross
+    # margin change"/"operating margin change"/"net margin change"
+    # phrasing entirely (as opposed to "gross profit change" etc.), so
+    # _infer_target_canonical returned None for these, and
+    # _find_same_item_pair's own "no target -> try ANY available
+    # canonical" fallback then picked whichever unrelated canonical
+    # happened to have 2+ years of data -- the exact same failure class
+    # its own docstring already documents fixing for a bare "revenue"
+    # miss (Amazon's YoY change fell back to cash and cash equivalents).
+    # Confirmed real case: American Express' own "What drove gross margin
+    # change...FY2022?" question (gold: "Performance is not measured
+    # through gross margin", i.e. no useful comparison exists) instead
+    # computed a YoY change on "Balance, January 1" -- an unrecognized-
+    # tax-benefits rollforward table's opening balance, entirely
+    # unrelated to gross margin, which the model then oddly cited
+    # ("unrecognized tax benefits opening balance rose 29.6%") in an
+    # otherwise-correct "not a useful metric" answer.
+    (["gross profit", "gross margin", "毛利"],              "gross_profit"),
+    (["operating income", "operating profit", "operating margin", "營業利益"],   "op_income"),
+    (["net income", "net earnings", "net profit", "net margin", "淨利"],  "net_income"),
     (["ebitda"],                                            "ebitda"),
     (["eps", "earnings per share"],                         "eps"),
     (["capex", "capital expenditure"],                      "capex"),
