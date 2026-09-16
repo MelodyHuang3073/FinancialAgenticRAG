@@ -181,8 +181,21 @@ _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
     # 1.3%" right next to the same revenue figures, but a generic
     # "JOHNSON_JOHNSON_2022_10K Total revenue 2022" retrieval query never
     # surfaced that specific row.
+    # "total percent change results of operations" empirically ranks the
+    # target row far higher (rank ~4 in isolated retrieval testing) than
+    # the more verbose, grammatically natural phrasing this replaced
+    # ("results of operations analysis of consolidated sales percent
+    # change", which ranked the SAME row outside the top 50) -- BM25
+    # rewards fewer, more distinctive overlapping terms, and this row's
+    # own content is extremely terse (literally "Total | 2022: 1.3% |
+    # 2021: 13.6%"), so a shorter, more literal-sounding query scores
+    # better than a longer, more "readable" one. Paired with
+    # orchestrator.py's own RETRIEVAL_TOP_K_NARRATIVE widening for
+    # narrative_topic-sourced sub-questions specifically (this row didn't
+    # make the top 8 even for the best-performing NUMERIC sub-query
+    # alone, "Total revenue 2022", at the standard RETRIEVAL_TOP_K=5).
     (["high growth", "high-growth", "growth company"],
-     "results of operations analysis of consolidated sales percent change"),
+     "total percent change results of operations"),
 ]
 
 

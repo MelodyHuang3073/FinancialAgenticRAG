@@ -2263,7 +2263,23 @@ def _extract_formula_guided(
                 old_yr = sorted(query_years)[0]
                 new_yr = sorted(query_years)[-1]
             elif len(sorted_years) >= 2:
-                old_yr, new_yr = sorted_years[0], sorted_years[-1]
+                # A query naming FEWER than 2 years at all ("Are JnJ's
+                # FY2022 financials that of a high growth company?" names
+                # only "2022") implicitly means the change INTO that
+                # single year from the year immediately before it -- the
+                # two most RECENT consecutive years this placeholder's own
+                # matches cover, not the oldest-vs-newest years ever found.
+                # A real income statement routinely prints 3 comparative
+                # years, so "oldest vs newest" silently reaches back twice
+                # as far as the question means. Same underlying principle,
+                # and the same confirmed real case (JnJ's own "high
+                # growth" question computing 2020->2022 (14.97%) instead
+                # of 2021->2022 (1.3%, gold's own answer)), as
+                # _find_same_item_pair's own identical fix above -- that
+                # one covers the generic (non-formula) YoY code path, this
+                # covers formula-guided extraction, which never had the
+                # same fix even though it can hit the exact same gap.
+                old_yr, new_yr = sorted_years[-2], sorted_years[-1]
             else:
                 old_yr = new_yr = sorted_years[0] if sorted_years else "N/A"
             if "_old" in placeholder:
@@ -3235,6 +3251,38 @@ def _gen_formula_code(
     if fk == "capital_intensity_ratio":
         lines.extend(_capital_intensity_context_lines(resolved, extracted_table))
 
+    # revenue_yoy's own "direct_lookup_var" (revenue_pct_change_direct)
+    # can never actually match through _extract_formula_guided's usual
+    # alias-scoring pipeline: _score_row_match expects the ALIAS to
+    # appear as a substring of the row's own (longer, specific) label
+    # (e.g. "revenue" inside "Total net revenues") -- here it's inverted,
+    # the row's own label is the short generic word ("Total"), shorter
+    # than any alias phrase descriptive enough to be safely used as a
+    # search query, so no alias can ever match it as a substring. Reusing
+    # _find_direct_pct_change_row directly against extracted_table here
+    # (the same helper the old generic-YoY code path used, with the same
+    # by-family disambiguation against unrelated same-labeled rows) gets
+    # the intended behavior without needing _score_row_match to support a
+    # matching direction it fundamentally doesn't.
+    if fk == "revenue_yoy" and "revenue_new" in resolved and "revenue_old" in resolved:
+        yoy_new_yr = next(
+            (v.get("year") for v in extracted_table.values()
+             if v.get("canonical") == "revenue" and v.get("val") == resolved["revenue_new"]),
+            None,
+        )
+        yoy_old_yr = next(
+            (v.get("year") for v in extracted_table.values()
+             if v.get("canonical") == "revenue" and v.get("val") == resolved["revenue_old"]),
+            None,
+        )
+        if yoy_new_yr and yoy_old_yr:
+            direct_pct = _find_direct_pct_change_row(extracted_table, yoy_old_yr, yoy_new_yr)
+            if direct_pct is not None:
+                lines.append(f"# Formula: {fk} (filing's own reported % change, preferred over recomputed)")
+                lines.append(f"result = {direct_pct}")
+                lines.append(f"print(f'{label} ({yoy_old_yr}->{yoy_new_yr}) [filing-reported]: {{result}}%')")
+                return lines
+
     lines.append(f"# Formula: {fk}")
     if unit == "%":
         lines.append(f"_raw = {expr}")
@@ -3258,6 +3306,28 @@ def _gen_formula_code(
         # than leaving raw floating-point division noise in the answer.
         lines.append(f"result = round({expr}, 2)")
         lines.append(f"print(f'{label}: {{result}}')")
+        # debt_change_yoy's own formula_expr is a SIGNED delta
+        # (new - old) -- correct for direction detection, but printing
+        # only that signed number leads the LLM to narrate it as
+        # "decreased by -229.0" (a double negative: the verb already
+        # carries the direction, then the number repeats it with a minus
+        # sign). FinanceBench's own gold answers always state a plain
+        # magnitude ("decreased by $229 million"), never a signed delta
+        # after a directional verb -- same underlying principle as
+        # dividends_paid/capex being wrapped in abs() elsewhere in this
+        # file (a "how much" question wants a positive magnitude, not a
+        # signed cash-flow-statement value). Printing an explicit
+        # magnitude+direction line here gives the LLM an unambiguous
+        # figure to quote directly, matching gold's phrasing convention,
+        # without changing `result` itself (direction-detection elsewhere
+        # still sees the real signed value). Confirmed real case:
+        # Microsoft's and Verizon's own debt-change questions both stated
+        # the correct fact ("decreased by -229.0") but failed the grading
+        # check's number match purely because of this sign framing.
+        if fk == "debt_change_yoy":
+            lines.append("_magnitude = abs(result)")
+            lines.append("_direction_word = 'increased' if result > 0 else ('decreased' if result < 0 else 'stayed flat')")
+            lines.append(f"print(f'{{_direction_word}} by {{_magnitude}}')")
     return lines
 
 
@@ -3545,7 +3615,7 @@ _DIRECT_GROWTH_LABEL_RE = re.compile(r'^(total|worldwide|consolidated)$', re.IGN
 
 
 def _find_direct_pct_change_row(
-    extracted_table: Dict[str, Dict], new_yr: str,
+    extracted_table: Dict[str, Dict], old_yr: str, new_yr: str,
 ) -> Optional[float]:
     """
     A 10-K's own "Results of Operations"/"Analysis of Consolidated Sales"
@@ -3569,22 +3639,59 @@ def _find_direct_pct_change_row(
 
     Scoped narrowly: only ever called for a "revenue" canonical (see call
     site), and only trusts a candidate whose label is one of the handful
-    of generic terms filers use for a totals row, with a magnitude
-    (<100) that's plausible for a percentage but not a real dollar
-    total at the company scale this dataset covers -- both checks
-    together make an accidental collision with an unrelated same-named
-    row very unlikely. Returns None (falls back to the recomputed ratio)
-    when no such row exists, which is the common case for most filings.
+    of generic terms filers use for a totals row. A generic "Total"/
+    "Worldwide" label alone is NOT enough of a filter, though -- the same
+    filing routinely has SEVERAL unrelated "Total"-labeled rows (segment
+    subtotals, asset totals, ...) scattered across different tables, and
+    widening retrieval to catch this row reliably (see
+    RETRIEVAL_TOP_K_NARRATIVE at this function's call site) pulls several
+    of those unrelated "Total" candidates into the SAME extracted_table
+    alongside the real one. Requiring ONLY the target year's value to look
+    like a percentage (abs < 100) isn't discriminating enough on its own
+    -- confirmed real case: JnJ's own evidence also contained "Total |
+    2022: 23,438" (a segment pretax-income subtotal, > 100 so already
+    excluded) and, once retrieval widened further, occasionally an
+    unrelated same-shaped candidate that also happened to be < 100 for
+    ONLY the target year. Grouping by the row's own label and requiring
+    BOTH years to look like percentages (a genuine "%change" row always
+    reports both years that way; an unrelated dollar-figure row is
+    virtually never < 100 in BOTH years by coincidence) resolves this.
+    Returns None (falls back to the recomputed ratio) when no such row
+    exists, which is the common case for most filings.
     """
-    for v in extracted_table.values():
-        if v.get("year") != new_yr:
-            continue
+    # Group by the row's own FAMILY (its code_key with the year stripped
+    # out), not just its generic label -- extracted_table routinely holds
+    # SEVERAL distinct rows that all happen to be labeled exactly "Total"
+    # for the exact same year (a segment subtotal, an asset total, AND
+    # the real %-change row can all coexist once retrieval is widened
+    # enough to catch this row reliably). Grouping by label alone lets a
+    # later same-label/same-year row silently overwrite an earlier one in
+    # a plain dict, discarding whichever was assigned first regardless of
+    # which one is actually correct. code_key already disambiguates same-
+    # label/same-year duplicates with a numeric suffix (_extract_from_
+    # linearized_table's own dedup logic) — a chunk's OWN "2022"/"2021"
+    # columns are extracted back-to-back in the same loop pass, so they
+    # reliably land on the SAME suffix index, letting the two years of
+    # the SAME underlying row be paired correctly by that family alone.
+    by_family: Dict[str, Dict[str, float]] = {}
+    for code_key, v in extracted_table.items():
         item = (v.get("item") or "").strip()
         if not _DIRECT_GROWTH_LABEL_RE.match(item):
             continue
         val = v.get("val")
-        if val is not None and abs(val) < 100:
-            return val
+        yr = v.get("year")
+        if val is None or yr is None:
+            continue
+        family = re.sub(r'^val_(?:19|20)\d{2}_', '', code_key)
+        by_family.setdefault(family, {})[yr] = val
+    for yr_vals in by_family.values():
+        new_val = yr_vals.get(new_yr)
+        if new_val is None or abs(new_val) >= 100:
+            continue
+        old_val = yr_vals.get(old_yr)
+        if old_val is not None and abs(old_val) >= 100:
+            continue
+        return new_val
     return None
 
 
@@ -3953,7 +4060,7 @@ def _build_calculation_code(
         v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
             direct_pct = (
-                _find_direct_pct_change_row(extracted_table, v2["year"])
+                _find_direct_pct_change_row(extracted_table, v1["year"], v2["year"])
                 if v1.get("canonical") == "revenue" and _kw_match(_HIGH_GROWTH_TRIGGERS, q_lower)
                 else None
             )

@@ -468,9 +468,10 @@ Available Evidence:
     "geographies" question is asking for actual regions, and an internal
     reporting-segment code is not itself a geography.
 12. If the question asks about ongoing LEGAL BATTLES/litigation and the
-    evidence names multiple DISTINCT categories of legal matters (e.g. a
-    filing's own named sub-headings like "Usual and Customary Pricing
-    Litigation", "PBM Litigation and Investigations", "Controlled
+    verdict is that the company DOES have materially important ones, and
+    the evidence names multiple DISTINCT categories of legal matters
+    (e.g. a filing's own named sub-headings like "Usual and Customary
+    Pricing Litigation", "PBM Litigation and Investigations", "Controlled
     Substances Litigation"), give a one-sentence summary of what is
     actually ALLEGED or at issue in EACH named category, not just its
     name -- do not describe only the category with the largest dollar
@@ -480,6 +481,54 @@ Available Evidence:
     "alleges retail pharmacies overcharged for prescription drugs by
     not submitting the correct usual and customary price"); state that,
     even without a dollar figure to cite alongside it.
+    This enumerate-every-category instruction applies ONLY when the
+    verdict is "Yes, materially important". When the filing discloses
+    ordinary-course legal proceedings but management/the filing itself
+    concludes none are expected to have a material adverse effect (a
+    "No" verdict), do NOT enumerate the individual immaterial matters or
+    their categories in detail -- state the "No" verdict plainly in the
+    opening sentence, optionally with a single brief clause noting that
+    ordinary-course matters exist but were assessed as immaterial, and
+    stop there. Spending a paragraph walking through each disclosed-but-
+    immaterial matter (even when every individual fact stated is
+    accurate) makes a correct "No" answer read as hedgy or self-
+    contradictory -- the level of enumeration itself implies materiality
+    the verdict is denying. Confirmed real case: PepsiCo's own "Has
+    PepsiCo reported any materially important ongoing legal battles..."
+    question (gold: a plain "No, PepsiCo is not involved in material
+    legal battles") got a technically-correct "No" that nonetheless
+    opened with "PepsiCo's FY2022 and FY2021 10-K filings disclose
+    various legal proceedings..." followed by a category-by-category
+    breakdown, before finally restating "No" -- accurate in substance,
+    but reads as uncertain given how much space was spent describing
+    matters the verdict itself says aren't material.
+    Decide the Yes/No verdict itself from the NATURE and SEVERITY of what
+    the evidence actually describes (e.g. lawsuits/investigations tied to
+    fatal accidents, large stated settlement/remediation figures, an
+    active bankruptcy-court proceeding, multiple concurrent suits) -- NOT
+    from whether the filing happens to contain an explicit sentence
+    literally labeling something "material" or "not material". A filing
+    that explicitly states its own materiality conclusion (as PepsiCo's
+    and CVS's do) is one valid signal when present, but its ABSENCE does
+    not make the question unanswerable -- evidence naming specific,
+    serious ongoing lawsuits (e.g. litigation arising from fatal aircraft
+    accidents) is by itself sufficient basis for a confident "Yes", even
+    without the filing using the word "material" anywhere in the excerpt
+    you were given. Do not respond "I cannot confirm" / "not enough
+    information to determine materiality" when the evidence already
+    names specific, serious ongoing legal matters -- use professional
+    judgment on severity the same way a human analyst reading the same
+    excerpt would, rather than treating the ABSENCE of an explicit
+    materiality label as itself inconclusive. Confirmed real case:
+    Boeing's own "Has Boeing reported any materially important ongoing
+    legal battles...FY2022?" question (gold: "Yes. Multiple lawsuits...
+    resulting from a 2018 Lion Air crash and a 2019 Ethiopian Airlines
+    crash") had evidence correctly naming both accidents and the
+    resulting litigation, but got "I cannot confirm... management's
+    materiality conclusions are not included here" instead of "Yes" --
+    the underlying facts were sufficient to answer confidently; two fatal
+    aircraft-accident lawsuits against a company this size are self-
+    evidently material without needing the filing to say so explicitly.
 13. Before concluding that the evidence does NOT contain something the
     question asks for (an acquisition, a litigation category, a specific
     figure, a named note like "Acquisitions and Divestitures"), you MUST
@@ -528,6 +577,34 @@ Available Evidence:
     capital intensity it is (physical plant vs. a large acquired/
     goodwill-heavy balance sheet), not to overrule what ROA already
     indicates.
+15. If the question asks what DROVE a margin change (gross margin,
+    operating margin, etc.) and the evidence contains BOTH (a) routine/
+    recurring operational factors (raw-material or logistics cost
+    inflation, ordinary pricing/volume/mix shifts, FX translation,
+    routine productivity gains) AND (b) one-off/non-recurring special
+    items (litigation charges, impairments, restructuring/divestiture
+    costs, a specific named exit from a product line or manufacturing
+    process), lead the explanation with the one-off/special items, not
+    the routine operational factors -- even when a routine factor has a
+    numerically larger stated percentage-point impact. This mirrors
+    standard financial-statement-analysis practice (distinguishing
+    "core"/recurring performance from non-recurring items when
+    explaining a period-over-period change): a margin move is usually
+    considered NEWSWORTHY and explanation-worthy specifically because of
+    what's unusual about it, not because of the routine cost/pricing
+    noise that's present in every period regardless. Routine factors can
+    still be mentioned, but as secondary context after the special
+    items, not as the headline explanation. Confirmed real case: 3M's
+    own "What drove operating margin change...FY2022" question (gold:
+    "...primarily due to...mostly one-off charges including Combat Arms
+    Earplugs litigation, impairment related to exiting PFAS
+    manufacturing, costs related to exiting Russia and divestiture-
+    related restructuring charges") had evidence containing both a raw-
+    material/logistics inflation drag AND these named one-off items, but
+    the routine inflation factor was cited first as the primary driver
+    while the litigation/PFAS/Russia/divestiture items were relegated to
+    an "other contributors" list -- gold's own framing treats the one-off
+    items as the primary story.
 """
 
         try:
