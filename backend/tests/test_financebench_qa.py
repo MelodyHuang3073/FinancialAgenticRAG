@@ -148,6 +148,31 @@ def _expand_fy_shorthand(text: str) -> str:
     return _FY_SHORT_RE.sub(lambda m: "FY20" + m.group(1), text or "")
 
 
+#: "3M" (the company, formally "3M Company") is this benchmark's one
+#: recurring real-world case of a company's own NAME starting with a
+#: bare digit -- _NUM_RE has no way to tell the literal word "3M" apart
+#: from a genuine "<digit>M" magnitude shorthand ("$1561M" = 1,561
+#: million), so any gold/model answer that merely mentions the company
+#: by name contributes a spurious 3.0 to the extracted-numbers list,
+#: indistinguishable from a real financial figure. Confirmed real case:
+#: 3M's own "What drove operating margin change...FY2022?" question --
+#: the model's answer never stated gold's actual 1.7-percentage-point
+#: figure, but still PASSED anyway, because both texts' incidental "3M"
+#: mentions each contributed a coincidental 3.0 that alone satisfied
+#: _check_contains_facts's "at least half the gold numbers must match"
+#: threshold (gold had only 2 non-year numbers total).
+#: Only strips the EXACT word "3M" (word-bounded on both sides, not
+#: preceded by '$' or another digit, not followed by another digit) --
+#: leaves genuine magnitude shorthand like "$1561M"/"a 23M-share buyback"
+#: completely untouched, since those are always preceded by '$' or by
+#: more digits, never by nothing at all the way the bare company name is.
+_3M_COMPANY_NAME_RE = re.compile(r"(?<![\w$])3M\b(?!\d)")
+
+
+def _strip_3m_company_name(text: str) -> str:
+    return _3M_COMPANY_NAME_RE.sub("", text or "")
+
+
 #: A gold answer that enumerates a short list inline ("...during FY 2022:
 #: (1) Current Health Ltd and (2) Two Peaks, LLC...") uses "(1)"/"(2)" as
 #: pure list-item numbering, not a financial fact -- but _NUM_RE has no
@@ -220,7 +245,7 @@ def _numbers_in(text: str):
     preceded by whitespace/start at the '-' itself, not a letter.
     """
     out = []
-    cleaned = _split_bullet_dash(_strip_list_markers(_expand_fy_shorthand(text)))
+    cleaned = _split_bullet_dash(_strip_list_markers(_strip_3m_company_name(_expand_fy_shorthand(text))))
     for m in _NUM_RE.finditer(cleaned):
         s = m.group(0)
         if "-" in s:
