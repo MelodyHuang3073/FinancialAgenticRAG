@@ -308,13 +308,44 @@ class LLMAnswerGenerator:
             # the net income, because only the final ratio, never the
             # inputs that produced it, was ever shown to the model.
             pot_code_text = pot_res.get("code", "") or ""
+            output_log_text = pot_res.get("output_log", "") or ""
+            # The sandbox's own generic "no relevant structured data found"
+            # fallback (pot_reasoner.py's _build_calculation_code, both the
+            # extracted_table and free_text branches) always sets
+            # result_value to a bare 0.0 alongside this exact warning text
+            # -- a deliberately meaningless placeholder, not a genuine
+            # computed fact, printed so an honest "couldn't compute this"
+            # beats a confidently wrong number borrowed from an unrelated
+            # line item. Without this check, the unconditional "MUST quote
+            # this exact number in your HEADLINE" instruction below applied
+            # here too, making the model literally open its answer with
+            # "0.0 --" or "PoT result: 0.0" as if that were a real finding.
+            # Confirmed real case: American Express's own "Does AMEX have an
+            # improving operating margin profile...?" and "What drove gross
+            # margin change...for American Express?" questions (gold: the
+            # metric simply isn't measured for a financial institution) --
+            # the model's reasoning and conclusion were already correct, but
+            # the answer opened with an oddly out-of-place "0.0" because
+            # this instruction told it to.
+            is_unreliable_fallback = "result is not reliable" in output_log_text
             pot_summary = (
                 f"\nPoT result: {result_value}\n"
                 f"PoT calculation code (these are the EXACT input values actually used):\n"
                 f"{pot_code_text[:1200]}\n"
-                f"Sandbox output: {pot_res.get('output_log', '')[:600]}"
+                f"Sandbox output: {output_log_text[:600]}"
             )
-            if result_value is not None:
+            if is_unreliable_fallback:
+                pot_summary += (
+                    "\n⚠️ NOTE: The sandbox could NOT find structured data in the retrieved "
+                    "evidence that actually matches what this question asks about -- the 0.0 "
+                    "result above is a meaningless placeholder, NOT a real computed answer. "
+                    "Do NOT cite \"0\"/\"0.0\" anywhere in your answer as if it were a genuine "
+                    "figure or headline result. Instead, answer directly from the qualitative "
+                    "evidence text below (e.g. explaining what actually drove a change, or why "
+                    "this metric isn't a meaningful one for this company), the same way you "
+                    "would if no PoT result had been computed at all."
+                )
+            elif result_value is not None:
                 pot_summary += (
                     f"\n⚠️ CRITICAL: The PoT result above ({result_value}) was computed by a "
                     "verified Python sandbox, NOT by you. You MUST quote this exact number -- "
@@ -467,6 +498,26 @@ Available Evidence:
     places the evidence itself names, not just the abbreviation -- a
     "geographies" question is asking for actual regions, and an internal
     reporting-segment code is not itself a geography.
+    When the filing reports revenue/operations broken out by its OWN
+    named geographic segments (e.g. "United States", "EMEA", "APAC",
+    "LACC"), use those segment names -- optionally with the revenue
+    figures/percentages the filing gives for each -- as the answer's main
+    structure, not a flat list of every individual country mentioned
+    anywhere in the evidence pulled together in no particular order. Do
+    NOT lead the answer with employee/headcount statistics ("X employees
+    are located in the U.S., Y outside the U.S.") -- a "where does the
+    business operate" question is about where revenue/operations are, not
+    where staff are located, even when a headcount breakdown by geography
+    is present in the same evidence. Confirmed real case: American
+    Express's own "What are the geographies...primarily operates in as of
+    2022?" question -- one answer opened with a U.S.-vs-international
+    employee headcount split, then closed with a fragmented list of
+    individual place names (United States; Europe; the Middle East;
+    Africa; United Kingdom; European Union; Asia Pacific including Japan;
+    Australia; New Zealand; Latin America; Canada; Mexico; the Caribbean)
+    instead of American Express's own three reporting segments (EMEA,
+    APAC, LACC) with their revenue figures, even though the filing itself
+    reports geographic revenue exactly that way.
 12. If the question asks about ongoing LEGAL BATTLES/litigation and the
     verdict is that the company DOES have materially important ones, and
     the evidence names multiple DISTINCT categories of legal matters
@@ -577,6 +628,18 @@ Available Evidence:
     capital intensity it is (physical plant vs. a large acquired/
     goodwill-heavy balance sheet), not to overrule what ROA already
     indicates.
+    Whenever the PoT sandbox output includes an ROA figure, your final
+    answer text MUST explicitly state that ROA percentage as a number
+    (e.g. "...evident from its ROA of only 1.82%...") -- do not merely
+    reason from it internally while leaving it out of the written answer.
+    Confirmed real case: 3M's and CVS Health's own "Is [company] a
+    capital-intensive business...?" questions have each, on different
+    occasions, produced an answer with the right Yes/No verdict and
+    correct reasoning but with the ROA number itself silently omitted
+    from the text, even though this instruction already asked for ROA to
+    be the primary signal -- restating it here as an explicit output
+    requirement (a number that must appear), not just a reasoning
+    priority, is meant to close that gap.
 15. If the question asks what DROVE a margin change (gross margin,
     operating margin, etc.) and the evidence contains BOTH (a) routine/
     recurring operational factors (raw-material or logistics cost

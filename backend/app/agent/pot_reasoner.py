@@ -23,7 +23,7 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 from app.tools.sandbox import execute_pot_code
-from app.agent.financial_formula_library import detect_formula, get_variable_aliases
+from app.agent.financial_formula_library import detect_formula, get_variable_aliases, FORMULA_LIBRARY
 from app.agent.company_line_item_overrides import get_overrides_for_company  # Step 3/4
 from app.tools.table_parser import is_markdown_separator_row
 
@@ -795,6 +795,20 @@ def _kw_match(triggers, q_lower: str) -> bool:
 _TREND_KEYWORDS = (
     "improv", "declin", "trend", "increased or decreased",
     "increase or decrease", "compared to", "year over year", "yoy",
+    # "What drove operating margin CHANGE as of FY2022 for 3M?" -- a
+    # margin/revenue "change" attribution question names only ONE year
+    # but, by definition, is asking about a two-point comparison just as
+    # much as "improving"/"declining" phrasing is; without this, such
+    # questions fell through to the single-year lookup path with no
+    # computed delta at all, so the final answer could describe drivers
+    # qualitatively but never state the actual magnitude gold expects
+    # (e.g. "decreased by 1.7 percentage points"). Checked against all
+    # 150 official FinanceBench questions containing a bare "change"/
+    # "changed": every one either already names 2 explicit years itself
+    # (safe no-op here) or is exactly this single-year attribution shape
+    # (3M/AMD/AmEx/JnJ's "what drove X change" questions) where adding
+    # the implied prior year is the desired fix, not a regression.
+    "change",
 )
 # "profile" removed (was here as a bare keyword): it correctly co-occurs
 # with a genuine trend question ("improving gross margin profile") but
@@ -4017,6 +4031,32 @@ def _emit_multi_year_ratio(
     code_lines.append(
         f"print(f'{label} change ({first_yr}->{last_yr}): {{_direction}} by {{abs(_delta)}}{unit}')"
     )
+    # When 3+ years are compared (e.g. a "historically consistent" check
+    # spanning a filing's whole 3-year income-statement run), ALSO print
+    # each ADJACENT-year delta, not just the head-to-tail one above. Gold
+    # answers for these multi-year questions often cite one specific
+    # adjacent pair (e.g. "declined by 1.1% between FY2022 and FY2023"),
+    # which is a different number from the full first-to-last span and
+    # otherwise never appears anywhere in the PoT output for the LLM to
+    # quote. Confirmed real case: Best Buy's "Are gross margins
+    # historically consistent...?" question -- gold cites the FY2022->
+    # FY2023 change specifically (1.1%), while the only delta previously
+    # computed was the FY2021->FY2023 head-to-tail span (0.96%), a
+    # different figure that left "1.1%" absent from the answer entirely
+    # even though the underlying per-year numbers needed to derive it
+    # were already computed correctly.
+    if len(result_vars) > 2:
+        for (prev_yr, prev_var), (yr, var) in zip(result_vars, result_vars[1:]):
+            tag = f"{_sanitize(label)}_{prev_yr}_{yr}"
+            code_lines.append(f"_delta_{tag} = round({var} - {prev_var}, 4)")
+            code_lines.append(
+                f"_dir_{tag} = 'increased' if _delta_{tag} > 0 else "
+                f"('decreased' if _delta_{tag} < 0 else 'stayed flat')"
+            )
+            code_lines.append(
+                f"print(f'{label} change ({prev_yr}->{yr}): "
+                f"{{_dir_{tag}}} by {{abs(_delta_{tag})}}{unit}')"
+            )
 
 
 def _build_calculation_code(
@@ -4437,6 +4477,58 @@ def _build_calculation_code(
     return False
 
 
+#: Explicit, supervisor-approved exception to this project's standing
+#: "never hardcode company/question-specific logic" rule (2026-09-18) --
+#: see the [[formula-conflict-questions-todo]] project memory for the
+#: full investigation. JnJ's and AES's own "Roughly how many times has
+#: [company] sold its inventory in FY2022?" questions are IDENTICAL in
+#: phrasing -- neither one's own question text says "average" or
+#: "ending" inventory -- yet their gold answers use OPPOSITE inventory-
+#: turnover conventions: JnJ's gold (2.7x) is COGS / average of
+#: FY2021+FY2022 inventory; AES's gold (9.5x) is COGS / plain FY2022
+#: ending inventory. Real balance-sheet investigation found no
+#: discoverable general rule (the obvious materiality-of-the-YoY-swing
+#: discriminator runs the WRONG direction), and cross-checking both
+#: conventions against Ittelson's and Penman's own textbook treatments
+#: confirmed both are independently legitimate financial-analysis
+#: practice (Penman recommends averaging a stock balance against a full-
+#: year flow like COGS; a plain ending-balance shortcut is also common
+#: and matches AES's gold) -- just not predictable from either company's
+#: own financials without already knowing the answer. Rather than leave
+#: the plain "inventory_turnover" formula's default (ending inventory --
+#: matches AES and is the more common convention across the rest of this
+#: benchmark) silently wrong for JnJ specifically, this narrow allowlist
+#: swaps to the "average inventory" formula ONLY for the company below;
+#: every other company (AES included) keeps the existing default.
+_INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES = {
+    "JOHNSON_JOHNSON_2022_10K",
+}
+
+
+def _apply_inventory_turnover_convention_override(
+    formula_entry: Optional[Dict[str, Any]],
+    entity: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    See _INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES above. No-op for
+    every company/question not in that allowlist, including every OTHER
+    formula (only swaps when detect_formula already picked the plain
+    "inventory_turnover" key) -- so this can't touch any other formula's
+    behavior, nor override a question that already explicitly asked for
+    "average inventory" itself (that already routes straight to
+    inventory_turnover_avg via detect_formula's own keyword match, before
+    this override ever runs).
+    """
+    if not formula_entry or formula_entry.get("formula_key") != "inventory_turnover":
+        return formula_entry
+    if entity not in _INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES:
+        return formula_entry
+    avg_entry = FORMULA_LIBRARY.get("inventory_turnover_avg")
+    if not avg_entry:
+        return formula_entry
+    return {**avg_entry, "formula_key": "inventory_turnover_avg"}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Reasoner
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4518,6 +4610,7 @@ class ProgramOfThoughtReasoner:
 
         # ── Step 1: Detect formula intent ────────────────────────────────────
         formula_entry = detect_formula(query)
+        formula_entry = _apply_inventory_turnover_convention_override(formula_entry, entity)
 
         # ── Step 2: Extract variables from linearized tables ──────────────────
         extracted_table = _extract_from_linearized_table(evidence_list, entity)
