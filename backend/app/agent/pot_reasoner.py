@@ -3278,7 +3278,25 @@ def _gen_formula_code(
     # by-family disambiguation against unrelated same-labeled rows) gets
     # the intended behavior without needing _score_row_match to support a
     # matching direction it fundamentally doesn't.
-    if fk == "revenue_yoy" and "revenue_new" in resolved and "revenue_old" in resolved:
+    # Only take the filing's own reported-% shortcut when the question does
+    # NOT explicitly demand a precise decimal-rounded computation -- checked
+    # against all 150 official FinanceBench questions, every single one that
+    # requires a specific numeric precision uses the exact phrase "round to
+    # one/two decimal place(s)" (28 questions, zero exceptions; no other
+    # "round(ed) to..." phrasing exists anywhere in the dataset), while JnJ's
+    # "high growth company" question (the one this shortcut exists for) has
+    # no such phrase at all. Confirmed real regression without this gate:
+    # Amazon's "...year-over-year change in revenue from FY2016 to FY2017
+    # (round to one decimal place)?" -- precise computation gives 30.797...%
+    # (rounds to gold's 30.8%), but Amazon's own MD&A states its growth as
+    # a coarser rounded "31%" nearby, and the shortcut silently substituted
+    # that filing-reported figure for the precise one the question explicitly
+    # asked for.
+    wants_precise_rounding = "decimal place" in q_lower
+    if (
+        fk == "revenue_yoy" and not wants_precise_rounding
+        and "revenue_new" in resolved and "revenue_old" in resolved
+    ):
         yoy_new_yr = next(
             (v.get("year") for v in extracted_table.values()
              if v.get("canonical") == "revenue" and v.get("val") == resolved["revenue_new"]),
@@ -4047,7 +4065,18 @@ def _emit_multi_year_ratio(
     # were already computed correctly.
     if len(result_vars) > 2:
         for (prev_yr, prev_var), (yr, var) in zip(result_vars, result_vars[1:]):
-            tag = f"{_sanitize(label)}_{prev_yr}_{yr}"
+            # Trailing "_pair" is load-bearing, not decorative: the
+            # frontend's result_series (built by generate_and_execute()
+            # scanning sandbox locals for names ending in a bare "_YYYY")
+            # would otherwise misidentify "_delta_..._2023" as itself a
+            # per-year data point, corrupting the green result card's
+            # trend display. Confirmed real regression: Best Buy's 3-year
+            # gross-margin-consistency question's result_series collapsed
+            # from the correct [2021, 2022, 2023] sequence to a single
+            # bogus {"year": "2023", "value": -1.0789} entry (the DELTA
+            # mislabeled as if it were 2023's own margin) once this block
+            # was added without the suffix.
+            tag = f"{_sanitize(label)}_{prev_yr}_{yr}_pair"
             code_lines.append(f"_delta_{tag} = round({var} - {prev_var}, 4)")
             code_lines.append(
                 f"_dir_{tag} = 'increased' if _delta_{tag} > 0 else "
