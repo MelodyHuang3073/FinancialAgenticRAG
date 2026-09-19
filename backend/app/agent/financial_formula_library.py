@@ -49,8 +49,19 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # Confirmed real case: American Water Works FY2022 — the model's
         # text never stated the actual -$1,561M figure at all, just a
         # generic "not a relevant metric for this company" non-answer.
-        "keywords_zh": ["正的營運資金", "負的營運資金"],
-        "keywords_en": ["positive working capital", "negative working capital"],
+        # "net working capital" added alongside the original positive/
+        # negative phrasing: unlike bare "working capital" (which would
+        # also match inside "working capital RATIO" questions and wrongly
+        # hijack those into a subtraction), "net working capital" is
+        # unambiguous -- nobody asks for a "net working capital ratio",
+        # it always names this raw dollar metric. Confirmed real case:
+        # Lockheed Martin's "What is Lockheed Martin's FY2021 net working
+        # capital?" matched no formula at all (detect_formula() returned
+        # None), so it fell through to the less reliable LLM-decomposition
+        # retrieval path instead of this formula's direct, deterministic
+        # current_assets/current_liabilities lookup.
+        "keywords_zh": ["正的營運資金", "負的營運資金", "淨營運資金"],
+        "keywords_en": ["positive working capital", "negative working capital", "net working capital"],
         "formula_expr": "current_assets - current_liabilities",
         "required_vars": {
             "current_assets":    ["流動資產", "current assets", "total current assets"],
@@ -119,7 +130,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "gross_profit / revenue",
         "required_vars": {
             "gross_profit": ["毛利", "gross profit", "gross income"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Gross Margin",
         "unit": "%",
@@ -139,7 +150,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "operating_income / revenue",
         "required_vars": {
             "operating_income": ["營業利益", "operating income", "operating profit", "ebit", "income from operations"],
-            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Operating Margin",
         "unit": "%",
@@ -151,7 +162,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "net_income / revenue",
         "required_vars": {
             "net_income": ["本期淨利", "淨利", "net income", "net profit", "profit after tax", "net earnings"],
-            "revenue":    ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue":    ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Net Profit Margin",
         "unit": "%",
@@ -176,7 +187,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "required_vars": {
             "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
                              "depreciation"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "D&A Margin",
         "unit": "%",
@@ -255,11 +266,83 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "formula_expr": "ebitda / revenue",
         "required_vars": {
             "ebitda":  ["ebitda", "稅息折舊及攤銷前利潤"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "EBITDA Margin",
         "unit": "%",
         "period_average": True,
+    },
+    "ebitda_margin_unadjusted": {
+        # Must be checked BEFORE ebitda_unadjusted below: FinanceBench's
+        # own recurring phrasing is "unadjusted EBITDA % margin" (or
+        # "...EBITDA margin"), which contains "unadjusted ebitda" as a
+        # substring -- if the plain-dollar-sum formula below came first
+        # it would win the match and this question would compute a raw
+        # dollar figure instead of a percentage, with no revenue term and
+        # no period-average support at all. ebitda_margin above doesn't
+        # catch this either: its own keyword "ebitda margin" requires
+        # "ebitda" and "margin" to be adjacent, but the real phrasing
+        # inserts "%" between them ("EBITDA % margin"), so \bebitda
+        # margin\b never matches. Confirmed real case: Walmart's "FY2018
+        # - FY2020 3 year average unadjusted EBITDA % margin" question
+        # matched ebitda_unadjusted instead, so retrieval only fetched a
+        # single year's op_income/depreciation and never fetched revenue
+        # at all (needed for the % denominator) or the other two years
+        # (needed for the 3-year average) -- an answer sometimes still
+        # came out right when neighboring evidence happened to carry the
+        # missing pieces anyway, and sometimes didn't, depending on
+        # retrieval luck.
+        "keywords_zh": ["未調整EBITDA利潤率", "未調整EBITDA 利潤率"],
+        "keywords_en": ["unadjusted ebitda % margin", "unadjusted ebitda margin",
+                         "unadjusted ebitda %margin"],
+        "formula_expr": "(op_income + depreciation) / revenue",
+        "required_vars": {
+            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+                              "income from operations"],
+            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+                              "depreciation", "amortization", "d&a"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "Unadjusted EBITDA Margin",
+        "unit": "%",
+        "period_average": True,
+    },
+    "ebitda_unadjusted_less_capex": {
+        # Registered BEFORE the plain "ebitda_unadjusted" below (same
+        # "more specific must be checked first" convention as
+        # fixed_asset_turnover/asset_turnover elsewhere in this
+        # library) — a question asking for "unadjusted EBITDA less
+        # capex" is a DIFFERENT, three-variable metric, not the same
+        # two-variable "unadjusted EBITDA" with an extra clause the
+        # formula happens to ignore. Without its own entry, "unadjusted
+        # ebitda" alone matches first, resolves successfully with just
+        # op_income+depreciation, and the whole "less capex" half of
+        # the question is silently dropped — the formula never even
+        # tries to retrieve capex, since it isn't one of ITS required
+        # vars. Confirmed real case: PepsiCo's own "What is the FY2022
+        # unadjusted EBITDA less capex...?" (gold $9,068M) matched
+        # ebitda_unadjusted and returned bare EBITDA ($14,275M) with
+        # the model's own answer stating capex "is not shown in the
+        # provided cash flow extract" — capex was never searched for
+        # at all, not merely missing from evidence.
+        "keywords_zh": ["未調整EBITDA減資本支出", "未調整EBITDA扣除資本支出"],
+        "keywords_en": ["unadjusted ebitda less capex", "unadjusted ebitda minus capex",
+                         "unadjusted ebitda - capex"],
+        # abs(capex): same sign convention as capex_to_revenue elsewhere
+        # in this library -- a cash-flow-statement capex line is
+        # routinely a parenthesised/negative outflow figure.
+        "formula_expr": "op_income + depreciation - abs(capex)",
+        "required_vars": {
+            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+                              "income from operations"],
+            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+                              "depreciation", "amortization", "d&a"],
+            "capex":        ["capital expenditures", "capital expenditure", "purchases of property",
+                              "purchases of property and equipment",
+                              "purchases of property, plant and equipment", "資本支出"],
+        },
+        "result_label": "Unadjusted EBITDA less CapEx",
+        "unit": "",
     },
     "ebitda_unadjusted": {
         # A plain "operating income + D&A" sum — distinct from ebitda_margin
@@ -308,7 +391,11 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "shareholders_equity_new": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
         },
         "result_label": "Return on Equity (ROE)",
-        "unit": "%",
+        # Bare decimal (e.g. "-0.02"), not a percentage -- see the "roa"
+        # entry just below for the confirmed real case and full reasoning
+        # (ROE is the same metric family as ROA, sharing the same gold-
+        # answer convention throughout this benchmark).
+        "unit": "",
         "multi_year": True,
     },
     "roa": {
@@ -321,7 +408,16 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "total_assets_new": ["總資產", "total assets", "assets"],
         },
         "result_label": "Return on Assets (ROA)",
-        "unit": "%",
+        # Bare decimal ratio, not a percentage -- matches every OTHER
+        # true ratio in this codebase (quick_ratio, current_ratio,
+        # dividend_payout_ratio) and FinanceBench's own gold-answer
+        # convention. Confirmed real case: AES Corporation's FY2022 ROA
+        # gold answer is "-0.02" -- the system's own calculation was
+        # numerically correct (net income -546 / avg total assets
+        # 35,813 ≈ -0.0152, which rounds to -0.02) but this formula's
+        # ×100 scaling turned it into "-1.53%", a 100x scale mismatch
+        # against gold that had nothing to do with the actual math.
+        "unit": "",
         "multi_year": True,
     },
     "roic": {
@@ -388,7 +484,18 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             ],
         },
         "result_label": "Dividend Payout Ratio",
-        "unit": "%",
+        # Bare decimal (e.g. "0.80"), not a percentage -- matches its
+        # sibling formula retention_ratio just below (same underlying
+        # line items, "unit": ""), and matches how FinanceBench's own
+        # gold answers express every other true RATIO in this benchmark
+        # (quick ratio "0.69", working capital ratio "0.68", inventory
+        # turnover "6.25") as opposed to a MARGIN/RATE ("%"). Confirmed
+        # real case: Coca-Cola's FY2022 dividend payout ratio gold answer
+        # is "0.8" -- the system's own calculation was numerically
+        # correct (0.7983) but presented as "79.83%", a 100x scale
+        # mismatch against gold that had nothing to do with the actual
+        # math.
+        "unit": "",
     },
     "retention_ratio": {
         # Was entirely unregistered — fell to a generic evidence-dump
@@ -452,6 +559,60 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "result_label": "Debt-to-Assets Ratio",
         "unit": "%",
     },
+    "debt_change_yoy": {
+        # "Has X increased its debt on balance sheet...?" has no formula
+        # of its own before this entry existed at all -- it isn't a
+        # ratio, so debt_to_equity/debt_to_assets above never match it,
+        # and the question fell through to an ungrounded LLM guess that
+        # happened to print a hollow "0.0" alongside a coincidentally-
+        # correct Yes/No. required_vars are placeholder names deliberately
+        # DISTINCT from "total_debt" (used by debt_to_equity/debt_to_assets
+        # for "total liabilities") -- this question means actual
+        # borrowings (loans/notes/bonds), a much smaller, different
+        # figure -- see _COMPOSITE_ITEM_ALIASES's own
+        # "total_borrowings_old"/"total_borrowings_new" entries in
+        # pot_reasoner.py for why this needs summing TWO separate
+        # balance-sheet rows ("Long-term debt" + "Current portion of
+        # long-term debt") rather than a single alias match. multi_year
+        # (not period_average): this is a two-point comparison with a
+        # direction, the same shape as any other YoY trend question.
+        "keywords_zh": ["負債是否增加", "負債是否減少", "舉債增加", "舉債減少"],
+        "keywords_en": ["increased its debt", "increased debt on balance sheet",
+                         "decreased its debt", "debt on balance sheet"],
+        "formula_expr": "total_borrowings_new - total_borrowings_old",
+        # "long-term debt" is deliberately NOT one of this formula's own
+        # required_vars aliases (only "total debt" is), even though it
+        # IS one of the composite fallback's sub-item aliases in
+        # pot_reasoner.py's _COMPOSITE_ITEM_ALIASES above -- a filer
+        # that discloses an explicit "Total debt" total (most do,
+        # typically in its own debt note) states it ALONGSIDE several
+        # OTHER rows that also happen to contain the substring
+        # "long-term debt" ("Long-term debt" on the balance sheet
+        # itself, "Total long-term debt", "Total long-term debt,
+        # including current maturities" in the note) -- if "long-term
+        # debt" were also a primary alias here, its higher matched
+        # FREQUENCY (several same-labeled rows) can outrank the single,
+        # correctly-scoped "Total debt" row in the extraction
+        # reduction's tie-break, even though "Total debt" is the exact,
+        # authoritative figure. Confirmed real case: Verizon's own debt
+        # note states "Total debt $150,639 $150,868" (change -229,
+        # matching gold's own "$229 million decrease" exactly), but
+        # with "long-term debt" also in this list, extraction picked
+        # the balance sheet's narrower "Long-term debt" row (140,676 /
+        # 143,425, change -2,749) instead purely on higher frequency.
+        # Keeping "long-term debt" ONLY in the composite fallback (used
+        # exclusively when this primary alias finds nothing at all)
+        # still correctly resolves a filer like Microsoft that has NO
+        # "Total debt" row anywhere, only "Long-term debt" + "Current
+        # portion of long-term debt" as two separate lines.
+        "required_vars": {
+            "total_borrowings_old": ["total debt"],
+            "total_borrowings_new": ["total debt"],
+        },
+        "multi_year": True,
+        "result_label": "Change in Total Debt",
+        "unit": "$",
+    },
     "interest_coverage": {
         "keywords_zh": ["利息保障倍數", "利息覆蓋率"],
         "keywords_en": ["interest coverage", "times interest earned", "interest coverage ratio"],
@@ -481,7 +642,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "ppe turnover", "property plant and equipment turnover"],
         "formula_expr": "revenue / ((ppe_old + ppe_new) / 2)",
         "required_vars": {
-            "revenue":  ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue":  ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
             # Same alias list for both — distinguished purely by which
             # year column matches, same convention as revenue_yoy's
             # revenue_new/revenue_old below.
@@ -497,14 +658,59 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "multi_year": True,
     },
     "asset_turnover": {
+        # Averages total_assets across the two endpoint years, same
+        # convention as every other turnover ratio in this library
+        # (fixed_asset_turnover's ppe_old/ppe_new, inventory_turnover,
+        # receivables_turnover) -- FinanceBench's own asset_turnover
+        # questions define it exactly this way ("FY2020 revenue /
+        # (average total assets between FY2019 and FY2020)"). Previously
+        # a bare "revenue / total_assets" using only ONE year's total
+        # assets, with no _old/_new split and no period_average flag, so
+        # the average was silently never computed at all. Confirmed real
+        # case: Lockheed Martin FY2020 asset turnover -- gold 1.33 (=
+        # 65,398 / ((47,528+50,710)/2) = 65,398/49,119), old code
+        # returned 1.29 (= 65,398/50,710, FY2020 total assets alone).
         "keywords_zh": ["資產週轉率", "總資產週轉率"],
         "keywords_en": ["asset turnover", "total asset turnover"],
-        "formula_expr": "revenue / total_assets",
+        "formula_expr": "revenue / ((total_assets_old + total_assets_new) / 2)",
         "required_vars": {
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
-            "total_assets": ["總資產", "total assets", "assets"],
+            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "total_assets_old": ["總資產", "total assets", "assets"],
+            "total_assets_new": ["總資產", "total assets", "assets"],
         },
         "result_label": "Asset Turnover",
+        "unit": "x",
+        "multi_year": True,
+    },
+    "capital_intensity_ratio": {
+        # "Is X a capital-intensive business...?" (an ASSESSMENT-mode
+        # question, not a bare numeric one) previously matched NO
+        # formula at all -- ASSESSMENT questions still route through
+        # detect_formula() when one exists (see orchestrator.py's
+        # non_numeric_formula check), which drives formula-guided
+        # retrieval for the SPECIFIC values needed instead of a generic
+        # topic-keyword search. Without this entry, "capital-intensive"
+        # retrieval fell back to the generic ASSESSMENT fallback_suffix
+        # ("capital expenditure assets depreciation"), which doesn't
+        # reliably surface a company's OWN total assets/revenue
+        # together -- confirmed real case: 3M's and CVS Health's own
+        # "Is X a capital-intensive business...?" questions answered
+        # "I cannot conclude... the filing excerpts lack CapEx and PP&E
+        # figures" despite those figures existing in the corpus.
+        # total_assets / revenue (single year, NOT averaged) matches
+        # FinanceBench's own definition verbatim -- Verizon's gold
+        # answer states "capital intensity ratio was approximately
+        # 2.774729 ... $2.77 of assets to generate $1 of revenue",
+        # i.e. assets/revenue for one fiscal year, the reciprocal of
+        # (and a DIFFERENT placeholder set from) asset_turnover above.
+        "keywords_zh": ["資本密集度", "資本密集"],
+        "keywords_en": ["capital-intensive", "capital intensive", "capital intensity ratio"],
+        "formula_expr": "total_assets / revenue",
+        "required_vars": {
+            "total_assets": ["總資產", "total assets", "assets"],
+            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "Capital Intensity Ratio",
         "unit": "x",
     },
     "cash_conversion_cycle": {
@@ -530,7 +736,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         ),
         "required_vars": {
             "cogs":    ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
             "inv_old": ["存貨", "inventory", "inventories"],
             "inv_new": ["存貨", "inventory", "inventories"],
             # Bare "receivables"/"receivable" — General Mills' balance
@@ -604,7 +810,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["receivables turnover", "accounts receivable turnover"],
         "formula_expr": "revenue / accounts_receivable",
         "required_vars": {
-            "revenue":             ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue":             ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
             "accounts_receivable": ["應收帳款", "accounts receivable", "trade receivables", "receivables", "receivable"],
         },
         "result_label": "Receivables Turnover",
@@ -684,12 +890,45 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # it at all. Confirmed real case: Amazon FY2016->FY2017 revenue
         # change had no formula match, so the sandbox never computed it
         # despite "Net sales" being cleanly retrievable for both years.
+        # "high growth"/"growth company" (a qualitative business
+        # characterization, e.g. "Is X a high-growth company?") also
+        # fundamentally means "compute revenue YoY growth" in ordinary
+        # usage -- registering it HERE (not just as a bare-canonical hint
+        # in pot_reasoner.py, which it also has) routes the question
+        # through this formula's OWN targeted, few-query extraction
+        # instead of the generic LLM-decomposed 6-9-query path, the same
+        # reliability win effective_tax_rate's direct_lookup_var already
+        # gets (see that entry's own comment). Confirmed unique across
+        # FinanceBench's 150 questions -- only JnJ's own "high growth
+        # company" question contains this phrase, so this can't change
+        # routing for any other already-passing question.
         "keywords_en": ["revenue growth", "revenue yoy", "sales growth", "revenue increase",
-                         "change in revenue", "change in total revenue"],
+                         "change in revenue", "change in total revenue",
+                         "high growth", "high-growth", "growth company"],
         "formula_expr": "(revenue_new - revenue_old) / revenue_old * 100",
+        # A 10-K's own "Results of Operations"/"Analysis of Consolidated
+        # Sales" MD&A table routinely prints the filer's OWN computed
+        # revenue %-change (a row labeled just "Total"/"Worldwide"), which
+        # can differ slightly from recomputing off two whole-million-
+        # rounded dollar figures -- same rationale as effective_tax_rate's
+        # own direct_lookup_var above. Confirmed real case: JnJ's FY2022
+        # 10-K states "Total | 2022: 1.3%" directly; recomputing from
+        # "Sales to customers | 2022: 94,943 | 2021: 93,775" gives
+        # 1.2455%, a 4.2% relative miss against gold's own "grew by 1.3%"
+        # (outside the 2% grading tolerance) purely from rounding.
+        "direct_lookup_var": "revenue_pct_change_direct",
         "required_vars": {
-            "revenue_new": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
-            "revenue_old": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue_new": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "revenue_old": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            # First alias becomes the actual retrieval query text (see
+            # orchestrator._build_formula_subquestions) -- empirically the
+            # single best-ranking phrasing found for this row's own
+            # extremely terse content (literally "Total | 2022: 1.3%"),
+            # not a grammatically "natural" description of it. See
+            # pot_reasoner._HIGH_GROWTH_TRIGGERS's own comment for the
+            # isolated retrieval-ranking testing this came from.
+            "revenue_pct_change_direct": ["total percent change results of operations",
+                                            "results of operations analysis of consolidated sales"],
         },
         "result_label": "Revenue YoY Growth",
         "unit": "%",
@@ -735,6 +974,40 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
     },
 
     # ── Multi-Year Average Ratios ────────────────────────────────────────────
+    "cogs_ratio": {
+        # Was entirely unregistered -- "cost of goods sold as a % of
+        # revenue" (FinanceBench's own recurring phrasing) matched NO
+        # formula at all, so retrieval fell to the LLM-decomposed path
+        # (no guarantee every requested year's cost_of_sales/revenue pair
+        # gets fetched) and, when no formula matched, PoT codegen's
+        # "Direct lookup" fallback just returned revenue itself as if
+        # that were the answer -- see pot_reasoner._MARGIN_MAP's own
+        # "cost of goods sold as a % of revenue" trigger addition, added
+        # alongside this formula for the SAME confirmed real case: Nike's
+        # "three year average of cost of goods sold as a % of revenue
+        # from FY2016 to FY2018" (gold 55.1%) returned $36,397 (FY2018's
+        # own revenue, a dollar figure) with zero ratio computed at all.
+        # Registering the formula here fixes retrieval determinism (every
+        # requested year's cost_of_sales AND revenue both get their own
+        # sub-query); the _MARGIN_MAP trigger fixes calculation as a
+        # fallback for whenever this doesn't match first.
+        "keywords_zh": ["銷貨成本佔營收比", "銷貨成本占營收比", "營業成本率"],
+        "keywords_en": ["cost of goods sold as a % of revenue",
+                         "cost of goods sold as a percentage of revenue",
+                         "cost of sales as a % of revenue",
+                         "cost of revenue as a % of revenue"],
+        # abs(cogs): same sign convention as capex_to_revenue below -- COGS
+        # is occasionally presented as a parenthesised/negative figure.
+        "formula_expr": "abs(cogs) / revenue",
+        "required_vars": {
+            "cogs":    ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales",
+                        "cost of revenue"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "Cost of Revenue Ratio",
+        "unit": "%",
+        "period_average": True,
+    },
     "capex_to_revenue": {
         # "period_average" (unlike "multi_year") isn't a pick-one-of-two-years
         # ratio — it's the average of capex/revenue computed separately for
@@ -755,11 +1028,94 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "capex":   ["capital expenditures", "capital expenditure", "purchases of property",
                         "purchases of property and equipment", "purchases of property, plant and equipment",
                         "資本支出"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue"],
+            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "CapEx to Revenue (period average)",
         "unit": "%",
         "period_average": True,
+    },
+
+    # ── Additional Standard Ratios ───────────────────────────────────────────
+    # Textbook-standard ratios (Ittelson's "Financial Statements"; Penman's
+    # "Financial Statement Analysis and Security Valuation") not yet asked
+    # by any of FinanceBench's own 150 questions, added proactively so a
+    # FUTURE question phrased this way has a deterministic formula to match
+    # instead of falling through to the less reliable generic LLM-
+    # decomposition path. English keywords only (this benchmark's filings
+    # and questions are entirely English; no Chinese trigger phrases are
+    # needed for terms that will never appear in a Chinese-language query
+    # here). All placed AFTER cash_conversion_cycle above, which must keep
+    # winning the "first match wins" scan for General Mills' own FY2019 CCC
+    # question (its own text spells out "DIO is defined as..."/"DSO is
+    # defined as..." verbatim, which would otherwise hijack formula
+    # selection away from CCC — see cash_conversion_cycle's own comment).
+    "days_sales_outstanding": {
+        "keywords_en": ["days sales outstanding", "dso"],
+        "formula_expr": "365 * accounts_receivable / revenue",
+        "required_vars": {
+            "accounts_receivable": ["accounts receivable", "trade receivables", "receivables", "receivable"],
+            "revenue": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "Days Sales Outstanding (DSO)",
+        "unit": "",
+    },
+    "days_inventory_outstanding": {
+        "keywords_en": ["days inventory outstanding", "dio"],
+        # abs(cogs): same sign convention as inventory_turnover above.
+        "formula_expr": "365 * inventory / abs(cogs)",
+        "required_vars": {
+            "inventory": ["inventory", "inventories"],
+            "cogs": ["cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
+        },
+        "result_label": "Days Inventory Outstanding (DIO)",
+        "unit": "",
+    },
+    "equity_multiplier": {
+        "keywords_en": ["equity multiplier"],
+        "formula_expr": "total_assets / shareholders_equity",
+        "required_vars": {
+            "total_assets":        ["total assets", "assets"],
+            "shareholders_equity": ["shareholders equity", "stockholders equity", "equity", "total equity"],
+        },
+        "result_label": "Equity Multiplier",
+        "unit": "x",
+    },
+    "book_value_per_share": {
+        "keywords_en": ["book value per share"],
+        "formula_expr": "shareholders_equity / shares_outstanding",
+        "required_vars": {
+            "shareholders_equity": ["shareholders equity", "stockholders equity", "equity", "total equity"],
+            "shares_outstanding":  ["shares outstanding", "weighted average shares", "diluted shares",
+                                     "common shares outstanding"],
+        },
+        "result_label": "Book Value Per Share",
+        "unit": "",
+    },
+    "operating_expense_ratio": {
+        "keywords_en": ["operating expense ratio", "operating expenses as a % of revenue",
+                         "operating expenses as a percentage of revenue"],
+        # abs(): an income statement occasionally presents opex as a signed
+        # subtraction step rather than a plain positive magnitude, same
+        # rationale as cogs_ratio/capex_to_revenue above.
+        "formula_expr": "abs(operating_expenses) / revenue",
+        "required_vars": {
+            "operating_expenses": ["operating expenses", "total operating expenses", "operating expense"],
+            "revenue":            ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "Operating Expense Ratio",
+        "unit": "%",
+        "period_average": True,
+    },
+    "long_term_debt_to_capitalization": {
+        "keywords_en": ["long-term debt to capitalization", "long term debt to capitalization",
+                         "debt to capitalization ratio", "debt-to-capitalization"],
+        "formula_expr": "long_term_debt / (long_term_debt + shareholders_equity)",
+        "required_vars": {
+            "long_term_debt":      ["long-term debt", "long term debt"],
+            "shareholders_equity": ["shareholders equity", "stockholders equity", "equity", "total equity"],
+        },
+        "result_label": "Long-Term Debt to Capitalization",
+        "unit": "%",
     },
 }
 

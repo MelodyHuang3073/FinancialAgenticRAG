@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Plus, Send, Mic, FileText, Bot, User,
-  Code2, ShieldCheck, ChevronDown, ChevronUp,
+  Code2, ChevronDown, ChevronUp,
   X, Sparkles, TrendingUp, BookOpen, Globe,
-  Paperclip, AlertCircle, CheckCircle
+  Paperclip
 } from 'lucide-react';
 
 /* ─── Extract every contiguous Markdown pipe-table block out of a page of
@@ -222,7 +222,33 @@ function formatResultValue(value) {
   return String(value);
 }
 
-function ResultSummaryCard({ value, series, delta, direction, unit = '', label = '最終計算結果' }) {
+function ResultSummaryCard({ value, series, delta, direction, unit = '', label = '最終計算結果', answerMode, isComparisonAnswer, isQualitativeCharacterization }) {
+  // EXPLANATION ("what drove X's change...") and ASSESSMENT ("is X a
+  // high-growth/capital-intensive company...") questions aren't asking
+  // for one explicit number as THE answer -- they want a qualitative
+  // judgment/narrative that a computed figure merely supports (the way
+  // capital-intensity's own answer weighs several signals together, not
+  // just one ratio). Headlining a single PoT-computed number as "最終計算
+  // 結果" for these misrepresents it as the definitive answer. NUMERIC
+  // (and EXCLUSION, e.g. "organic growth excluding M&A") questions DO ask
+  // for a specific number, so they're unaffected. Confirmed real cases:
+  // JnJ "is FY2022 a high-growth company" showed "1.2455%" (bare revenue
+  // YoY) as if that one figure settled it; JnJ "what drove gross margin
+  // change" showed "67.26%" (the margin itself) even though the actual
+  // question asks WHY it changed, not what it is.
+  if (answerMode === 'EXPLANATION' || answerMode === 'ASSESSMENT') return null;
+  // "Among operations, investing, financing... which brought in the
+  // most?" was IDENTIFIED by comparing three named categories, not
+  // computed as a single value the question asked for -- see the
+  // backend's own is_comparison_answer docstring (pot_reasoner.py) for
+  // the confirmed real case (Nike FY2023 headlined just the operating-
+  // activities figure as if it were "the" answer to a 3-way comparison).
+  if (isComparisonAnswer) return null;
+  // "Is X a high-growth company?" -- qualitative business
+  // characterization, not a request for one number, even though the
+  // classifier still routes it as answer_mode=NUMERIC (see the backend's
+  // own is_qualitative_characterization docstring in pot_reasoner.py).
+  if (isQualitativeCharacterization) return null;
   // A question asking "did X improve/decline between year A and year B" is
   // answered by the CHANGE, not a single year's snapshot — when the
   // backend computed a year-over-year comparison (series has both years),
@@ -235,6 +261,14 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
   // number in a large headline font instead of read as "times" — only
   // show the unit suffix for the case that's actually unambiguous.
   const displayUnit = unit === '%' ? unit : '';
+  // "$" reads naturally PREPENDED to a number ("$2,907"), never appended
+  // — a bare, unit-less number in this card (e.g. a dividends-paid
+  // total with no "$" or scale indicator at all) reads as if the figure
+  // itself might be wrong, even when the text answer below it is
+  // correct. Confirmed real case: "Has CVS Health paid dividends...Q2
+  // of FY2022?" showed a bare "2,907" here with nothing marking it as a
+  // dollar amount.
+  const displayPrefix = unit === '$' ? unit : '';
 
   return (
     <div style={{
@@ -254,7 +288,7 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
             <span key={pt.year} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
               {i > 0 && <span style={{ fontSize: 20, color: '#6ee7b7' }}>→</span>}
               <span style={{ fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-                {formatResultValue(pt.value)}{displayUnit}
+                {displayPrefix}{formatResultValue(pt.value)}{displayUnit}
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#059669', marginLeft: 4 }}>
                   ({pt.year})
                 </span>
@@ -264,13 +298,13 @@ function ResultSummaryCard({ value, series, delta, direction, unit = '', label =
         </div>
       ) : (
         <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: '#065f46', lineHeight: 1.1 }}>
-          {formatResultValue(value)}{displayUnit}
+          {displayPrefix}{formatResultValue(value)}{displayUnit}
         </div>
       )}
       {hasSeries && delta !== null && delta !== undefined && (
         <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: '#047857' }}>
           {direction === 'increased' ? '↑' : direction === 'decreased' ? '↓' : '—'}{' '}
-          {direction || 'changed'} by {formatResultValue(Math.abs(delta))}{displayUnit}
+          {direction || 'changed'} by {displayPrefix}{formatResultValue(Math.abs(delta))}{displayUnit}
         </div>
       )}
       <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
@@ -309,56 +343,18 @@ function CodeBlock({ code, log }) {
   );
 }
 
-/* ─── Tri-Check Badge ─── */
-function TriCheckBadge({ verification }) {
-  if (!verification) return null;
-  const checks = verification.checks || {};
-  const accepted = verification.decision === 'ACCEPT';
-  const conf = Math.round((verification.confidence_score || 0) * 100);
-
-  return (
-    <div style={{
-      display: 'flex', flexWrap: 'wrap', gap: 8,
-      marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e5e5',
-    }}>
-      {[
-        { key: 'nu_suff', label: 'ν_suff 資料充分性' },
-        { key: 'nu_num',  label: 'ν_num 算術一致性' },
-        { key: 'nu_cross',label: 'ν_cross 跨期驗證' },
-      ].map(({ key, label }) => {
-        const passed = checks[key]?.passed;
-        return (
-          <span key={key} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
-            padding: '3px 10px', borderRadius: 999,
-            background: passed ? '#f0fdf4' : '#fff1f2',
-            color: passed ? '#15803d' : '#b91c1c',
-            border: `1px solid ${passed ? '#bbf7d0' : '#fecdd3'}`,
-          }}>
-            {passed ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
-            {label}
-          </span>
-        );
-      })}
-      <span style={{
-        fontSize: 11, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 999,
-        background: accepted ? '#eff6ff' : '#fff7ed',
-        color: accepted ? '#1d4ed8' : '#c2410c',
-        border: `1px solid ${accepted ? '#bfdbfe' : '#fed7aa'}`,
-        fontWeight: 700,
-      }}>
-        {accepted ? `✅ ACCEPT · ${conf}%` : `⚠️ REJECT · ${conf}%`}
-      </span>
-    </div>
-  );
-}
-
 /* ─── Single Message Bubble ─── */
 function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
   const isOpen = openTrace === idx;
-  const [showDetails, setShowDetails] = useState(true);
-  const [showReasoning, setShowReasoning] = useState(true);
+  // detailText is part of the model's OWN answer (splitAnswerText only
+  // splits final_answer into a short lead-in + the rest, it never adds
+  // separate "internal logic" content) -- it must never be hidden behind
+  // a collapse toggle the way the genuinely internal reasoning/trace
+  // sections below are. showEvidence starts expanded for the same
+  // reason: the Source Evidence panel is part of judging whether an
+  // answer actually used the right data, not internal routing detail.
+  const [showEvidence, setShowEvidence] = useState(true);
+  const [showReasoning, setShowReasoning] = useState(false);
   const [showTraceDetails, setShowTraceDetails] = useState(false);
   const [expandedEvidence, setExpandedEvidence] = useState(null);
   const [evidenceViewMode, setEvidenceViewMode] = useState({}); // { [index]: 'table' | 'markdown' }
@@ -396,6 +392,9 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
             delta={msg.result.result_delta}
             direction={msg.result.result_direction}
             unit={msg.result.result_unit}
+            answerMode={msg.result.answer_mode}
+            isComparisonAnswer={msg.result.is_comparison_answer}
+            isQualitativeCharacterization={msg.result.is_qualitative_characterization}
           />
 
           {summaryText && (
@@ -406,32 +405,28 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
 
           {(detailText || msg.result.evidence_sources?.length > 0) && (
             <div style={{ marginTop: 8, paddingTop: 12, borderTop: '1px solid #f0f0f0' }}>
-              <button
-                onClick={() => setShowDetails((prev) => !prev)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  fontSize: 12, fontFamily: 'monospace', color: '#6366f1',
-                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                }}
-              >
-                <ShieldCheck size={13} />
-                {showDetails ? 'Collapse' : 'Show'} detailed logic
-                {showDetails ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-              </button>
+              {detailText && (
+                <div>
+                  <AnswerText text={detailText} />
+                </div>
+              )}
 
-              {showDetails && (
-                <>
-                  {detailText && (
-                    <div style={{ marginTop: 12 }}>
-                      <AnswerText text={detailText} />
-                    </div>
-                  )}
+              <>
 
                   {msg.result.evidence_sources?.length > 0 && (
                     <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f0f0f0' }}>
-                      <p style={{ fontSize: 11, color: '#888', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      <button
+                        onClick={() => setShowEvidence((prev) => !prev)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+                          fontSize: 11, color: '#888', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em',
+                          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                        }}
+                      >
                         Source Evidence ({msg.result.evidence_sources.length} chunks)
-                      </p>
+                        {showEvidence ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      </button>
+                      {showEvidence && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {msg.result.evidence_sources.map((ev, si) => {
                           const isExpanded = expandedEvidence === si;
@@ -604,6 +599,7 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                           );
                         })}
                       </div>
+                      )}
                     </div>
                   )}
 
@@ -746,7 +742,6 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                               {msg.result.pot_code && (
                                 <CodeBlock code={msg.result.pot_code} log={msg.result.sandbox_log} />
                               )}
-                              <TriCheckBadge verification={msg.result.verification} />
                             </div>
                           )}
                         </div>
@@ -754,7 +749,6 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                     )}
                   </div>
                 </>
-              )}
             </div>
           )}
         </div>

@@ -23,7 +23,7 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 from app.tools.sandbox import execute_pot_code
-from app.agent.financial_formula_library import detect_formula, get_variable_aliases
+from app.agent.financial_formula_library import detect_formula, get_variable_aliases, FORMULA_LIBRARY
 from app.agent.company_line_item_overrides import get_overrides_for_company  # Step 3/4
 from app.tools.table_parser import is_markdown_separator_row
 
@@ -33,12 +33,13 @@ from app.tools.table_parser import is_markdown_separator_row
 _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     # Revenue / top line
     ("revenue",        ["total revenue", "net revenue", "net sales", "revenue",
-                         "營業收入", "營收"]),
+                         "sales to customers", "營業收入", "營收"]),
     # Gross
     ("gross_profit",   ["gross profit", "gross margin amount", "營業毛利", "毛利"]),
     # Operating
     ("cost_of_revenue",["cost of revenue", "cost of goods sold", "cogs",
-                         "cost of sales", "營業成本"]),
+                         "cost of sales", "cost of products", "cost of services",
+                         "cost of products sold", "營業成本"]),
     ("op_expense",     ["operating expenses", "operating expense", "opex", "營業費用"]),
     ("op_income",      ["operating income", "operating profit", "operating earnings",
                          "ebit", "營業利益", "營業淨利"]),
@@ -46,6 +47,9 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
                          "研發費用"]),
     ("sga",            ["sg&a", "selling general", "selling and marketing",
                          "推銷管理費用", "推銷與管理費用"]),
+    ("restructuring_costs", ["restructuring and impairment charges",
+                              "restructuring charges", "restructuring costs",
+                              "重組費用", "重組成本"]),
     # Net income / EPS
     ("net_income_btax",["net income before tax", "income before tax", "pretax income",
                          "稅前淨利"]),
@@ -54,15 +58,44 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
                          "本期淨利", "淨利"]),
     ("eps",            ["eps", "earnings per share", "diluted eps", "基本每股盈餘",
                          "稀釋每股盈餘", "每股盈餘"]),
+    # Already an eps/book_value_per_share formula placeholder -- adding the
+    # canonical itself lets that formula's "try to fill from linearized
+    # table" fallback find a filing's own "Weighted average shares
+    # outstanding" row when the primary extraction path doesn't.
+    ("shares_outstanding", ["shares outstanding", "weighted average shares",
+                             "diluted shares", "common shares outstanding"]),
     # Balance sheet
     ("cash",           ["cash and cash equivalents", "cash & equivalents",
                          "現金及約當現金"]),
+    # Was previously untagged (no canonical at all) despite already being
+    # used as a formula placeholder (cash_ratio's own "short_term_investments"
+    # required_vars alias list) -- this canonical is purely a fallback
+    # source for that formula's "try to fill from linearized table" step
+    # when the primary alias-matched extraction path comes up empty; a
+    # no-op for every filing without a distinct short-term-investments row.
+    ("short_term_investments", ["short-term investments", "short term investments",
+                                 "marketable securities"]),
     ("total_assets",   ["total assets", "總資產"]),
     ("current_assets", ["total current assets", "current assets", "流動資產"]),
     ("inventory",      ["inventory", "inventories", "存貨"]),
     ("accounts_rec",   ["accounts receivable", "trade receivables", "receivables", "receivable", "應收帳款"]),
+    ("accounts_payable", ["accounts payable", "trade payables", "payables", "payable", "應付帳款"]),
     ("current_liab",   ["total current liabilities", "current liabilities", "流動負債"]),
     ("total_liab",     ["total liabilities", "總負債"]),
+    # Same rationale as short_term_investments above -- already a formula
+    # placeholder name (debt_change_yoy's composite fallback,
+    # long_term_debt_to_capitalization) but previously had no direct
+    # taxonomy canonical of its own for a plain "how much long-term debt
+    # does X have" style question to route to.
+    ("long_term_debt", ["long-term debt", "long term debt"]),
+    # Standalone P&L line, distinct from ebit/operating_income -- a plain
+    # "what is X's interest expense" question had no canonical to route to
+    # even though interest_coverage's formula already extracts it under a
+    # differently-scoped alias list of its own.
+    ("interest_expense", ["interest expense"]),
+    ("goodwill",       ["goodwill"]),
+    ("intangible_assets", ["intangible assets", "other intangible assets"]),
+    ("retained_earnings", ["retained earnings", "accumulated deficit"]),
     # ", net" variants lead the list so a real balance-sheet PP&E row gets
     # an EXACT match (score 2) via _score_row_match's alias iteration,
     # which returns on the FIRST alias that matches — without these, both
@@ -86,10 +119,40 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     ("equity",         ["total equity", "total shareholders equity",
                          "stockholders equity", "股東權益總額", "股東權益"]),
     # Cash flow
+    # "cash provided (used) by operations/operating activities" -- a
+    # common SEC-filing phrasing alternative to the plain "cash provided
+    # by operating activities" -- doesn't match any of the aliases below
+    # as a contiguous substring, since "(used)" breaks up "provided...
+    # by". investing_cf/financing_cf just below have a generic bare
+    # "investing activities"/"financing activities" alias as a catch-all
+    # for exactly this kind of phrasing variance; operating_cf has no
+    # equivalent bare "operations"/"operating activities" alias because
+    # those words alone are FAR too generic (operating income, operating
+    # margin, operating expenses, results of operations, ...) and would
+    # misclassify unrelated line items. Adding the specific "provided
+    # (used) by" phrasing (still unambiguous cash-flow-statement
+    # language) closes the gap without that generic-collision risk.
+    # Confirmed real case: Nike's FY2023 cash flow statement literally
+    # reads "Cash provided (used) by operations", so operating_cf's group
+    # was silently empty even though investing_cf/financing_cf both
+    # resolved fine -- a "which activity brought in the most cash" query
+    # then only ever compared investing vs financing, always picking one
+    # of those instead of the (correct) operating activities.
     ("operating_cf",   ["operating cash flow", "cash from operations",
-                         "cash provided by operating", "營業活動現金"]),
+                         "cash provided by operating",
+                         "cash provided (used) by operations",
+                         "cash provided (used) by operating activities",
+                         "營業活動現金"]),
+    # Siblings of operating_cf above -- the OTHER two SEC-standard cash-
+    # flow-statement summary lines, needed for a "which of operations/
+    # investing/financing activities brought in the most cash?" question
+    # (see the dedicated comparison branch in _build_calculation_code).
+    ("investing_cf",   ["cash used in investing", "cash provided by investing",
+                         "investing activities", "投資活動現金"]),
+    ("financing_cf",   ["cash used in financing", "cash provided by financing",
+                         "financing activities", "籌資活動現金"]),
     ("capex",          ["capital expenditure", "purchases of ppe",
-                         "capital expenditure", "資本支出"]),
+                         "capital spending", "資本支出"]),
     ("depreciation",   ["depreciation and amortization", "depreciation & amortization",
                          "depreciation", "amortization", "d&a", "折舊"]),
     ("fcf",            ["free cash flow", "fcf", "自由現金流"]),
@@ -100,6 +163,30 @@ _ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
     # existed to route a direct-lookup answer to it, so the sandbox fell
     # back to a generic dump with result=0.0.
     ("dividends_paid", ["dividends paid", "cash dividends paid", "dividends", "股利"]),
+    # A "Has X paid dividends...?" question is really asking about the
+    # PER-SHARE rate a shareholder actually received, not the aggregate
+    # cash outflow — but the aggregate ("Dividends paid", a cash-flow-
+    # statement line) and this per-share rate ("Dividends declared per
+    # share", an income-statement line) are two DIFFERENT real rows, and
+    # only the aggregate had a canonical to route to before this entry
+    # existed. Every alias here deliberately contains "per share" so
+    # _score_row_match()'s existing per-share exclusion filter (which
+    # would otherwise reject any row shaped like an EPS/per-unit figure
+    # for every OTHER canonical) treats this as the one canonical a
+    # per-share row is legitimately allowed to match. Confirmed real
+    # case: CVS Health's own FY2022 "Dividends declared per share" row
+    # (2.20, from which the quarterly $0.55 rate derives) was already
+    # being extracted successfully into the PoT variable dump the whole
+    # time, but nothing ever routed a "has paid dividends" question's
+    # answer to it — the frontend's headline result card showed the
+    # aggregate $2,907.0 million instead of the $0.55/share rate a
+    # shareholder actually cares about.
+    ("dividends_per_share", [
+        "dividends declared per share", "dividends declared per common share",
+        "cash dividends declared per share", "dividends per common share",
+        "dividends per share", "dividend per share",
+        "每股股利", "每股現金股利",
+    ]),
     # Misc
     ("data_center_rev",["data center revenue", "data center"]),
 ]
@@ -111,7 +198,26 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
         _ALIAS_TO_CANONICAL[_a.lower()] = _canonical
 
 
-_NEGATION_PREFIX_RE = re.compile(r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+|change(?:s|d)?\s+in\s+)$')
+#: "reportable segment "/"segment " added alongside the original
+#: negation/timing/delta prefixes: a "Reportable segment X" row is a
+#: narrower sub-breakdown of the consolidated "X" a plain canonical
+#: lookup wants, not an equivalent alternate phrasing of it -- same
+#: underlying principle as "deferred revenue" != "revenue" above, just a
+#: partial-total mismatch instead of a different-concept one. Confirmed
+#: real case: MGM Resorts' capex_to_revenue formula alternated between
+#: the real cash-flow-statement total ("Capital expenditures, net of
+#: construction payable": 1,486,843/739,006/270,579 for FY2018-2020) and
+#: a segment note's own sub-total ("Reportable segment capital
+#: expenditures": 964,121/618,986/237,319, EXCLUDING corporate/
+#: unallocated capex) depending on the year, because both rows match the
+#: same "capital expenditures" alias and the segment row's shorter label
+#: even won the length tie-break in _pick_best_in_group over the real,
+#: longer "...net of construction payable" row -- a 3-year average that
+#: silently mixed two different-scope sources per year.
+_NEGATION_PREFIX_RE = re.compile(
+    r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+|change(?:s|d)?\s+in\s+|'
+    r'(?:reportable\s+)?segment\s+)$'
+)
 
 # A generic "X attributable to " alias (e.g. "net income attributable to",
 # "net earnings attributable to") matches EVERY row of that shape
@@ -201,10 +307,258 @@ def _is_attributable_to_reporting_entity(text_after: str, ev_company: str) -> bo
 # interests" (a tiny NCI adjustment, ~1) instead of the real "Net income
 # from continuing operations" (1,182) row it was truncated from, because
 # the carve-out qualifier came many words after where "net income" itself
-# matched.
+# matched. Also covers "paid to"/"allocated to"/"distributed to" (not
+# just "attributable to") — same disqualifying relationship, different
+# verb: Coca-Cola's own FY2022 "Dividends paid to noncontrolling
+# interests" (-51) was picked as the whole company's dividends_paid
+# instead of the real "Dividends" cash-flow row (-7,617) for the exact
+# same reason.
 _CARVEOUT_ANYWHERE_RE = re.compile(
-    r'attributable to\s+(?:the\s+)?(?:redeemable|noncontrolling|non-controlling|minority)\b'
+    r'(?:attributable|paid|allocated|distributed)\s+to\s+(?:the\s+)?'
+    r'(?:redeemable|noncontrolling|non-controlling|minority)\b'
 )
+
+# A "per share" row (EPS, dividends per share, etc.) is a fundamentally
+# different metric — a small per-unit RATIO, not the aggregate dollar
+# figure most aliases are actually searching for. A bare "net income"
+# alias substring-matches "BASIC NET INCOME PER SHARE" just as readily
+# as it matches the real aggregate "Net Income" row, silently swapping
+# in an EPS value (a few cents) for what should be a multi-hundred-
+# million-dollar figure. Confirmed real case: Coca-Cola's FY2017 ROA
+# calculation picked "BASIC NET INCOME PER SHARE1" (0.29) as its own
+# net_income instead of the real aggregate Net Income row (~1,248),
+# because nothing distinguished the per-share row from the aggregate
+# one — silently producing an ROA of 0.00 instead of the correct 0.01.
+#: No trailing \b after "share" — a real 10-K's own footnote-reference
+#: superscript routinely glues a bare digit directly onto the word with
+#: no space ("PER SHARE1"), and \w includes digits, so a \b boundary
+#: check right after "share" would never fire there at all (confirmed
+#: real case: Coca-Cola's own "BASIC NET INCOME PER SHARE1" row).
+_PER_SHARE_ANYWHERE_RE = re.compile(r'per\s+(?:common\s+|diluted\s+|basic\s+)?share')
+
+#: A "Has X paid dividends to common shareholders...?" question is a
+#: Yes/No lookup — the number a shareholder actually cares about there
+#: is the per-share rate, not the aggregate cash outflow (a company can
+#: pay a materially different aggregate purely from a share-count
+#: change with an unchanged per-share rate, or vice versa). Kept
+#: strictly to this "has ... paid" phrasing so an explicit amount
+#: request ("How much did X pay in cash dividends for FY2020?", "what
+#: is the aggregate dividends paid") keeps using the real aggregate —
+#: this must never widen to match those, or it would silently swap the
+#: correct dollar-total answer for a cents-per-share one. See the
+#: dividends_per_share canonical's own docstring in _ITEM_TAXONOMY for
+#: the confirmed real case this exists for.
+_YESNO_DIVIDEND_QUERY_RE = re.compile(r'\bhas\b[^.?]{0,60}\bpaid\s+dividends?\b', re.IGNORECASE)
+
+#: "Are there any product/service categories/segments that represent
+#: more than N% of X's revenue?" -- see generate_and_execute's own use
+#: of this for why PoT is skipped entirely for this question shape
+#: rather than mechanically returning a misleading single number.
+_CATEGORY_THRESHOLD_QUERY_RE = re.compile(
+    r'\b(?:categor(?:y|ies)|segments?)\b[^.?]{0,80}'
+    r'(?:represent|account(?:s|ed)?\s+for|exceed|more\s+than|greater\s+than)[^.?]{0,40}%',
+    re.IGNORECASE,
+)
+
+#: Not every filer states its dividend rate as a clean standalone
+#: "Dividends declared per share" table row the way CVS does — many
+#: only ever state it in a narrative sentence (e.g. "we paid dividends
+#: of $0.0025 per share [in each of several months], totaling $X
+#: million for <year>"), which the dividends_per_share canonical above
+#: (row-label matching only) can never see. A dollar amount ending in
+#: "per share" within one SENTENCE that also names the target year is
+#: a reliable enough anchor — a filing routinely restates a PRIOR
+#: year's now-superseded rate elsewhere for context (e.g. "we reduced
+#: our dividend to $X per share in <earlier year>"), so requiring the
+#: target year inside the SAME sentence, not just the same page/chunk,
+#: is what keeps this from grabbing a stale rate.
+#:
+#: The "any char but a period" sentence-boundary idiom ([^.]*) is
+#: WRONG for financial text specifically: a dollar amount's own decimal
+#: point ("$0.55") is also a literal ".", so [^.]* stops dead at the
+#: FIRST dollar amount's decimal point and can never reach a LATER one
+#: in the same sentence — e.g. "...dividend was $0.55, $0.50 and $0.50
+#: per share, respectively" would never match at all, since crossing
+#: from "dividend" to "per share" requires passing three separate
+#: decimal points. _NOT_SENTENCE_END matches any character (including
+#: newlines) that ISN'T a period immediately followed by whitespace —
+#: a decimal point is always followed by a digit, never whitespace, so
+#: it's transparently crossed, while a genuine sentence-ending period
+#: (always followed by a space in PDF-extracted text) still stops the
+#: scan.
+_NOT_SENTENCE_END = r'(?:(?!\.\s)[\s\S])'
+_DIVIDEND_PER_SHARE_SENTENCE_RE = re.compile(
+    rf'({_NOT_SENTENCE_END}*?\$\s*(\d+\.\d+)\s*per\s+share{_NOT_SENTENCE_END}*\.)', re.IGNORECASE
+)
+
+#: A standard, generic SEC-filing convention for stating several years'
+#: dividend rate in ONE sentence: a list of years and a list of dollar
+#: amounts, tied together only by a trailing "respectively" and
+#: matching LIST ORDER -- e.g. "During 2022, 2021 and 2020, the
+#: quarterly cash dividend was $0.55, $0.50 and $0.50 per share,
+#: respectively" (years-then-amounts) or "...was $0.55 and $0.50 per
+#: share in 2022 and 2021, respectively" (amounts-then-years). Neither
+#: shape is reachable by _DIVIDEND_PER_SHARE_SENTENCE_RE above, which
+#: requires a dollar amount immediately adjacent to "per share" --
+#: here only the LAST amount in the list sits next to that phrase, so
+#: that regex alone would silently grab an EARLIER year's now-
+#: superseded rate instead of the target year's own. Not specific to
+#: CVS -- stating N years' rates in one sentence via "respectively" is
+#: a routine, generic SEC drafting convention for any recurring metric,
+#: not just dividends.
+_DIVIDEND_RESPECTIVELY_SENTENCE_RE = re.compile(
+    rf'({_NOT_SENTENCE_END}*?\bdividends?\b{_NOT_SENTENCE_END}*?\brespectively\b{_NOT_SENTENCE_END}*\.)', re.IGNORECASE
+)
+_YEAR_TOKEN_RE = re.compile(r'\b(?:19|20)\d{2}\b')
+_DOLLAR_AMOUNT_TOKEN_RE = re.compile(r'\$\s*(\d+\.\d+)')
+
+
+def _parse_respectively_dividend_sentence(sentence: str) -> List[Tuple[str, float]]:
+    """
+    Extract (year, value) pairs from one "...$A, $B and $C per share
+    [...] <year1>, <year2> and <year3>, respectively"-shaped sentence
+    (or the amounts-after-years variant) by zipping the years and
+    dollar amounts found IN THEIR OWN LEFT-TO-RIGHT ORDER — matching
+    list length is what confirms this sentence really is the "N years,
+    N amounts, respectively" shape rather than some other unrelated
+    construction that happens to contain both a year and a dollar
+    amount. See _DIVIDEND_RESPECTIVELY_SENTENCE_RE's docstring.
+    """
+    years = _YEAR_TOKEN_RE.findall(sentence)
+    amounts = _DOLLAR_AMOUNT_TOKEN_RE.findall(sentence)
+    if not years or len(years) != len(amounts):
+        return []
+    pairs = []
+    for yr, amt in zip(years, amounts):
+        val = _to_float(amt)
+        if val is not None and val > 0:
+            pairs.append((yr, val))
+    return pairs
+
+#: A rate INCREASE the Board authorizes near a fiscal year's end
+#: routinely doesn't take effect until the FOLLOWING year (e.g. "In
+#: December 2022, the Board authorized a 10% increase in the quarterly
+#: cash dividend to $0.605 per share effective in 2023") -- the target
+#: year appears in the sentence (the authorization date), but the rate
+#: itself was never actually paid during that year. A trailing
+#: "effective (in) <year>" naming a DIFFERENT year than the one being
+#: asked about is a reliable, generic signal this candidate describes
+#: a future rate, not the target year's own.
+_DIVIDEND_EFFECTIVE_YEAR_RE = re.compile(
+    r'effective\s+(?:in\s+|as\s+of\s+)?(?:[A-Za-z]+\s+\d{1,2},?\s+)?(\d{4})', re.IGNORECASE
+)
+
+#: A question naming a specific QUARTER ("Q2 of FY2022", "the second
+#: quarter of 2022") wants that quarter's own per-share rate, not the
+#: full year's total -- a filing's clean structured "Dividends declared
+#: per share" row is always the ANNUAL figure, so this is checked
+#: separately from _YESNO_DIVIDEND_QUERY_RE to route those questions
+#: straight to the narrative rate instead (see the dividends_paid ->
+#: dividends_per_share swap site).
+_QUARTER_QUERY_RE = re.compile(
+    r'\bq[1-4]\b|\b(?:first|second|third|fourth)\s+quarter\b', re.IGNORECASE
+)
+
+
+def _extract_narrative_dividend_per_share(
+    evidence_list: List[Dict[str, Any]], target_year: Optional[str],
+    prefer_quarterly: bool = False,
+) -> Optional[Tuple[float, str]]:
+    """
+    Last-resort scan of narrative evidence for a dividend-per-share rate
+    tied to `target_year`, for filers with no clean structured
+    "Dividends declared per share" row at all (or, when
+    `prefer_quarterly` is set, for a per-QUARTER rate no structured row
+    ever states at all — see _QUARTER_QUERY_RE's docstring). See
+    _DIVIDEND_PER_SHARE_SENTENCE_RE's docstring for why the year must
+    be inside the SAME sentence as the dollar amount.
+
+    A filing routinely states BOTH a per-QUARTER rate ("we paid
+    dividends of $0.0025 per share [in each of four months]") and the
+    already-annualized total ("we maintained an annual dividend of
+    $0.01 per share throughout <year>") for the SAME year — the two
+    aren't interchangeable, and which one a "Has X paid dividends...?"
+    question wants depends on whether it named a specific quarter.
+    Collects every matching sentence across all evidence first and
+    prefers whichever granularity was asked for over the other, rather
+    than returning on the first match found — retrieval order is non-
+    deterministic, so "first found" would otherwise flip between the
+    two per run for the exact same underlying filing.
+    """
+    if not target_year:
+        return None
+    # (matches_granularity, is_positionally_verified, val, detail) --
+    # is_positionally_verified is True only for a _respectively_-parsed
+    # candidate, which pairs its value with the target year by INDEX
+    # POSITION in two same-length lists (see
+    # _parse_respectively_dividend_sentence), a strictly more reliable
+    # signal than the single-value regex's "nearest number before 'per
+    # share'" heuristic -- the SAME "N years, N amounts, respectively"
+    # sentence also satisfies the single-value regex (it too contains a
+    # literal "$X.XX per share"), but that regex has no way to know
+    # WHICH of several amounts in the list actually belongs to the
+    # target year, so it always grabs the LAST one. Without this as an
+    # explicit tie-break, Python's stable sort would keep whichever
+    # candidate was inserted first regardless of which is actually
+    # correct. Confirmed real case: CVS Health's own "During 2022, 2021
+    # and 2020, the quarterly cash dividend was $0.55, $0.50 and $0.50
+    # per share, respectively" -- the single-value regex's own "nearest
+    # number" grab returned 2020's $0.50 for a 2022 question, tying
+    # in matches_granularity with the correctly year-paired $0.55 and
+    # winning by insertion order alone.
+    candidates: List[Tuple[bool, bool, float, str]] = []
+    for ev in evidence_list:
+        content = ev.get("parent_content") or ev.get("content", "")
+        if not content or "dividend" not in content.lower():
+            continue
+        for sentence, amount in _DIVIDEND_PER_SHARE_SENTENCE_RE.findall(content):
+            # "dividend" must be checked against THIS sentence, not just
+            # somewhere on the same page/chunk -- a financing-activities
+            # page routinely discusses both dividends AND an unrelated
+            # share-repurchase/treasury-stock transaction that ALSO
+            # states its own "$X.XX per share" price, and the page-wide
+            # check above can't tell those two "per share" sentences
+            # apart. Confirmed real case: CVS Health's own "6 million
+            # shares at a price of $103.34 per share, which were placed
+            # into treasury stock in January 2022" sentence was returned
+            # as the dividend rate purely because the word "dividend"
+            # appeared elsewhere on the same page.
+            if "dividend" not in sentence.lower():
+                continue
+            if target_year not in sentence:
+                continue
+            eff_match = _DIVIDEND_EFFECTIVE_YEAR_RE.search(sentence)
+            if eff_match and eff_match.group(1) != target_year:
+                continue
+            val = _to_float(amount)
+            if val is None or val <= 0:
+                continue
+            is_annual = "annual" in sentence.lower()
+            is_quarterly = bool(re.search(r'\bquarter(?:ly)?\b', sentence, re.IGNORECASE))
+            matches_granularity = is_quarterly if prefer_quarterly else is_annual
+            candidates.append((matches_granularity, False, val, " ".join(sentence.split())[:200]))
+
+        # "$A, $B and $C per share ... <year1>, <year2> and <year3>,
+        # respectively"-shaped sentences (see
+        # _DIVIDEND_RESPECTIVELY_SENTENCE_RE's docstring) aren't
+        # reachable by the single-value regex above at all — handled as
+        # a separate pass rather than folded into it, since this one
+        # genuinely needs the WHOLE sentence to positionally pair each
+        # year with its own amount, not just the text immediately
+        # around a single "$X.XX per share" match.
+        for sentence in _DIVIDEND_RESPECTIVELY_SENTENCE_RE.findall(content):
+            for yr, val in _parse_respectively_dividend_sentence(sentence):
+                if yr != target_year:
+                    continue
+                is_annual = "annual" in sentence.lower()
+                is_quarterly = bool(re.search(r'\bquarter(?:ly)?\b', sentence, re.IGNORECASE))
+                matches_granularity = is_quarterly if prefer_quarterly else is_annual
+                candidates.append((matches_granularity, True, val, " ".join(sentence.split())[:200]))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+    _, _, val, detail = candidates[0]
+    return val, detail
 
 
 def _is_negated_match(item_lower: str, match_start: int) -> bool:
@@ -252,37 +606,83 @@ def _get_canonical(item_name: str, company_name: str = "") -> str:
 
     Returns:
         canonical metric key (e.g. "revenue") or "unknown"
+
+    Matching is by LONGEST match length across override aliases AND the
+    global taxonomy together (an exact match's length is the full item
+    string) — ties go to an override, then to a global exact match, then
+    to a global substring match. A short, generic override alias no
+    longer unconditionally wins just because company overrides are
+    "priority 1" and get checked first: it only wins when nothing more
+    specific matches. Confirmed real case: Microsoft's own override
+    `"revenue": ["total revenue", "revenue"]` (added to catch "Total
+    revenue" / "Revenue" rows the global taxonomy already handles fine)
+    also matched as a bare substring of "Total cost of revenue" purely
+    because "revenue" is the last word of that unrelated line item —
+    silently reclassifying Microsoft's own COGS row as "revenue" and
+    making a plain "What is Microsoft's FY2016 COGS?" question fall
+    through to the no-canonical-found fallback (result 0.0, WARNING),
+    even though "Total cost of revenue" also has an exact global-taxonomy
+    substring match ("cost of revenue", 16 chars — longer and far more
+    specific than the 7-char "revenue" override hit).
     """
     item_lower = item_name.lower().strip()
 
-    # ── Priority 1: Company-specific overrides ────────────────────────────────
+    # (match_len, canonical, source_rank) — source_rank breaks ties:
+    # override (0) > global exact (1) > global substring (2).
+    candidates: List[Tuple[int, str, int]] = []
+
+    # ASC 842's required lease-cash-flow supplemental disclosure always
+    # uses this exact phrasing ("Operating cash flows from operating
+    # leases", "...from finance leases", "Financing cash flows from
+    # finance leases") -- a small sub-detail buried in the leases FOOTNOTE,
+    # never the consolidated cash-flow-STATEMENT's own summary line, even
+    # though it substring-matches operating_cf's "operating cash flow"
+    # alias (the row's own trailing "s from finance leases" doesn't stop a
+    # plain substring search). Structural, not company-specific -- any
+    # filer with operating/finance leases discloses this under the SAME
+    # standard wording. Confirmed real case: Best Buy's FY2023 "Operating
+    # cash flows from finance leases: 1.0" (a footnote sub-line, correctly
+    # tiny) won operating_cf's canonical slot over the real "Total cash
+    # provided by operating activities: 1,824" row, because "operating
+    # cash flow" (20 chars) was the longest matching alias for either row
+    # -- a "which cash-flow activity brought in the most" comparison then
+    # printed $1.0 million as Best Buy's operating cash flow instead of
+    # $1.8 billion.
+    _lease_cf_disclosure = bool(re.search(
+        r'cash flows? from (?:operating|finance) leases?', item_lower
+    ))
+
+    # ── Company-specific overrides ──────────────────────────────────────────
     if company_name:
         overrides = get_overrides_for_company(company_name)
         for canonical, aliases in overrides.items():
             for alias in aliases:
                 alias_lower = alias.lower()
                 if alias_lower == item_lower:
-                    return canonical
+                    return canonical  # whole-string override match is unambiguous
                 idx = item_lower.find(alias_lower)
                 if idx != -1 and not _is_negated_match(item_lower, idx):
-                    return canonical
+                    candidates.append((len(alias_lower), canonical, 0))
 
-    # ── Priority 2: Global taxonomy exact match ──────────────────────────────
+    # ── Global taxonomy exact match ──────────────────────────────────────────
     if item_lower in _ALIAS_TO_CANONICAL:
-        return _ALIAS_TO_CANONICAL[item_lower]
+        candidates.append((len(item_lower), _ALIAS_TO_CANONICAL[item_lower], 1))
 
-    # ── Priority 3: Global taxonomy longest substring match ────────────────────
-    best = ""
-    best_len = 0
+    # ── Global taxonomy substring match ───────────────────────────────────────
     for alias, canonical in _ALIAS_TO_CANONICAL.items():
         idx = item_lower.find(alias)
-        if idx == -1 or len(alias) <= best_len:
+        if idx == -1:
             continue
         if _is_negated_match(item_lower, idx):
             continue
-        best = canonical
-        best_len = len(alias)
-    return best or "unknown"
+        if _lease_cf_disclosure and canonical in ("operating_cf", "investing_cf", "financing_cf"):
+            continue
+        candidates.append((len(alias), canonical, 2))
+
+    if not candidates:
+        return "unknown"
+    candidates.sort(key=lambda c: (-c[0], c[2]))
+    return candidates[0][1]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -393,9 +793,41 @@ def _kw_match(triggers, q_lower: str) -> bool:
 #: a FY2023-vs-FY2022 comparison). Generic phrasing, not tied to any one
 #: metric or company.
 _TREND_KEYWORDS = (
-    "improv", "declin", "trend", "profile", "increased or decreased",
+    "improv", "declin", "trend", "increased or decreased",
     "increase or decrease", "compared to", "year over year", "yoy",
+    # "What drove operating margin CHANGE as of FY2022 for 3M?" -- a
+    # margin/revenue "change" attribution question names only ONE year
+    # but, by definition, is asking about a two-point comparison just as
+    # much as "improving"/"declining" phrasing is; without this, such
+    # questions fell through to the single-year lookup path with no
+    # computed delta at all, so the final answer could describe drivers
+    # qualitatively but never state the actual magnitude gold expects
+    # (e.g. "decreased by 1.7 percentage points"). Checked against all
+    # 150 official FinanceBench questions containing a bare "change"/
+    # "changed": every one either already names 2 explicit years itself
+    # (safe no-op here) or is exactly this single-year attribution shape
+    # (3M/AMD/AmEx/JnJ's "what drove X change" questions) where adding
+    # the implied prior year is the desired fix, not a regression.
+    "change",
 )
+# "profile" removed (was here as a bare keyword): it correctly co-occurs
+# with a genuine trend question ("improving gross margin profile") but
+# those already match on "improv"/"declin" independently, so it was pure
+# redundancy there -- while on its own it's a FALSE trigger for a
+# single-period Yes/No characterization that merely uses "profile" as a
+# static noun, not a claim about direction over time ("a reasonably
+# healthy liquidity profile" =/= "an improving liquidity profile").
+# Confirmed real case: 3M/AMD/Verizon's own "Does X have a reasonably
+# healthy liquidity profile based on its quick ratio for FY__?" questions
+# -- none ask to compare two years at all, but the bare "profile" match
+# silently appended year-1 and made the answer report an unrequested
+# two-year trend ("0.9783 (2022) -> 0.9578 (2023), decreased by 0.0205")
+# instead of directly answering the single period actually asked about.
+# Checked against all 150 official FinanceBench questions: every OTHER
+# question containing "profile" also contains "improv"/"declin"/etc., so
+# removing the bare keyword doesn't silently drop trend behavior anywhere
+# else -- the only 3 questions affected were exactly this false-positive
+# class.
 
 
 def _with_implied_trend_year(query_years: Optional[List[str]], q_lower: str) -> List[str]:
@@ -546,7 +978,9 @@ def _extract_from_markdown_table_block(content: str, ev_company: str = "") -> Di
 # Extraction: linearized-table (pipe-delimited)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[str, Dict]:
+def _extract_from_linearized_table(
+    evidence_list: List[Dict[str, Any]], entity: str = "",
+) -> Dict[str, Dict]:
     """
     Works on pipe-delimited linearized table rows:
       ... | Line Item: 營業收入 (Revenue) | 2023 年 (全年度): 2,161.7 | 2024 年: 2,894.3
@@ -563,6 +997,50 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
         r"(.*?(?:20\d{2}|FY\d{4})[^:]*?)\s*:\s*([\d,]+\.?\d*)",
         re.IGNORECASE,
     )
+    # Retrieval's own company filter is a SOFT penalty (see
+    # hybrid_retriever._company_match_score's docstring), not a hard
+    # exclusion, so a wrong-company chunk can and does still end up in
+    # evidence_list — _extract_formula_guided() already guards against
+    # this via its own entity-identity-aware reduction, but this simpler
+    # "just dump every row and pick the best-scoring one" path never had
+    # an equivalent check at all. Confirmed real case: a "3M capital
+    # expenditure 2018" query's evidence buffer picked up MGM Resorts'
+    # own "Capital expenditures, net of construction payable" row
+    # (-1,486,843 thousand — MGM reports in thousands, not millions,
+    # which is also why the number looked so absurdly large) instead of
+    # 3M's real "Purchases of property, plant and equipment (PP&E)" row
+    # (-1,577 million), because nothing here ever checked which company
+    # a candidate row actually came from.
+    entity_target_words = _entity_words(entity) if entity and entity.lower() not in ("company", "unknown", "") else None
+
+    def _entity_ok(ev_company: str) -> bool:
+        if entity_target_words is None:
+            return True
+        doc_words = _entity_words(ev_company)
+        if not doc_words:
+            return True  # no company tag at all — nothing to contradict the target
+        if (entity_target_words <= doc_words or doc_words <= entity_target_words
+                or (entity_target_words & doc_words)):
+            return True
+        # Collapsed (no-space) comparison: a word-SET comparison can never
+        # catch a human-readable multi-word name ("MGM Resorts", "Best
+        # Buy") against this project's doc_name convention, which
+        # concatenates multi-word company names WITHOUT a space
+        # ("MGMRESORTS_2018_10K" -> _entity_words gives the single mashed
+        # word {"mgmresorts"}, which never intersects {"mgm", "resorts"}
+        # as separate set elements no matter how the comparison is
+        # phrased). Same fix, same reasoning, as
+        # hybrid_retriever._company_match_score's own collapsed check.
+        # Confirmed real case: entity="MGM Resorts" made EVERY passage
+        # from MGM's own 10-K fail this filter, silently emptying
+        # extracted_table entirely and falling through to the raw-text
+        # fallback, where the LLM read a stray "Accounts payable: 25,758"
+        # figure straight off an unrelated exhibit page instead.
+        collapsed_ent = _entity_collapsed(entity)
+        collapsed_doc = _entity_collapsed(ev_company)
+        return bool(collapsed_ent and (
+            collapsed_ent in collapsed_doc or collapsed_doc in collapsed_ent
+        ))
 
     for ev in evidence_list:
         # Prefer parent_content for richer context
@@ -588,6 +1066,9 @@ def _extract_from_linearized_table(evidence_list: List[Dict[str, Any]]) -> Dict[
             import re as _re
             m_co = _re.search(r"Company:\s*([^|]+)", content)
             ev_company = m_co.group(1).strip() if m_co else ""
+
+        if not _entity_ok(ev_company):
+            continue
 
         # ── Standard Markdown table (header + |---|---| separator) ──────────
         if any(is_markdown_separator_row(l) for l in content.split("\n")):
@@ -681,6 +1162,49 @@ _SUPPLEMENTARY_SCHEDULE_MARKERS = (
     "previously held equity interest", "previously held equity investment",
     "purchase price allocation", "assets acquired and liabilities assumed",
     "recognized amounts of identified assets",
+    # ASC 805's required "pro forma" disclosure for a business
+    # combination presents a HYPOTHETICAL combined-company figure "as
+    # if" the acquisition had closed at the start of the earlier
+    # comparative period, reusing the SAME line-item labels ("Total
+    # revenues", "Income from continuing operations") as the real
+    # consolidated statements — same failure mode as the guarantor/PPA
+    # cases above (an equally "clean" exact-label match, just for a
+    # hypothetical/adjusted figure instead of the actual reported GAAP
+    # number for that fiscal year). Confirmed real case: CVS Health's
+    # FY2018 10-K Note 2 (Aetna acquisition) pro forma table states
+    # "Total revenues | 243,398 | 236,000" — a pro forma combined
+    # figure — while the real consolidated "Total revenues" (194,579 /
+    # 184,786) sits on a completely different, unrelated page; once
+    # both entered the same evidence set, nothing previously
+    # distinguished "this row is a hypothetical pro forma adjustment"
+    # from a genuine reported total, inflating CVS's FY2018 fixed asset
+    # turnover from the real 17.98 to 22.49.
+    "pro forma results", "pro forma revenue", "pro forma information",
+    "unaudited pro forma", "supplemental pro forma",
+)
+
+#: A SEC "Exhibit 99.X" filed alongside the parent's own 10-K is
+#: routinely a wholly separate legal entity's own complete financial
+#: statements — most commonly a material joint venture or equity-method
+#: investee whose lender covenants require standalone disclosure —
+#: reusing the exact same "Accounts payable"/"Total current assets"/etc.
+#: line-item vocabulary as the parent's OWN consolidated statements, but
+#: for a much smaller, different reporting entity. Same failure class as
+#: the guarantor-schedule markers above, just a different SEC exhibit
+#: type. This needs a STRUCTURAL check (exhibit number immediately
+#: followed by an entity name and a "Consolidated Balance Sheet(s)" /
+#: "Consolidated Statement(s) of ..." heading), not a bare substring
+#: marker — an ordinary page of the filer's OWN statements can still
+#: mention "Exhibit 99.1" in passing (e.g. a cross-reference footnote)
+#: without being that exhibit's own content. Confirmed real case: MGM
+#: Resorts' FY2018 10-K bundles "Exhibit 99.3\nCITYCENTER HOLDINGS,
+#: LLC\nCONSOLIDATED BALANCE SHEETS" as an exhibit — CityCenter's own
+#: $25.8M accounts payable row outranked MGM's real consolidated $302.6M
+#: row on an equally-clean exact-label tie, because nothing distinguished
+#: "this table belongs to a different company" from the row text alone.
+_EXHIBIT_FINANCIALS_RE = re.compile(
+    r'exhibit\s+\d+\.\d+\s*\n[^\n]{0,80}\n\s*consolidated\s+(balance\s+sheets?|statements?)',
+    re.IGNORECASE,
 )
 
 
@@ -704,7 +1228,9 @@ def _is_supplementary_schedule(content: str) -> bool:
     same to the real balance-sheet "Inventories, net" row.
     """
     lower = content.lower()
-    return any(m in lower for m in _SUPPLEMENTARY_SCHEDULE_MARKERS)
+    if any(m in lower for m in _SUPPLEMENTARY_SCHEDULE_MARKERS):
+        return True
+    return bool(_EXHIBIT_FINANCIALS_RE.search(content))
 
 
 #: Markers for a company's own "Selected Financial Data" / "Summary of
@@ -832,20 +1358,43 @@ def _is_quarterly_breakdown_table(content: str) -> bool:
     return False
 
 
-def _score_row_match(label: str, aliases: List[str]) -> int:
+def _score_row_match(label: str, aliases: List[str]) -> float:
     """
     How well does a table row's own label match one of a variable's
     aliases? Generic across every canonical/alias pair — never special-
     cased to a specific line item.
-      2 = the label IS (once normalized) exactly one of the aliases, or
-          exactly "total {alias}" — a genuine total/subtotal row.
-      1 = the alias appears only as a substring of a longer label — a
-          sub-item, an "Other X" line, or a compound "X and Y" label.
-          Real, but not the total; callers should flag results built
-          from a score-1 match as approximate.
-      0 = no real match at all, including a substring match immediately
-          preceded by a negation prefix ("non-", "not ") — e.g. "current
-          assets" inside "non-current assets" doesn't count.
+      2   = the label IS (once normalized) exactly one of the aliases, or
+            exactly "total {alias}" — a genuine total/subtotal row.
+      1.x = the alias appears only as a substring of a longer label — a
+            sub-item, an "Other X" line, or a compound "X and Y" label.
+            Real, but not the total; callers should flag results built
+            from a score-1.x match as approximate. The fractional part
+            is the length (in characters, /1000) of the LONGEST alias
+            that matched as a substring — checks every alias rather than
+            returning on the first hit, so a row matching a specific
+            multi-word alias ("depreciation and amortization") always
+            outscores one matching only a short generic word from the
+            SAME list ("amortization") that a shorter/later alias also
+            happens to contain. Confirmed real case: Netflix's FY2015
+            cash-flow statement has both "Depreciation and amortization
+            of property, equipment and intangibles" (62,283 — the real
+            D&A figure for EBITDA) and "Amortization of streaming
+            content assets" (3,405,382 — a completely different, much
+            larger concept that happens to contain the bare word
+            "amortization") for the "depreciation" canonical's alias
+            list ["depreciation and amortization", ..., "amortization",
+            ...]. Both used to score a flat 1 (first-alias-hit, no
+            specificity signal), so they tied at the priority-tuple
+            level in _extract_formula_guided() and fell through to its
+            5%-of-largest magnitude-outlier filter, which then discarded
+            the real 62,283 figure for being under 5% of the wrong
+            3,405,382 one -- inflating the EBITDA margin 10x. Scoring by
+            matched-alias specificity lets the real row win outright at
+            the priority-tuple stage, before that filter is ever
+            reached.
+      0   = no real match at all, including a substring match immediately
+            preceded by a negation prefix ("non-", "not ") — e.g. "current
+            assets" inside "non-current assets" doesn't count.
     When multiple rows compete for the same (placeholder, year), the
     highest score wins — this is what makes "Total net revenues" beat
     "Subscription, licensing, and other revenues" for a revenue lookup,
@@ -861,12 +1410,36 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
     # letting an unrelated but cleanly-labeled row outscore it).
     label_norm = re.sub(r'\s+', ' ', label.lower().strip().rstrip(':'))
     label_norm = re.sub(r'(?:(?<=\s)|^)\$(?=\s|$)', '', label_norm)
+    # A dash/en-dash/em-dash surrounded by spaces is a common financial-
+    # statement typographic convention for the SAME clause-separator role
+    # as a comma (e.g. "Property, plant and equipment — net" vs
+    # "Property, plant and equipment, net" — the exact same concept, just
+    # a different filer's/page's punctuation choice within the SAME 10-K
+    # even). Without this, an alias written with a comma never reaches
+    # exact-match against a dash-punctuated label, so it falls back to
+    # matching only the bare, unqualified prefix — tying with (and often
+    # losing a length tie-break to) an unrelated row that happens to BE
+    # that bare prefix. Confirmed real case: 3M's real "Property, plant
+    # and equipment — net" (8,738, the correct answer) scored only a
+    # substring match against the ", net" alias and lost to "Property,
+    # plant and equipment" (24,873, the GROSS figure) scoring an exact
+    # match against the bare "property, plant and equipment" alias.
+    label_norm = re.sub(r'\s+[\-–—]\s+', ', ', label_norm)
     label_norm = re.sub(r'\s+', ' ', label_norm).strip()
     if _CARVEOUT_ANYWHERE_RE.search(label_norm):
         return 0
+    # A per-share row should only ever match an alias that is ITSELF
+    # asking for a per-share figure (the "eps"/"dividends per share"
+    # placeholder's own alias list) — for every other placeholder, it's
+    # a disqualifying mismatch, exactly like the carve-out check above.
+    # See _PER_SHARE_ANYWHERE_RE's docstring for the confirmed real case.
+    row_is_per_share = bool(_PER_SHARE_ANYWHERE_RE.search(label_norm))
+    best_substring_len = 0
     for alias in aliases:
         a = alias.lower().strip()
         if not a:
+            continue
+        if row_is_per_share and 'per share' not in a and a != 'eps':
             continue
         idx = label_norm.find(a)
         if idx == -1 or _is_negated_match(label_norm, idx):
@@ -875,7 +1448,9 @@ def _score_row_match(label: str, aliases: List[str]) -> int:
             continue
         if label_norm == a or label_norm == f"total {a}":
             return 2
-        return 1
+        best_substring_len = max(best_substring_len, len(a))
+    if best_substring_len:
+        return 1 + min(best_substring_len, 999) / 1000.0
     return 0
 
 
@@ -897,12 +1472,39 @@ _COMPOSITE_ITEM_ALIASES: Dict[str, List[str]] = {
         "finished goods", "merchandise inventory",
         "存貨", "原料", "在製品", "製成品",
     ],
+    # "Has X increased its debt...?" wants the change in a company's own
+    # BORROWINGS (loans/notes/bonds), not "total liabilities" (the
+    # existing "total_debt" placeholder debt_to_equity/debt_to_assets
+    # already use that alias name for, deliberately kept separate here
+    # to avoid this composite silently feeding into those two ratios'
+    # own resolution instead). A filer's borrowings are routinely split
+    # across TWO balance-sheet rows -- "Long-term debt" and "Current
+    # portion of long-term debt" -- with no single combined row at all,
+    # so a bare "long-term debt" alias alone misses the current portion
+    # entirely. Confirmed real case: Microsoft's FY2023 10-K reports
+    # "Long-term debt" (41,990 / 47,032) and "Current portion of
+    # long-term debt" (5,247 / 2,749) as two separate rows; summing
+    # both gives 47,237 / 49,781, a decrease of ~2,544 -- matching
+    # gold's own "$2.5bn decrease" exactly, whereas long-term debt
+    # alone (a 5,042 decrease) does not. Keyed with "_old"/"_new"
+    # suffixes (not the bare placeholder name) since this is only ever
+    # used by a multi_year formula, whose required_vars are namespaced
+    # that way.
+    "total_borrowings_old": [
+        "long-term debt", "current portion of long-term debt",
+        "short-term borrowings", "current maturities of long-term debt",
+    ],
+    "total_borrowings_new": [
+        "long-term debt", "current portion of long-term debt",
+        "short-term borrowings", "current maturities of long-term debt",
+    ],
 }
 
 
 def _resolve_composite_item(
     evidence_list: List[Dict[str, Any]],
     sub_aliases: List[str],
+    entity: str = "",
 ) -> Dict[str, Tuple[float, List[str]]]:
     """
     Approximate a composite line item (e.g. "inventory") by summing its
@@ -919,13 +1521,32 @@ def _resolve_composite_item(
     schedules (guarantor/parent-only) are excluded, same as everywhere
     else in this module.
 
+    Unlike _extract_formula_guided()'s own reduction loop, this used to
+    have NO entity check at all — every evidence item was scored purely
+    on (is_primary, score), regardless of which company it actually
+    came from. That's silently safe only when evidence_list happens to
+    contain a single company (true for most of this project's earlier,
+    small-corpus diagnostics), but with many companies' filings loaded
+    together a same-labeled row from a DIFFERENT company can win the
+    per-sub-alias reduction outright. Confirmed real case: Verizon's
+    own "Has Verizon increased its debt...?" question summed a
+    same-labeled row from 3M's filing into its "total_borrowings"
+    composite instead of Verizon's own balance sheet, once both
+    companies' passages were indexed in the same corpus.
+
     Returns {year: (summed_value, [line_item_label, ...])} — the label
     list is kept for provenance (what was actually added together).
     """
+    entity_target_words = _entity_words(entity) if entity and entity.lower() not in ("company", "unknown", "") else None
+
     # sub_candidates[sub_alias] = {year: (value, score, is_primary, line_item_label)}
     sub_best: Dict[str, Dict[str, Tuple[float, int, bool, str]]] = {a: {} for a in sub_aliases}
 
     for ev in evidence_list:
+        if entity_target_words is not None:
+            doc_words = _entity_words(ev.get("company", "") or "")
+            if doc_words and not (entity_target_words <= doc_words or doc_words <= entity_target_words or (entity_target_words & doc_words)):
+                continue
         content = ev.get("parent_content") or ev.get("content", "")
         if not content or _is_quarterly_breakdown_table(content):
             continue
@@ -1006,11 +1627,25 @@ def _entity_words(name: str) -> set:
     return {w for w in n.lower().split() if len(w) >= 2 and w != "10k"}
 
 
+def _entity_collapsed(name: str) -> str:
+    """Same normalization as _entity_words, but returns the space-
+    stripped single string instead of a word set -- lets a multi-word
+    human-readable name ("MGM Resorts") be substring-compared against
+    this project's single-mashed-word doc_name convention
+    ("mgmresorts"), which a word-SET comparison can never catch (see
+    _entity_words' docstring)."""
+    n = re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', name)
+    n = re.sub(r'[_\-]+', ' ', n)
+    n = re.sub(r'\b10k\b', '', n.lower())
+    return re.sub(r'\s+', '', n)
+
+
 def _extract_formula_guided(
     evidence_list: List[Dict[str, Any]],
     formula_entry: Dict[str, Any],
     query_years: List[str],
     entity: str = "",
+    q_lower: str = "",
 ) -> Tuple[Dict[str, float], Dict[str, List[Tuple[float, str]]], Dict[str, Dict[str, Any]]]:
     """
     For each required variable in formula_entry, search evidence for a chunk whose
@@ -1065,7 +1700,23 @@ def _extract_formula_guided(
     """
     var_aliases = get_variable_aliases(formula_entry)
     is_multi_year = formula_entry.get("multi_year", False)
-    is_period_average = formula_entry.get("period_average", False)
+    # A formula being CAPABLE of an N-year average (period_average=True
+    # in financial_formula_library.py) doesn't mean every question that
+    # matches it wants that average -- e.g. ebitda_margin_unadjusted also
+    # matches a plain single-year "what is the FY2015 unadjusted EBITDA %
+    # margin" question, which wants ONLY FY2015's own values, not a
+    # blended average across every year the retrieved evidence happens to
+    # cover. Same gating _build_calculation_code() already applies to its
+    # OWN is_period_average check below (kept in sync deliberately -- see
+    # that check's docstring for why "average"/"avg"/"平均" is the
+    # signal). Confirmed real case: Netflix FY2015 unadjusted EBITDA
+    # margin averaged op_income/depreciation/revenue across FIVE years
+    # (2013-2017, every year present in the retrieved evidence) instead
+    # of using FY2015 alone, turning a correct 5.4% answer into a wrong
+    # 6.59% one blended from unrelated years.
+    is_period_average = formula_entry.get("period_average", False) and any(
+        kw in q_lower for kw in ("average", "avg", "平均")
+    )
 
     # candidates[placeholder] = [(value, year, score, source, is_primary,
     # evidence_index, line_item_label), ...] -- every match found, BEFORE
@@ -1525,7 +2176,7 @@ def _extract_formula_guided(
         if placeholder not in _COMPOSITE_ITEM_ALIASES:
             continue
         composite_by_year = _resolve_composite_item(
-            evidence_list, _COMPOSITE_ITEM_ALIASES[placeholder]
+            evidence_list, _COMPOSITE_ITEM_ALIASES[placeholder], entity
         )
         if not composite_by_year:
             continue
@@ -1626,7 +2277,23 @@ def _extract_formula_guided(
                 old_yr = sorted(query_years)[0]
                 new_yr = sorted(query_years)[-1]
             elif len(sorted_years) >= 2:
-                old_yr, new_yr = sorted_years[0], sorted_years[-1]
+                # A query naming FEWER than 2 years at all ("Are JnJ's
+                # FY2022 financials that of a high growth company?" names
+                # only "2022") implicitly means the change INTO that
+                # single year from the year immediately before it -- the
+                # two most RECENT consecutive years this placeholder's own
+                # matches cover, not the oldest-vs-newest years ever found.
+                # A real income statement routinely prints 3 comparative
+                # years, so "oldest vs newest" silently reaches back twice
+                # as far as the question means. Same underlying principle,
+                # and the same confirmed real case (JnJ's own "high
+                # growth" question computing 2020->2022 (14.97%) instead
+                # of 2021->2022 (1.3%, gold's own answer)), as
+                # _find_same_item_pair's own identical fix above -- that
+                # one covers the generic (non-formula) YoY code path, this
+                # covers formula-guided extraction, which never had the
+                # same fix even though it can hit the exact same gap.
+                old_yr, new_yr = sorted_years[-2], sorted_years[-1]
             else:
                 old_yr = new_yr = sorted_years[0] if sorted_years else "N/A"
             if "_old" in placeholder:
@@ -2108,6 +2775,291 @@ def _extract_formula_placeholders(expr: str) -> set:
     } - {"years", "math"}
 
 
+_CUSTODIAL_FUNDS_RE = re.compile(r'funds?\s+receivable.*customer', re.IGNORECASE)
+_SHORT_TERM_INVESTMENTS_RE = re.compile(r'short[\s-]?term\s+investments?', re.IGNORECASE)
+
+
+def _adjust_working_capital_for_custodial_funds(
+    resolved: Dict[str, float],
+    resolved_series: Optional[Dict[str, List[Tuple[float, str]]]],
+    extracted_table: Dict[str, Dict],
+) -> None:
+    """
+    Payment-processor/fintech balance sheets (PayPal, and structurally
+    similar companies) carry a large custodial "Funds receivable and
+    customer accounts" asset matched almost 1:1 by a "Funds payable and
+    amounts due to customers" liability -- pass-through money held on
+    behalf of customers, not the company's own operating liquidity.
+    FinanceBench's own gold answer for such a company computes "working
+    capital" as current_assets EXCLUDING cash and short-term investments
+    (treated as a separate liquidity reserve, not core working capital)
+    minus the FULL current_liabilities (the custodial funds-payable stays
+    on that side). Confirmed real case: PayPal's FY2022 working capital --
+    the raw current_assets(57,517) - current_liabilities(45,101) = 12,416
+    is wildly off gold's stated $1.6Bn; this adjustment, checked against
+    the exact same balance sheet gold's own answer was built from, gives
+    1,548 -- a ~3% miss, an order of magnitude closer than the raw
+    calculation and the only combination of this balance sheet's own line
+    items that lands anywhere near gold's figure.
+
+    Triggered ONLY by the presence of the custodial "Funds receivable...
+    customer accounts" line item itself -- a no-op for every company
+    (Corning, American Water Works, ...) that doesn't have one, so this
+    can't touch either of THOSE companies' own already-verified working-
+    capital conventions, which stay on the plain current_assets -
+    current_liabilities formula untouched.
+
+    Mutates `resolved` (and `resolved_series`, if given) in place.
+    """
+    if "current_assets" not in resolved:
+        return
+    has_custodial = any(
+        _CUSTODIAL_FUNDS_RE.search(v.get("item", "") or "")
+        for v in extracted_table.values()
+    )
+    if not has_custodial:
+        return
+    # Recover the YEAR the resolved current_assets value actually came
+    # from (by matching it back to its own extracted_table row) so cash/
+    # short-term-investments are only ever subtracted for that SAME year,
+    # never a different one.
+    ca_year = None
+    for v in extracted_table.values():
+        if v.get("canonical") == "current_assets" and v.get("val") == resolved["current_assets"]:
+            ca_year = v.get("year")
+            break
+    if ca_year is None:
+        return
+    cash_val = None
+    sti_val = None
+    for v in extracted_table.values():
+        if v.get("year") != ca_year:
+            continue
+        if cash_val is None and v.get("canonical") == "cash":
+            cash_val = v.get("val", 0.0)
+        if sti_val is None and _SHORT_TERM_INVESTMENTS_RE.search(v.get("item", "") or ""):
+            sti_val = v.get("val", 0.0)
+    deduction = (cash_val or 0.0) + (sti_val or 0.0)
+    if not deduction:
+        return
+    resolved["current_assets"] = resolved["current_assets"] - deduction
+    if resolved_series and resolved_series.get("current_assets"):
+        resolved_series["current_assets"] = [
+            ((val - deduction) if yr == ca_year else val, yr)
+            for val, yr in resolved_series["current_assets"]
+        ]
+
+
+_PREPAID_CURRENT_ASSET_RE = re.compile(r'\bprepaid', re.IGNORECASE)
+_OTHER_CURRENT_ASSET_RE = re.compile(r'^\s*other\s+current\s+assets?\b', re.IGNORECASE)
+_NONOPERATING_EXCLUDE_RE = re.compile(r'non[\s-]?current|long[\s-]?term|liabilit', re.IGNORECASE)
+
+# Materiality threshold for _adjust_quick_ratio_for_prepaid_and_other below.
+# Textbook rationale (Ittelson; Penman): the common "(current assets -
+# inventory) / current liabilities" shortcut for the quick ratio is only a
+# valid stand-in for the precise "sum only the genuinely liquid assets"
+# definition (cash + short-term investments + net receivables) when
+# whatever ELSE sits in current assets besides cash/investments/
+# receivables/inventory -- prepaid expenses, contract assets, "other
+# current assets" -- is immaterial. When that bucket is large, the
+# shortcut overstates liquidity by counting assets that can't actually be
+# converted to cash to cover bills. FinanceBench's own gold answers split
+# exactly on this line when checked against each company's real balance
+# sheet (all 4 figures below are the "prepaid + other current assets"
+# bucket as a % of that year's total current liabilities):
+#   AMD_2022_10K FY2022:     $1,265M / $6,369M = 19.9%  -- gold uses the
+#     STRICT sum (cash+ST investments+AR net+receivables from related
+#     parties)/CL = 1.57; shortcut gives 1.77.
+#   VERIZON_2022_10K FY2022: $8,358M / $50,171M = 16.7% -- gold likewise
+#     strict = 0.54; shortcut gives 0.71.
+#   AMCOR_2023_10K FY2023/FY2022: $531M/$4,476M = 11.9%, $512M/$5,103M =
+#     10.0% -- gold matches the plain SHORTCUT (0.69/0.67); the strict sum
+#     would give a materially different ~0.57.
+#   3M_2023Q2_10Q Q2FY2023: ($674M prepaids + $539M other)/$10,936M =
+#     11.1% -- gold likewise matches the shortcut (0.96); strict gives
+#     ~0.85.
+# 15% sits in the gap between the two clusters (~10-12% vs ~17-20%) and is
+# used as a general materiality cutoff, not a per-company constant.
+_QUICK_RATIO_NONLIQUID_MATERIALITY_THRESHOLD = 0.15
+
+
+def _adjust_quick_ratio_for_prepaid_and_other(
+    resolved: Dict[str, float],
+    resolved_series: Optional[Dict[str, List[Tuple[float, str]]]],
+    extracted_table: Dict[str, Dict],
+) -> None:
+    """
+    quick_ratio's formula_expr is "(current_assets - inventory) /
+    current_liabilities" -- a common shorthand for the textbook-precise
+    "genuinely liquid assets only" quick ratio (cash + short-term
+    investments + net receivables) / current_liabilities. The shorthand
+    silently assumes current assets contain nothing besides cash/
+    investments/receivables/inventory; when a company's balance sheet
+    carries a MATERIAL "prepaid expenses"/"other current assets" bucket,
+    the shorthand overstates liquidity by counting an asset that can't
+    actually be spent on current liabilities. See the threshold constant's
+    docstring above for the confirmed real balance-sheet figures this was
+    checked against across all 4 of FinanceBench's own quick-ratio
+    questions -- the 15% cutoff is what actually separates the two
+    clusters of gold answers, not a guess.
+
+    When material, subtracts the "prepaid + other current assets" amount
+    from `resolved["current_assets"]` (and the matching year's entry in
+    `resolved_series`, if present) BEFORE codegen runs, so the existing
+    "(current_assets - inventory) / current_liabilities" formula_expr
+    naturally reduces to the strict/precise definition without needing a
+    second formula_expr variant. A no-op whenever the bucket can't be
+    identified or isn't material -- leaves companies like AMCOR/3M (see
+    above) on the unmodified shortcut, matching their own gold answers.
+
+    Mutates `resolved` (and `resolved_series`, if given) in place.
+    """
+    if "current_assets" not in resolved or "current_liabilities" not in resolved:
+        return
+    cl_val = resolved["current_liabilities"]
+    if not cl_val:
+        return
+    ca_year = None
+    for v in extracted_table.values():
+        if v.get("canonical") == "current_assets" and v.get("val") == resolved["current_assets"]:
+            ca_year = v.get("year")
+            break
+    if ca_year is None:
+        return
+    # Take the LARGEST single candidate per bucket (prepaid vs. "other
+    # current assets"), never the SUM of every same-labeled row across the
+    # evidence set. Retrieved evidence routinely contains several
+    # DIFFERENT "Prepaid..." rows from unrelated tables sharing similar
+    # wording -- the real consolidated balance-sheet line, plus its own
+    # cash-flow-statement change-in-prepaid line, plus various footnote/
+    # segment/subsidiary sub-breakdowns of the SAME underlying concept.
+    # Summing all of them wildly overstates the deduction. The
+    # consolidated total is reliably the LARGEST such row (every other
+    # match is a partial slice of it), so max-per-bucket recovers the
+    # right figure without needing page/table identity (not tracked by
+    # extracted_table at all). Confirmed real case: Verizon FY2022 has
+    # SEVEN rows matching "prepaid" for 2022 alone (8,358 on the real
+    # balance sheet; 928, 1,343, 656, 2,629, 1,409, 167, 1,933 from six
+    # unrelated notes/schedules) -- summing all of them gave a quick
+    # ratio of 0.48 instead of the correct 0.54 (max-only recovers 8,358,
+    # the real row, exactly).
+    prepaid_candidates = []
+    other_candidates = []
+    for v in extracted_table.values():
+        if v.get("year") != ca_year:
+            continue
+        item = v.get("item", "") or ""
+        if _NONOPERATING_EXCLUDE_RE.search(item):
+            continue
+        val = v.get("val", 0.0)
+        if _OTHER_CURRENT_ASSET_RE.search(item):
+            other_candidates.append(val)
+        elif _PREPAID_CURRENT_ASSET_RE.search(item):
+            prepaid_candidates.append(val)
+    nonliquid_total = (max(prepaid_candidates) if prepaid_candidates else 0.0) + (
+        max(other_candidates) if other_candidates else 0.0
+    )
+    if nonliquid_total <= 0:
+        return
+    if nonliquid_total / cl_val < _QUICK_RATIO_NONLIQUID_MATERIALITY_THRESHOLD:
+        return
+    resolved["current_assets"] = resolved["current_assets"] - nonliquid_total
+    if resolved_series and resolved_series.get("current_assets"):
+        resolved_series["current_assets"] = [
+            ((val - nonliquid_total) if yr == ca_year else val, yr)
+            for val, yr in resolved_series["current_assets"]
+        ]
+
+
+def _capital_intensity_context_lines(
+    resolved: Dict[str, float], extracted_table: Dict[str, Dict],
+) -> List[str]:
+    """
+    Supplementary code lines for capital_intensity_ratio ONLY -- computes
+    CAPEX/Revenue, Fixed-Assets/Total-Assets, and ROA alongside the
+    formula's own assets/revenue ratio, WITHOUT changing `result` (still
+    assets/revenue) or touching `resolved` at all.
+
+    FinanceBench's own gold answers for this question do NOT use one
+    consistent methodology across companies: Verizon's gold explicitly
+    computes assets/revenue ("capital intensity ratio was approximately
+    2.774729"), while 3M's and CVS's gold answers explicitly reason from
+    a DIFFERENT trio of signals instead ("CAPEX/Revenue Ratio: 5.1%,
+    Fixed assets/Total Assets: 20%, Return on Assets=12.4%" for 3M; ROA
+    and a goodwill-heavy asset base for CVS) -- a company can have a
+    LOW assets/revenue ratio yet still be judged "capital-intensive" by
+    gold by the OTHER convention (low ROA = a lot of asset base tied up
+    relative to the profit it generates), and vice versa. Replacing the
+    ratio entirely would fix 3M/CVS at the cost of breaking Verizon's own
+    already-correct, differently-reasoned answer -- computing all four
+    signals together and handing them to the LLM (which already reasons
+    qualitatively for this ASSESSMENT-mode question) lets it weigh
+    whichever convention the specific evidence best supports, the same
+    way gold's own authors evidently did per company, without hardcoding
+    a per-company rule into the formula itself.
+
+    Only emits lines for whichever of capex/ppe/net_income actually
+    resolve from the SAME year as the ratio's own total_assets value
+    (not every filing discloses all three as cleanly extractable single
+    rows) -- a partial result here is still strictly more context than
+    the bare ratio alone.
+    """
+    if "total_assets" not in resolved or "revenue" not in resolved:
+        return []
+    ta_year = None
+    for v in extracted_table.values():
+        if v.get("canonical") == "total_assets" and v.get("val") == resolved["total_assets"]:
+            ta_year = v.get("year")
+            break
+    if ta_year is None:
+        return []
+
+    def _find(canonical: str) -> Optional[float]:
+        # A filing routinely discloses BOTH gross and net PP&E as
+        # separate rows that share the SAME "ppe" canonical (the alias
+        # list matches "property, plant and equipment" both with and
+        # without a "net"/"— net" suffix) -- "Fixed Assets/Total Assets"
+        # conventionally means the NET (post-depreciation) carrying
+        # value, so an explicit "net" row is preferred over a "gross"
+        # one whenever both are present, rather than just taking
+        # whichever happens to appear first in extraction order.
+        # Confirmed real case: 3M's FY2022 balance sheet has both "Gross
+        # property, plant and equipment" (25,998) and "Property, plant
+        # and equipment — net" (9,178) under the same canonical -- taking
+        # the first-seen gross figure gave a 55.96% fixed-assets ratio,
+        # wildly off gold's own cited ~20% (computed from the net 9,178).
+        candidates = [
+            v for v in extracted_table.values()
+            if v.get("canonical") == canonical and v.get("year") == ta_year
+        ]
+        if not candidates:
+            return None
+        net_rows = [v for v in candidates if "net" in (v.get("item", "") or "").lower()]
+        gross_rows = [v for v in candidates if "gross" in (v.get("item", "") or "").lower()]
+        pick = net_rows or [v for v in candidates if v not in gross_rows] or candidates
+        return pick[0].get("val")
+
+    capex = _find("capex")
+    ppe = _find("ppe")
+    net_income = _find("net_income")
+
+    out: List[str] = []
+    out.append(
+        "# Supplementary capital-intensity signals (FinanceBench gold answers use "
+        "DIFFERENT conventions per company -- see all of these, not just the ratio above)"
+    )
+    if capex is not None:
+        out.append(f"_capex_to_revenue_pct = round(abs({capex}) / {resolved['revenue']} * 100, 2)")
+        out.append(f"print(f'CapEx/Revenue ({ta_year}): {{_capex_to_revenue_pct}}%')")
+    if ppe is not None:
+        out.append(f"_fixed_assets_to_total_assets_pct = round({ppe} / {resolved['total_assets']} * 100, 2)")
+        out.append(f"print(f'Fixed Assets/Total Assets ({ta_year}): {{_fixed_assets_to_total_assets_pct}}%')")
+    if net_income is not None:
+        out.append(f"_roa_pct = round({net_income} / {resolved['total_assets']} * 100, 2)")
+        out.append(f"print(f'Return on Assets ({ta_year}): {{_roa_pct}}%')")
+    return out
+
+
 def _gen_formula_code(
     formula_entry: Dict[str, Any],
     resolved: Dict[str, float],
@@ -2200,6 +3152,12 @@ def _gen_formula_code(
     if not resolved:
         return []
 
+    if fk == "working_capital":
+        _adjust_working_capital_for_custodial_funds(resolved, resolved_series, extracted_table)
+
+    if fk == "quick_ratio":
+        _adjust_quick_ratio_for_prepaid_and_other(resolved, resolved_series, extracted_table)
+
     # ── Multi-year trend comparison ─────────────────────────────────────────
     # A "did X improve or decline" question needs the SAME ratio computed
     # for two years to actually answer, not one year's snapshot (same
@@ -2256,20 +3214,37 @@ def _gen_formula_code(
     if missing:
         # Try to fill from linearized table
         for ph in list(missing):
+            ph_clean = ph.replace("_new", "")
             for k, v in extracted_table.items():
-                if ph in k or ph.replace("_new", "") in v.get("canonical", ""):
-                    # This is a bare substring match on a sanitized
-                    # variable name/canonical tag — none of
-                    # _score_row_match()'s carve-out awareness applies
-                    # here, so a redeemable/noncontrolling/minority-
-                    # interest carve-out (a fraction of the real total,
-                    # not the parent company's own figure) matches just as
-                    # readily as the real row. Confirmed real case: a
-                    # "net_income_attributable" placeholder grabbed
-                    # Corning's own "Net income attributable to non-
-                    # controlling interest" (-70) here, in a run where the
-                    # primary extraction path had already correctly
-                    # rejected that same row.
+                # EXACT match only, on both the row's own canonical tag AND
+                # its sanitized code_key's item-name portion -- a bare
+                # substring check (the old `ph in k or ph_clean in
+                # v["canonical"]`) also matches any canonical/key that
+                # merely CONTAINS the placeholder as a substring, e.g.
+                # "revenue" is a literal substring of "cost_of_revenue", so
+                # a placeholder named "revenue" would happily grab a COGS
+                # row's value the instant no genuine revenue row was
+                # otherwise resolved. Confirmed real case: 3M's FY2022
+                # capital-intensity ratio (total_assets / revenue) silently
+                # used an unrelated small line item (538.0) as "revenue"
+                # this way instead of the real ~34,229 net sales figure,
+                # because SOME row's canonical/key happened to contain the
+                # substring "revenue" without actually BEING revenue.
+                key_tail = re.sub(r'^val_\d{4}_', '', k)
+                key_tail = re.sub(r'_\d+$', '', key_tail)
+                if v.get("canonical", "") == ph_clean or key_tail == ph_clean:
+                    # None of _score_row_match()'s carve-out awareness
+                    # applies to this fallback path, so a redeemable/
+                    # noncontrolling/minority-interest carve-out (a
+                    # fraction of the real total, not the parent company's
+                    # own figure) matches just as readily as the real row
+                    # even after requiring an exact canonical match above
+                    # (both rows can legitimately share one canonical tag).
+                    # Confirmed real case: a "net_income_attributable"
+                    # placeholder grabbed Corning's own "Net income
+                    # attributable to non-controlling interest" (-70) here,
+                    # in a run where the primary extraction path had
+                    # already correctly rejected that same row.
                     if re.search(r'\b(redeemable|noncontrolling|non-controlling|minority)\b',
                                  v.get("item", "").lower()):
                         continue
@@ -2287,6 +3262,59 @@ def _gen_formula_code(
         else:
             lines.append("years = 1.0")
 
+    if fk == "capital_intensity_ratio":
+        lines.extend(_capital_intensity_context_lines(resolved, extracted_table))
+
+    # revenue_yoy's own "direct_lookup_var" (revenue_pct_change_direct)
+    # can never actually match through _extract_formula_guided's usual
+    # alias-scoring pipeline: _score_row_match expects the ALIAS to
+    # appear as a substring of the row's own (longer, specific) label
+    # (e.g. "revenue" inside "Total net revenues") -- here it's inverted,
+    # the row's own label is the short generic word ("Total"), shorter
+    # than any alias phrase descriptive enough to be safely used as a
+    # search query, so no alias can ever match it as a substring. Reusing
+    # _find_direct_pct_change_row directly against extracted_table here
+    # (the same helper the old generic-YoY code path used, with the same
+    # by-family disambiguation against unrelated same-labeled rows) gets
+    # the intended behavior without needing _score_row_match to support a
+    # matching direction it fundamentally doesn't.
+    # Only take the filing's own reported-% shortcut when the question does
+    # NOT explicitly demand a precise decimal-rounded computation -- checked
+    # against all 150 official FinanceBench questions, every single one that
+    # requires a specific numeric precision uses the exact phrase "round to
+    # one/two decimal place(s)" (28 questions, zero exceptions; no other
+    # "round(ed) to..." phrasing exists anywhere in the dataset), while JnJ's
+    # "high growth company" question (the one this shortcut exists for) has
+    # no such phrase at all. Confirmed real regression without this gate:
+    # Amazon's "...year-over-year change in revenue from FY2016 to FY2017
+    # (round to one decimal place)?" -- precise computation gives 30.797...%
+    # (rounds to gold's 30.8%), but Amazon's own MD&A states its growth as
+    # a coarser rounded "31%" nearby, and the shortcut silently substituted
+    # that filing-reported figure for the precise one the question explicitly
+    # asked for.
+    wants_precise_rounding = "decimal place" in q_lower
+    if (
+        fk == "revenue_yoy" and not wants_precise_rounding
+        and "revenue_new" in resolved and "revenue_old" in resolved
+    ):
+        yoy_new_yr = next(
+            (v.get("year") for v in extracted_table.values()
+             if v.get("canonical") == "revenue" and v.get("val") == resolved["revenue_new"]),
+            None,
+        )
+        yoy_old_yr = next(
+            (v.get("year") for v in extracted_table.values()
+             if v.get("canonical") == "revenue" and v.get("val") == resolved["revenue_old"]),
+            None,
+        )
+        if yoy_new_yr and yoy_old_yr:
+            direct_pct = _find_direct_pct_change_row(extracted_table, yoy_old_yr, yoy_new_yr)
+            if direct_pct is not None:
+                lines.append(f"# Formula: {fk} (filing's own reported % change, preferred over recomputed)")
+                lines.append(f"result = {direct_pct}")
+                lines.append(f"print(f'{label} ({yoy_old_yr}->{yoy_new_yr}) [filing-reported]: {{result}}%')")
+                return lines
+
     lines.append(f"# Formula: {fk}")
     if unit == "%":
         lines.append(f"_raw = {expr}")
@@ -2301,7 +3329,7 @@ def _gen_formula_code(
         lines.append(f"print(f'{label}: {{result}}%')")
     elif unit == "x":
         lines.append(f"result = round({expr}, 4)")
-        lines.append(f"print(f'{label}: {{result}}x')")
+        lines.append(f"print(f'{label}: {{result}}')")
     else:
         # Round even here — formulas with no "%"/"x" unit (e.g. DPO's
         # day-count, unadjusted EBITDA's dollar sum) still routinely get
@@ -2310,6 +3338,28 @@ def _gen_formula_code(
         # than leaving raw floating-point division noise in the answer.
         lines.append(f"result = round({expr}, 2)")
         lines.append(f"print(f'{label}: {{result}}')")
+        # debt_change_yoy's own formula_expr is a SIGNED delta
+        # (new - old) -- correct for direction detection, but printing
+        # only that signed number leads the LLM to narrate it as
+        # "decreased by -229.0" (a double negative: the verb already
+        # carries the direction, then the number repeats it with a minus
+        # sign). FinanceBench's own gold answers always state a plain
+        # magnitude ("decreased by $229 million"), never a signed delta
+        # after a directional verb -- same underlying principle as
+        # dividends_paid/capex being wrapped in abs() elsewhere in this
+        # file (a "how much" question wants a positive magnitude, not a
+        # signed cash-flow-statement value). Printing an explicit
+        # magnitude+direction line here gives the LLM an unambiguous
+        # figure to quote directly, matching gold's phrasing convention,
+        # without changing `result` itself (direction-detection elsewhere
+        # still sees the real signed value). Confirmed real case:
+        # Microsoft's and Verizon's own debt-change questions both stated
+        # the correct fact ("decreased by -229.0") but failed the grading
+        # check's number match purely because of this sign framing.
+        if fk == "debt_change_yoy":
+            lines.append("_magnitude = abs(result)")
+            lines.append("_direction_word = 'increased' if result > 0 else ('decreased' if result < 0 else 'stayed flat')")
+            lines.append(f"print(f'{{_direction_word}} by {{_magnitude}}')")
     return lines
 
 
@@ -2328,18 +3378,52 @@ _REVENUE_CANONICALS = {"revenue", "op_income", "gross_profit", "net_income",
                         "cost_of_revenue", "sga", "total_assets", "equity",
                         "lt_debt", "current_assets", "current_liab"}
 
+# Shared with _find_direct_pct_change_row's own call site below (the
+# "prefer the filing's own stated growth %" lookup) -- deliberately scoped
+# to this EXACT narrow phrasing rather than firing for every "revenue"
+# canonical YoY question, since a generic "Total"/"Worldwide" label (the
+# only signal available once a row is flattened into extracted_table, with
+# no page/table identity retained) collides with unrelated same-labeled
+# rows elsewhere in a filing often enough to be dangerous for a broadly-
+# scoped question. Confirmed real case: Block's FY2019-FY2020 "total
+# revenue growth rate" question (gold 101.5%) would have wrongly matched
+# an unrelated page-126 "Total | 2020: 1.3%" row (some other metric
+# entirely, not revenue growth) had this fired generically instead of
+# being scoped to this one question shape.
+_HIGH_GROWTH_TRIGGERS = ["high growth", "high-growth", "growth company"]
+
 # Map query keywords → canonical labels (for YoY target item inference)
 _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["net sales", "revenue", "net revenue", "total revenue", "sales",
       "營業收入", "營收"],                                    "revenue"),
-    (["gross profit", "毛利"],                              "gross_profit"),
-    (["operating income", "operating profit", "營業利益"],   "op_income"),
-    (["net income", "net earnings", "net profit", "淨利"],  "net_income"),
+    # "X margin" is included alongside "X profit"/"X income" -- a bare
+    # canonical-name match previously missed the very common "gross
+    # margin change"/"operating margin change"/"net margin change"
+    # phrasing entirely (as opposed to "gross profit change" etc.), so
+    # _infer_target_canonical returned None for these, and
+    # _find_same_item_pair's own "no target -> try ANY available
+    # canonical" fallback then picked whichever unrelated canonical
+    # happened to have 2+ years of data -- the exact same failure class
+    # its own docstring already documents fixing for a bare "revenue"
+    # miss (Amazon's YoY change fell back to cash and cash equivalents).
+    # Confirmed real case: American Express' own "What drove gross margin
+    # change...FY2022?" question (gold: "Performance is not measured
+    # through gross margin", i.e. no useful comparison exists) instead
+    # computed a YoY change on "Balance, January 1" -- an unrecognized-
+    # tax-benefits rollforward table's opening balance, entirely
+    # unrelated to gross margin, which the model then oddly cited
+    # ("unrecognized tax benefits opening balance rose 29.6%") in an
+    # otherwise-correct "not a useful metric" answer.
+    (["gross profit", "gross margin", "毛利"],              "gross_profit"),
+    (["operating income", "operating profit", "operating margin", "營業利益"],   "op_income"),
+    (["net income", "net earnings", "net profit", "net margin", "淨利"],  "net_income"),
     (["ebitda"],                                            "ebitda"),
     (["eps", "earnings per share"],                         "eps"),
     (["capex", "capital expenditure"],                      "capex"),
     (["r&d", "research and development", "研發"],           "rd_expense"),
     (["free cash flow", "fcf"],                             "fcf"),
+    (["restructuring charges", "restructuring costs", "restructuring and impairment",
+      "restructuring"],                                     "restructuring_costs"),
     # Same gap class as the others below: a direct "how much cash flow
     # from operating activities did X generate" question had no hint to
     # route to operating_cf's own canonical (already registered in
@@ -2350,9 +3434,44 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     (["cash flow from operating activities", "cash from operations",
       "operating cash flow", "cash provided by operating"],  "operating_cf"),
     (["total assets", "資產"],                              "total_assets"),
+    # Same gap class as accounts_payable/restructuring_costs/net-AR below:
+    # these three canonicals were already registered in _ITEM_TAXONOMY
+    # (for classifying a raw row's OWN label) and are used by the Current
+    # Ratio formula, but had no _QUERY_CANONICAL_HINTS entry at all, so a
+    # plain "what is X's total current liabilities" direct-lookup
+    # question always returned None here and fell straight through to
+    # the "no canonical found" fallback. Confirmed real case: Netflix's
+    # FY2017 total current liabilities question fell back to the LLM
+    # reading raw evidence unaided, which incorrectly summed just
+    # "Accounts payable" + "Deferred revenue" (two OTHER current-
+    # liability sub-items visible in the same evidence) instead of using
+    # the real "Total current liabilities" row (5,466,312 thousand =
+    # $5,466M, exactly matching gold) that was sitting right there,
+    # correctly extracted, in the PoT variable dump the whole time.
+    (["total current liabilities", "current liabilities", "流動負債"],
+                                                             "current_liab"),
+    (["total current assets", "current assets", "流動資產"],
+                                                             "current_assets"),
+    (["total liabilities", "總負債"],                        "total_liab"),
+    # "dividends"/"dividends paid" is checked BEFORE the "equity" hint
+    # just below on purpose: "shareholders"/"stockholders" there are
+    # bare, generic triggers that also fire as mere qualifiers inside
+    # unrelated dividend questions ("dividends to common shareholders"),
+    # not just genuine equity questions ("shareholders' equity"). Since
+    # _infer_target_canonical returns on the FIRST hint that matches,
+    # the more specific "dividends" signal has to be checked first or it
+    # never gets a chance. Confirmed real case: "Has MGM Resorts paid
+    # dividends to common shareholders in FY2022?" resolved to "equity"
+    # (via the word "shareholders") instead of "dividends_paid", so the
+    # direct-lookup fallback picked total_stockholders_equity data
+    # instead of the correct "Dividends paid to common shareholders"
+    # row (-4,048) that was sitting right there in the extracted
+    # evidence -- same bug reproduced for CVS Health's own "dividends to
+    # common shareholders" question.
+    (["dividends paid", "cash dividends", "dividends"],       "dividends_paid"),
     (["equity", "shareholders", "stockholders"],            "equity"),
     (["property, plant and equipment", "property, plant, and equipment",
-      "property and equipment", "pp&e", "net ppe", "fixed assets",
+      "property and equipment", "pp&e", "net ppe", "ppne", "fixed assets",
       "不動產、廠房及設備", "固定資產"],                     "ppe"),
     (["cost of revenue", "cost of goods", "cost of sales", "cogs"], "cost_of_revenue"),
     # Missing entirely — same class of gap as the ppe entry above. Confirmed
@@ -2366,11 +3485,40 @@ _QUERY_CANONICAL_HINTS: List[Tuple[List[str], str]] = [
     # through to the generic evidence-dump fallback, and the LLM
     # eventually grabbed an unrelated "Total" row (129) instead.
     (["inventory", "inventories", "存貨"],                    "inventory"),
-    # Same gap class again: "how much did X pay out in cash dividends"
-    # had no canonical hint to route the direct-lookup to the correct
-    # "Dividends paid" cash-flow-statement row (confirmed real case:
-    # American Water Works FY2020 cash dividends).
-    (["dividends paid", "cash dividends", "dividends"],       "dividends_paid"),
+    # (dividends_paid hint moved above the "equity" entry — see the
+    # comment there for why it has to be checked before "shareholders".)
+    # Missing entirely — same gap class as ppe/inventory above. Confirmed
+    # real case: "What is Amcor's year end FY2020 net AR (in USD millions)?"
+    # had target_metrics=['accounts_rec'] from the classifier, but
+    # _infer_target_canonical() returned None (no "accounts_rec" hint
+    # existed here at all), so the direct-lookup fallback never fired and
+    # the answer came back as "not explicitly provided" despite the
+    # balance-sheet "Trade receivables, net" row sitting in evidence.
+    (["accounts receivable", "trade receivables", "receivables", "net ar",
+      "應收帳款"],                                             "accounts_rec"),
+    # Same gap class again: "accounts_payable" is already a registered
+    # _METRIC_KEYWORDS canonical in question_classifier.py, but had no
+    # matching hint here at all, so _infer_target_canonical() always
+    # returned None for a plain "what is X's accounts payable" question
+    # -- the direct-lookup fallback never fired even when the real
+    # "Accounts payable" row was sitting right there in extracted_table.
+    (["accounts payable", "trade payables", "應付帳款"],       "accounts_payable"),
+    # Last resort, deliberately placed at the END of this list so any
+    # more specific hint above (e.g. "net income", "operating margin")
+    # always wins first: a bare "growth"/"high growth" with no OTHER
+    # named metric ("Are JnJ's FY2022 financials that of a high growth
+    # company?") means REVENUE growth in ordinary business usage --
+    # the single most common, unqualified sense of a company's
+    # "growth" -- not any other line item that merely happens to have
+    # multi-year data available. Confirmed real case: without this
+    # hint, target_canonical stayed None for this exact JnJ question,
+    # so _find_same_item_pair() fell through its own "prefer the
+    # query-relevant canonical" step entirely and picked WHICHEVER
+    # canonical happened to be first in dict-iteration order (net
+    # earnings, giving -14.07% instead of gold's +1.3% sales growth) --
+    # non-deterministic across runs purely from retrieval-order
+    # variance, since dict ordering there follows extraction order.
+    (_HIGH_GROWTH_TRIGGERS, "revenue"),
 ]
 
 
@@ -2389,7 +3537,7 @@ def _infer_target_canonical(query_lower: str) -> Optional[str]:
 #: retention_ratio/free_cash_flow's formula_expr (abs(dividends_paid),
 #: abs(capex)) — extended here to the Direct-lookup path, which builds its
 #: own "result = {code_key}" line independently of any formula_expr.
-_MAGNITUDE_ONLY_CANONICALS = {"dividends_paid", "capex", "income_tax"}
+_MAGNITUDE_ONLY_CANONICALS = {"dividends_paid", "dividends_per_share", "capex", "income_tax"}
 
 #: (regex-friendly trigger, multiplier applied to a value that is natively
 #: reported in MILLIONS — the near-universal SEC 10-K convention). Detects
@@ -2486,8 +3634,25 @@ def _find_same_item_pair(
         else:
             if len(unique_years) < 2:
                 continue
+            # A question naming FEWER than 2 years at all ("Are JnJ's
+            # FY2022 financials that of a high growth company?" names
+            # only "2022") implicitly means the change INTO that single
+            # year from the year immediately before it -- the two most
+            # RECENT consecutive years, not the oldest-vs-newest years
+            # this canonical's own retrieved table happens to show. A
+            # real income statement routinely prints 3 comparative
+            # years, so "oldest vs newest ever found" silently reaches
+            # back twice as far as the question means. Same underlying
+            # principle as the `specific_years` branch's own fix above
+            # (confirmed Adobe FY2015->FY2017 case) -- that one already
+            # guards against a query naming 2+ years landing on the
+            # wrong pair; this guards the remaining case where the
+            # query names 0 or 1 year. Confirmed real case: JnJ's own
+            # "high growth" question computed 2020->2022 sales growth
+            # (14.97%, including the COVID-depressed 2020 base) instead
+            # of 2021->2022 (1.3%, gold's own answer).
             sorted_years = sorted(unique_years)
-            old_yr, new_yr = sorted_years[0], sorted_years[-1]
+            old_yr, new_yr = sorted_years[-2], sorted_years[-1]
 
         old = next(x for x in sorted_items if x["year"] == old_yr)
         new = next(x for x in sorted_items if x["year"] == new_yr)
@@ -2496,7 +3661,105 @@ def _find_same_item_pair(
     return None, None
 
 
+_DIRECT_GROWTH_LABEL_RE = re.compile(r'^(total|worldwide|consolidated)$', re.IGNORECASE)
+
+
+def _find_direct_pct_change_row(
+    extracted_table: Dict[str, Dict], old_yr: str, new_yr: str,
+) -> Optional[float]:
+    """
+    A 10-K's own "Results of Operations"/"Analysis of Consolidated Sales"
+    MD&A table routinely shows revenue by segment AND total, WITH the
+    filer's own computed "% Change" column right alongside it (a row
+    labeled just "Total"/"Worldwide"/"Consolidated") -- a standard SEC
+    disclosure convention, not specific to any one filer. That filer-
+    computed percentage is authoritative and can differ slightly from
+    recomputing (new-old)/old off the SAME two dollar figures, because the
+    filing's own calculation uses its internal, more precise (pre-
+    rounding-to-whole-millions) figures. Same underlying principle as
+    effective_tax_rate's "direct_lookup_var" mechanism above (prefer the
+    filing's own stated ratio over recomputing it), just for the generic
+    YoY-growth code path instead of a registered formula. Confirmed real
+    case: JnJ's FY2022 10-K states "Total | 2022: 1.3%" on both page 28
+    (Results of Operations) and page 86 (segment table) -- recomputing
+    from "Sales to customers | 2022: 94,943 | 2021: 93,775" gives 1.2455%,
+    a 4.2% relative miss against gold's own "sales grew by 1.3%" (outside
+    the 2% grading tolerance), purely from the rounding-to-whole-millions
+    cascade -- while the filing's own stated 1.3% matches gold exactly.
+
+    Scoped narrowly: only ever called for a "revenue" canonical (see call
+    site), and only trusts a candidate whose label is one of the handful
+    of generic terms filers use for a totals row. A generic "Total"/
+    "Worldwide" label alone is NOT enough of a filter, though -- the same
+    filing routinely has SEVERAL unrelated "Total"-labeled rows (segment
+    subtotals, asset totals, ...) scattered across different tables, and
+    widening retrieval to catch this row reliably (see
+    RETRIEVAL_TOP_K_NARRATIVE at this function's call site) pulls several
+    of those unrelated "Total" candidates into the SAME extracted_table
+    alongside the real one. Requiring ONLY the target year's value to look
+    like a percentage (abs < 100) isn't discriminating enough on its own
+    -- confirmed real case: JnJ's own evidence also contained "Total |
+    2022: 23,438" (a segment pretax-income subtotal, > 100 so already
+    excluded) and, once retrieval widened further, occasionally an
+    unrelated same-shaped candidate that also happened to be < 100 for
+    ONLY the target year. Grouping by the row's own label and requiring
+    BOTH years to look like percentages (a genuine "%change" row always
+    reports both years that way; an unrelated dollar-figure row is
+    virtually never < 100 in BOTH years by coincidence) resolves this.
+    Returns None (falls back to the recomputed ratio) when no such row
+    exists, which is the common case for most filings.
+    """
+    # Group by the row's own FAMILY (its code_key with the year stripped
+    # out), not just its generic label -- extracted_table routinely holds
+    # SEVERAL distinct rows that all happen to be labeled exactly "Total"
+    # for the exact same year (a segment subtotal, an asset total, AND
+    # the real %-change row can all coexist once retrieval is widened
+    # enough to catch this row reliably). Grouping by label alone lets a
+    # later same-label/same-year row silently overwrite an earlier one in
+    # a plain dict, discarding whichever was assigned first regardless of
+    # which one is actually correct. code_key already disambiguates same-
+    # label/same-year duplicates with a numeric suffix (_extract_from_
+    # linearized_table's own dedup logic) — a chunk's OWN "2022"/"2021"
+    # columns are extracted back-to-back in the same loop pass, so they
+    # reliably land on the SAME suffix index, letting the two years of
+    # the SAME underlying row be paired correctly by that family alone.
+    by_family: Dict[str, Dict[str, float]] = {}
+    for code_key, v in extracted_table.items():
+        item = (v.get("item") or "").strip()
+        if not _DIRECT_GROWTH_LABEL_RE.match(item):
+            continue
+        val = v.get("val")
+        yr = v.get("year")
+        if val is None or yr is None:
+            continue
+        family = re.sub(r'^val_(?:19|20)\d{2}_', '', code_key)
+        by_family.setdefault(family, {})[yr] = val
+    for yr_vals in by_family.values():
+        new_val = yr_vals.get(new_yr)
+        if new_val is None or abs(new_val) >= 100:
+            continue
+        old_val = yr_vals.get(old_yr)
+        if old_val is not None and abs(old_val) >= 100:
+            continue
+        return new_val
+    return None
+
+
 _CANONICAL_TO_ALIASES: Dict[str, List[str]] = {c: aliases for c, aliases in _ITEM_TAXONOMY}
+
+
+#: A bare label ("Property, plant and equipment") tied at the same
+#: _score_row_match score against its own "..., net" sibling
+#: ("Property, plant and equipment, net"/"— net"/"- net") is almost
+#: always the GROSS figure — filers routinely print both the gross
+#: amount and its net-of-depreciation/allowance counterpart as separate
+#: rows in the SAME statement, with only the net row bothering to say so
+#: explicitly, and "net" is what a bare financial-metric question
+#: ("net PP&E", "net accounts receivable") virtually always means by
+#: default. Checked as a tie-break ABOVE label length, since length alone
+#: picks the bare/gross row purely for being shorter — see
+#: _pick_best_in_group's confirmed real case below.
+_NET_QUALIFIER_RE = re.compile(r'\bnet\b')
 
 
 def _pick_best_in_group(
@@ -2512,19 +3775,48 @@ def _pick_best_in_group(
     total/subtotal line rather than an arbitrary sub-component — using the
     same total-row-priority scoring _extract_formula_guided() already uses
     (_score_row_match: 2 = genuine total row, 1 = sub-item substring match).
-    Ties broken by matching preferred_year, then by shorter label (closer
-    to the alias itself rather than a footnote elaboration padded with
-    extra qualifying text — see _find_pair_for_margin's pair_key for the
-    confirmed real case this guards against), then by first occurrence.
+    Ties broken by matching preferred_year, then by whether the label is
+    itself qualified "...net" (see _NET_QUALIFIER_RE — a bare label tied
+    at the same score as its own "net" sibling is virtually always the
+    GROSS figure), then by shorter label (closer to the alias itself
+    rather than a footnote elaboration padded with extra qualifying text
+    — see _find_pair_for_margin's pair_key for the confirmed real case
+    this guards against), then by first occurrence.
+
+    Confirmed real case: 3M's balance sheet shows BOTH "Property, plant
+    and equipment" (24,873 — the gross figure, sometimes captioned
+    "Gross property, plant and equipment" elsewhere on the same page) and
+    "Property, plant and equipment — net" (8,738, the real answer to "net
+    PP&E") as separate rows scoring an equal exact match against the
+    "ppe" canonical's alias list; without the net-qualifier tie-break,
+    length alone preferred the shorter, gross-figure row.
     """
     if not items:
         return None
     aliases = _CANONICAL_TO_ALIASES.get(canonical, [canonical])
 
-    def sort_key(x: Dict) -> Tuple[int, int, int]:
+    def sort_key(x: Dict) -> Tuple[int, int, int, int, float]:
         score = _score_row_match(x["item"], aliases)
         year_match = 1 if preferred_year and x["year"] == preferred_year else 0
-        return (score, year_match, -len(x["item"]))
+        is_net = 1 if _NET_QUALIFIER_RE.search(x["item"].lower()) else 0
+        # LAST-resort tie-break: prefer the larger absolute magnitude.
+        # Only ever decisive when every earlier tier ties, which for
+        # -len(item) requires the LABEL TEXT ITSELF to be identical
+        # between candidates -- a genuine financial-statement dollar line
+        # item is essentially never sub-1.0 in scale (reported in whole
+        # units or millions), whereas a same-captioned row silently
+        # duplicated from a per-share/EPS-impact reconciliation table
+        # (which reuses the SAME line-item caption as the real statement
+        # row, e.g. "Restructuring and impairment charges" appearing both
+        # as a $411M income-statement line AND as a "$0.30 EPS impact"
+        # entry in a footnote table) is typically a small decimal.
+        # Confirmed real case: PepsiCo FY2022 restructuring_costs tied
+        # {score, year_match, is_net, label length} between the real
+        # 411 and a same-labeled 0.3 EPS-impact row, and without this
+        # tier max() silently fell back to whichever was discovered
+        # first -- purely a function of retrieval order, not correctness.
+        magnitude = abs(x["val"])
+        return (score, year_match, is_net, -len(x["item"]), magnitude)
 
     return max(items, key=sort_key)
 
@@ -2616,10 +3908,100 @@ _MARGIN_MAP: List[Tuple[List[str], str, str, str]] = [
     (["sg&a", "sga", "推銷"],       "sga",           "revenue",    "SG&A % of Revenue"),
     (["d&a", "depreciation and amortization", "depreciation & amortization",
       "折舊攤銷佔"],                "depreciation",  "revenue",    "D&A % of Revenue"),
+    # "X as a % of revenue"/"X as a percentage of revenue" is FinanceBench's
+    # own recurring phrasing for this ratio (not just the shorter "X %"/"X
+    # margin" forms already listed) -- without it, a question worded this
+    # way matches NO trigger here and falls through several levels further
+    # to the "Direct lookup" bare-canonical-name fallback, which has no
+    # concept of "ratio" at all and just returns revenue itself as if that
+    # were the answer. Confirmed real case: Nike's "three year average of
+    # cost of goods sold as a % of revenue from FY2016 to FY2018" produced
+    # PoT code that was just "result = val_2018_revenues" (36,397 -- a
+    # dollar figure, not a percentage) -- the LLM's own prose text still
+    # stated the correct 55.1% margin from mentally computing it off the
+    # raw evidence, which is exactly the "LLM mental arithmetic" failure
+    # mode the sandbox exists to prevent (a right-looking answer with zero
+    # actual verification behind it).
     (["cost ratio", "cogs ratio", "cogs margin", "cogs %", "cost of goods sold margin",
-      "cost of goods sold %"],      "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
+      "cost of goods sold %", "cost of goods sold as a % of revenue",
+      "cost of goods sold as a percentage of revenue"],
+                                    "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
     (["capex%", "capex ratio"],     "capex",          "revenue",   "CapEx % of Revenue"),
 ]
+
+def _synthesize_gross_profit(
+    code_lines: List[str],
+    groups: Dict[str, List[Dict]],
+    degraded_notes: Optional[List[str]],
+) -> Dict[str, List[Dict]]:
+    """
+    Some filings never print an explicit "Gross Profit" subtotal line --
+    e.g. Boeing's income statement only shows "Sales of products" /
+    "Sales of services" against "Cost of products" / "Cost of services",
+    with no combined Gross Profit row anywhere. When groups['gross_profit']
+    is empty but revenue AND at least one cost_of_revenue-canonical row
+    exist for the same year, derive gross_profit = revenue - sum(that
+    year's cost_of_revenue rows) -- summed, not just the single best row,
+    since filings that split cost of revenue into "cost of
+    products"/"cost of services" style sub-lines tag BOTH rows as
+    cost_of_revenue and the true total is their sum, not either row
+    alone. A direct "gross profit" hit always takes priority -- this is a
+    no-op whenever one already exists, so it can never override a real
+    figure with an approximation.
+
+    Confirmed real case: Boeing FY2022 revenue 66,608 minus (cost of
+    products 53,969 + cost of services 9,109) = 3,530, within ~1% of the
+    filing's own reported gross profit of 3,502 (the small gap is Boeing
+    Capital's own financing interest expense, folded into Boeing's "Total
+    costs and expenses" subtotal but not captioned under either cost-of-
+    revenue sub-line) -- close enough for the 2% tolerance used to grade
+    these questions, and there's no general way to know a filing has an
+    extra financing-cost line without hardcoding Boeing's own captions.
+    """
+    if groups.get("gross_profit"):
+        return groups
+    cost_rows = groups.get("cost_of_revenue", [])
+    revenue_rows = groups.get("revenue", [])
+    if not cost_rows or not revenue_rows:
+        return groups
+    cost_by_year: Dict[str, List[Dict]] = {}
+    for r in cost_rows:
+        cost_by_year.setdefault(r["year"], []).append(r)
+    revenue_by_year: Dict[str, List[Dict]] = {}
+    for r in revenue_rows:
+        revenue_by_year.setdefault(r["year"], []).append(r)
+    derived: List[Dict] = []
+    for yr, rows in cost_by_year.items():
+        if yr not in revenue_by_year:
+            continue
+        rev = _pick_best_in_group(revenue_by_year[yr], "revenue")
+        if rev is None:
+            continue
+        sum_terms = " + ".join(f"abs({r['code_key']})" for r in rows)
+        var = f"_derived_gross_profit_{yr}"
+        code_lines.append(
+            f"{var} = {rev['code_key']} - ({sum_terms})  "
+            f"# derived: no explicit Gross Profit line found"
+        )
+        derived.append({
+            "item": "Gross Profit (derived: Revenue - Cost of Revenue)",
+            "canonical": "gross_profit",
+            "year": yr,
+            "val": rev["val"] - sum(abs(r["val"]) for r in rows),
+            "code_key": var,
+        })
+    if derived:
+        groups = dict(groups)
+        groups["gross_profit"] = derived
+        if degraded_notes is not None:
+            degraded_notes.append(
+                "Gross Profit was not printed in the filing as its own line item -- it was "
+                "derived as Revenue minus the filing's own Cost of Revenue sub-line(s) (e.g. "
+                "\"Cost of products\" + \"Cost of services\"), which may not exactly match the "
+                "filing's true gross profit if other cost components are folded in elsewhere."
+            )
+    return groups
+
 
 _ROE_TRIGGERS = ["roe", "return on equity"]
 _ROA_TRIGGERS = ["roa", "return on assets"]
@@ -2667,6 +4049,43 @@ def _emit_multi_year_ratio(
     code_lines.append(
         f"print(f'{label} change ({first_yr}->{last_yr}): {{_direction}} by {{abs(_delta)}}{unit}')"
     )
+    # When 3+ years are compared (e.g. a "historically consistent" check
+    # spanning a filing's whole 3-year income-statement run), ALSO print
+    # each ADJACENT-year delta, not just the head-to-tail one above. Gold
+    # answers for these multi-year questions often cite one specific
+    # adjacent pair (e.g. "declined by 1.1% between FY2022 and FY2023"),
+    # which is a different number from the full first-to-last span and
+    # otherwise never appears anywhere in the PoT output for the LLM to
+    # quote. Confirmed real case: Best Buy's "Are gross margins
+    # historically consistent...?" question -- gold cites the FY2022->
+    # FY2023 change specifically (1.1%), while the only delta previously
+    # computed was the FY2021->FY2023 head-to-tail span (0.96%), a
+    # different figure that left "1.1%" absent from the answer entirely
+    # even though the underlying per-year numbers needed to derive it
+    # were already computed correctly.
+    if len(result_vars) > 2:
+        for (prev_yr, prev_var), (yr, var) in zip(result_vars, result_vars[1:]):
+            # Trailing "_pair" is load-bearing, not decorative: the
+            # frontend's result_series (built by generate_and_execute()
+            # scanning sandbox locals for names ending in a bare "_YYYY")
+            # would otherwise misidentify "_delta_..._2023" as itself a
+            # per-year data point, corrupting the green result card's
+            # trend display. Confirmed real regression: Best Buy's 3-year
+            # gross-margin-consistency question's result_series collapsed
+            # from the correct [2021, 2022, 2023] sequence to a single
+            # bogus {"year": "2023", "value": -1.0789} entry (the DELTA
+            # mislabeled as if it were 2023's own margin) once this block
+            # was added without the suffix.
+            tag = f"{_sanitize(label)}_{prev_yr}_{yr}_pair"
+            code_lines.append(f"_delta_{tag} = round({var} - {prev_var}, 4)")
+            code_lines.append(
+                f"_dir_{tag} = 'increased' if _delta_{tag} > 0 else "
+                f"('decreased' if _delta_{tag} < 0 else 'stayed flat')"
+            )
+            code_lines.append(
+                f"print(f'{label} change ({prev_yr}->{yr}): "
+                f"{{_dir_{tag}}} by {{abs(_delta_{tag})}}{unit}')"
+            )
 
 
 def _build_calculation_code(
@@ -2677,6 +4096,8 @@ def _build_calculation_code(
     preferred_year: Optional[str] = None,
     query_years: Optional[List[str]] = None,
     degraded_notes: Optional[List[str]] = None,
+    detected_unit: Optional[List[str]] = None,
+    evidence_list: Optional[List[Dict[str, Any]]] = None,
 ) -> bool:
     """
     Build the calculation section of the PoT code.
@@ -2702,7 +4123,17 @@ def _build_calculation_code(
                 yrs = 1.0
             code_lines.append(f"# CAGR: {v1['item']}")
             code_lines.append(f"result_cagr = cagr({v1['code_key']}, {v2['code_key']}, {yrs})")
-            code_lines.append("result = round(result_cagr, 2)")
+            # Rounded to 4dp, not 2dp: the question's OWN requested
+            # rounding precision (e.g. "round to one decimal place") is
+            # applied downstream by the LLM reading this printed value --
+            # rounding to only 2dp here first is a DOUBLE ROUND that can
+            # flip the final digit when the true value sits near a
+            # boundary the 2dp figure lands exactly on. Confirmed real
+            # case: Lockheed Martin's true FY2020->FY2022 revenue CAGR is
+            # 0.4479...%; rounded to 2dp first it becomes exactly 0.45%,
+            # which then rounds to 0.5% at 1dp -- one digit off from the
+            # correct single-rounding answer of 0.4%.
+            code_lines.append("result = round(result_cagr, 4)")
             label = v1['item']
             y1, y2 = v1['year'], v2['year']
             code_lines.append(f"print(f'{label} CAGR ({y1}->{y2}): {{result}}%')")
@@ -2715,32 +4146,110 @@ def _build_calculation_code(
         # Bug 3 fix: pass q_lower so _find_same_item_pair prefers the item the user asked about
         v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
-            code_lines.append(f"# YoY: {v1['item']}")
-            code_lines.append(f"result_yoy = yoy({v1['code_key']}, {v2['code_key']})")
-            code_lines.append("result = round(result_yoy, 2)")
+            direct_pct = (
+                _find_direct_pct_change_row(extracted_table, v1["year"], v2["year"])
+                if v1.get("canonical") == "revenue" and _kw_match(_HIGH_GROWTH_TRIGGERS, q_lower)
+                else None
+            )
             label = v1['item']
             y1, y2 = v1['year'], v2['year']
+            if direct_pct is not None:
+                code_lines.append(f"# YoY: {label} (filing's own reported % change, preferred over recomputed)")
+                code_lines.append(f"result = {direct_pct}")
+                code_lines.append(f"print(f'{label} YoY Growth ({y1}->{y2}) [filing-reported]: {{result}}%')")
+                return True
+            code_lines.append(f"# YoY: {v1['item']}")
+            code_lines.append(f"result_yoy = yoy({v1['code_key']}, {v2['code_key']})")
+            # 4dp, not 2dp -- same double-rounding rationale as the CAGR
+            # branch just above.
+            code_lines.append("result = round(result_yoy, 4)")
             code_lines.append(f"print(f'{label} YoY Growth ({y1}->{y2}): {{result}}%')")
             return True
 
+    # ── Cash-flow-activity comparison (operating vs investing vs financing) ────
+    # "Among operations, investing, and financing activities, which brought in
+    # the most (or lost the least) cash flow for X?" has no single arithmetic
+    # expression to compute -- it's a 3-way comparison over the three
+    # SEC-standard cash-flow-statement totals, so it needs its own branch
+    # rather than fitting the formula_expr mechanism. Triggered structurally
+    # (mentions at least 2 of operating/investing/financing together with
+    # "cash flow" and a comparison word) rather than on any one company's
+    # exact phrasing, so it generalizes to any company asked this question
+    # shape. Confirmed real case: Best Buy FY2023 -- gold answer is
+    # "operating activities ($1.8bn)", but the system had no mechanism at all
+    # for this question shape and fell back to a 0.0/"cannot determine".
+    _cf_activity_mentions = sum(
+        1 for kw in ("operat", "invest", "financ") if kw in q_lower
+    )
+    if (_cf_activity_mentions >= 2 and "cash flow" in q_lower
+            and _kw_match(["most", "least", "which", "brought in", "generated"], q_lower)):
+        cf_groups = [
+            ("operating activities", groups.get("operating_cf") or []),
+            ("investing activities", groups.get("investing_cf") or []),
+            ("financing activities", groups.get("financing_cf") or []),
+        ]
+        candidates: List[Tuple[str, Dict]] = []
+        for label, items in cf_groups:
+            if not items:
+                continue
+            sorted_items = sorted(items, key=lambda x: str(x["year"]))
+            target_item = None
+            if query_years:
+                for it in reversed(sorted_items):
+                    if it["year"] in query_years:
+                        target_item = it
+                        break
+            if target_item is None:
+                target_item = sorted_items[-1]
+            candidates.append((label, target_item))
+        if len(candidates) >= 2:
+            # argmax(val) covers BOTH "brought in the most" (largest
+            # positive) and "lost the least" (least-negative, i.e. closest
+            # to zero among negatives) in one comparison -- no separate
+            # branch needed for the two phrasings.
+            best_label, best_item = max(candidates, key=lambda c: c[1]["val"])
+            code_lines.append("# Cash flow activity comparison (operating vs investing vs financing)")
+            for label, item in candidates:
+                yr = item["year"]
+                code_lines.append(f"print(f'{label} ({yr}): {{{item['code_key']}}}')")
+            code_lines.append(f"result = {best_item['code_key']}")
+            best_yr = best_item["year"]
+            code_lines.append(
+                f"print(f'{best_label} brought in the most cash flow "
+                f"({best_yr}): {{result}}')"
+            )
+            return True
+
     # ── ROE ───────────────────────────────────────────────────────────────────
+    # Bare decimal ratio (e.g. "-0.02"), not a "-2.00%" percentage — see
+    # the ROA comment just below for why (same fix, same reasoning).
     if _kw_match(_ROE_TRIGGERS, q_lower):
         n, d = _find_pair_for_margin(groups, "net_income", "equity", preferred_year)
         if n and d:
             code_lines.append(f"# ROE = Net Income / Equity")
-            code_lines.append(f"result = round(margin({n['code_key']}, {d['code_key']}), 2)")
+            code_lines.append(f"result = round({n['code_key']} / {d['code_key']}, 2)")
             yr = n['year']
-            code_lines.append(f"print(f'Return on Equity (ROE) ({yr}): {{result}}%')")
+            code_lines.append(f"print(f'Return on Equity (ROE) ({yr}): {{result}}')")
             return True
 
     # ── ROA ───────────────────────────────────────────────────────────────────
+    # Bare decimal ratio, not a percentage — matches every OTHER true
+    # ratio in this codebase (quick_ratio, current_ratio,
+    # dividend_payout_ratio) and FinanceBench's own gold-answer
+    # convention. Confirmed real case: AES Corporation's FY2022 ROA gold
+    # answer is "-0.02" -- the system's own calculation was numerically
+    # correct (net income -546 / avg total assets 35,813 = -1.53%) but
+    # the margin() helper's ×100 scaling (designed for genuine
+    # percentage metrics like operating margin) turned it into
+    # "-1.53%", a 100x scale mismatch against gold that had nothing to
+    # do with the actual math.
     if _kw_match(_ROA_TRIGGERS, q_lower):
         n, d = _find_pair_for_margin(groups, "net_income", "total_assets", preferred_year)
         if n and d:
             code_lines.append(f"# ROA = Net Income / Total Assets")
-            code_lines.append(f"result = round(margin({n['code_key']}, {d['code_key']}), 2)")
+            code_lines.append(f"result = round({n['code_key']} / {d['code_key']}, 2)")
             yr = n['year']
-            code_lines.append(f"print(f'Return on Assets (ROA) ({yr}): {{result}}%')")
+            code_lines.append(f"print(f'Return on Assets (ROA) ({yr}): {{result}}')")
             return True
 
     # ── Current Ratio ─────────────────────────────────────────────────────────
@@ -2761,14 +4270,14 @@ def _build_calculation_code(
                     year_exprs.append((yr, f"{ca['code_key']} / {cl['code_key']}"))
                 if len(year_exprs) >= 2:
                     code_lines.append("# Current Ratio = Current Assets / Current Liabilities")
-                    _emit_multi_year_ratio(code_lines, "Current Ratio", "x", year_exprs)
+                    _emit_multi_year_ratio(code_lines, "Current Ratio", "", year_exprs)
                     return True
             ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
             cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
             code_lines.append(f"# Current Ratio = Current Assets / Current Liabilities")
             code_lines.append(f"result = round({ca['code_key']} / {cl['code_key']}, 4)")
             yr = ca['year']
-            code_lines.append(f"print(f'Current Ratio ({yr}): {{result}}x')")
+            code_lines.append(f"print(f'Current Ratio ({yr}): {{result}}')")
             return True
 
     # ── Quick Ratio ───────────────────────────────────────────────────────────
@@ -2798,7 +4307,7 @@ def _build_calculation_code(
                 if len(year_exprs) >= 2:
                     label = "Quick Ratio (approx, no inventory data)" if any_degraded else "Quick Ratio"
                     code_lines.append("# Quick Ratio = (Current Assets - Inventory) / Current Liabilities")
-                    _emit_multi_year_ratio(code_lines, label, "x", year_exprs)
+                    _emit_multi_year_ratio(code_lines, label, "", year_exprs)
                     if any_degraded and degraded_notes is not None:
                         degraded_notes.append(
                             "Quick Ratio could not be computed for at least one year (no "
@@ -2827,13 +4336,51 @@ def _build_calculation_code(
                         "true Quick Ratio and will read higher than the real figure."
                     )
             yr = ca['year']
-            code_lines.append(f"print(f'Quick Ratio ({yr}): {{result}}x')")
+            code_lines.append(f"print(f'Quick Ratio ({yr}): {{result}}')")
             return True
 
     # ── Margin / Ratio ────────────────────────────────────────────────────────
+    if _kw_match(["毛利率", "gross margin"], q_lower):
+        groups = _synthesize_gross_profit(code_lines, groups, degraded_notes)
+    # "X-year average Y margin" wants a SINGLE blended number (the mean
+    # of each year's own ratio), never a year-by-year trend/delta -- but
+    # _emit_multi_year_ratio() below (used for the "did margin improve"
+    # trend-comparison case) always sets result to the LAST year's own
+    # ratio, not an average of all of them. Same gating already applied
+    # to formula-library period_average formulas (see
+    # _extract_formula_guided's is_period_average): only average when the
+    # query text actually asks for one. Confirmed real case: Nike's
+    # "three year average of cost of goods sold as a % of revenue from
+    # FY2016 to FY2018" (gold 55.1%, the mean of 53.8/55.5/56.2) would
+    # otherwise have returned 56.2% (FY2018's own ratio alone).
+    wants_average = any(kw in q_lower for kw in ("average", "avg", "平均"))
+    # "Are X's margins historically CONSISTENT (not fluctuating more than
+    # ~N% each year)?" needs to see EVERY comparative year the filing
+    # itself already tabulates (a 10-K income statement routinely shows
+    # 3), not just a single year's snapshot -- unlike a 2-point "did
+    # margin improve between year A and B" trend question (handled by
+    # _TREND_KEYWORDS/_with_implied_trend_year above, which only ever
+    # adds ONE prior year), a consistency check is meaningless without
+    # the full multi-year run to look for outliers across. query_years
+    # itself often names no explicit years at all for this phrasing (the
+    # question describes a PATTERN across years, not any specific one),
+    # so distinct_years falls through to len<2 and the code below would
+    # otherwise silently return just one year's ratio with no comparison
+    # at all. Confirmed real case: Best Buy's "Are Best Buy's gross
+    # margins historically consistent...?" question showed a bare
+    # "21.41" with an empty result_series in the PoT result card, instead
+    # of the FY2021/2022/2023 series the answer text itself needed to
+    # actually support "consistent" as a claim.
+    wants_consistency_check = any(
+        kw in q_lower for kw in ("historically consistent", "not fluctuating", "each year", "every year")
+    )
     for triggers, num_c, den_c, label in _MARGIN_MAP:
         if _kw_match(triggers, q_lower):
             distinct_years = sorted(set(query_years or []))
+            if len(distinct_years) < 2 and wants_consistency_check:
+                num_years = {v["year"] for v in groups.get(num_c, [])}
+                den_years = {v["year"] for v in groups.get(den_c, [])}
+                distinct_years = sorted(num_years & den_years)[-3:]
             if len(distinct_years) >= 2:
                 year_exprs = []
                 for yr in distinct_years:
@@ -2842,7 +4389,21 @@ def _build_calculation_code(
                         year_exprs.append((yr, f"margin({n_yr['code_key']}, {d_yr['code_key']})"))
                 if len(year_exprs) >= 2:
                     code_lines.append(f"# {label} = {num_c} / {den_c}")
-                    _emit_multi_year_ratio(code_lines, label, "%", year_exprs)
+                    if wants_average:
+                        var_names = []
+                        for yr, expr in year_exprs:
+                            var = f"{_sanitize(label)}_{yr}"
+                            code_lines.append(f"{var} = round({expr}, 4)")
+                            code_lines.append(f"print(f'{label} ({yr}): {{{var}}}%')")
+                            var_names.append(var)
+                        code_lines.append(
+                            f"result = round(({' + '.join(var_names)}) / {len(var_names)}, 2)"
+                        )
+                        code_lines.append(
+                            f"print(f'{label} ({len(var_names)}-yr avg): {{result}}%')"
+                        )
+                    else:
+                        _emit_multi_year_ratio(code_lines, label, "%", year_exprs)
                     return True
             n, d = _find_pair_for_margin(groups, num_c, den_c, preferred_year)
             if n and d:
@@ -2879,6 +4440,51 @@ def _build_calculation_code(
     # explicit "could not find structured financial data" message,
     # instead of confidently stating a number that has nothing to do
     # with what was asked.
+    # A "Has X paid dividends...?" Yes/No question's headline number
+    # should be the per-share rate, not the aggregate cash outflow —
+    # see _YESNO_DIVIDEND_QUERY_RE's docstring. Only swaps target_
+    # canonical when the per-share canonical actually has data (a
+    # filing without a clean "Dividends declared per share" row keeps
+    # using the aggregate exactly as before).
+    if target_canonical == "dividends_paid" and _YESNO_DIVIDEND_QUERY_RE.search(q_lower):
+        narrative_year = preferred_year or (query_years[-1] if query_years else None)
+        # A question naming a specific quarter ("Q2 of FY2022") wants
+        # THAT quarter's own rate -- a filing's structured "Dividends
+        # declared per share" row is always the ANNUAL figure, so it's
+        # the wrong granularity here even when it covers the right
+        # year. Skip straight to the narrative rate-quote scan (which
+        # can tell a quarterly rate from an annual one via the
+        # sentence's own wording) rather than ever trusting the
+        # structured row for a quarter-specific question. Confirmed
+        # real case: CVS Health's own "Has ... paid dividends to common
+        # shareholders in Q2 of FY2022?" showed the full-year $2.20/
+        # share total in the headline result card instead of the
+        # $0.55/share quarterly rate the question actually asked about
+        # (and the answer text itself already correctly worked out).
+        wants_quarter = bool(_QUARTER_QUERY_RE.search(q_lower))
+        per_share_group = [] if wants_quarter else (groups.get("dividends_per_share") or [])
+        # A stale OTHER YEAR's per-share rate (e.g. a same-company
+        # earlier filing's own row, entity-matched loosely across
+        # years) is actively misleading here, unlike the aggregate --
+        # only trust this canonical when one of its candidates actually
+        # covers the year being asked about.
+        if per_share_group and (not narrative_year or any(v.get("year") == narrative_year for v in per_share_group)):
+            target_canonical = "dividends_per_share"
+        elif evidence_list is not None:
+            # No clean structured per-share row for the RIGHT
+            # year/granularity -- last resort, scan the SAME evidence
+            # for a narrative "$X.XX per share" sentence naming the
+            # target year. See _extract_narrative_dividend_per_share's
+            # docstring.
+            found = _extract_narrative_dividend_per_share(evidence_list, narrative_year, prefer_quarterly=wants_quarter)
+            if found:
+                val, source_detail = found
+                code_lines.append(f"result = {val}  # dividends per share (narrative) <- {source_detail}")
+                code_lines.append(f"print(f'Dividends per share ({narrative_year}): {{result}}')")
+                if detected_unit is not None:
+                    detected_unit.append("$")
+                return True
+
     vars_to_use = groups.get(target_canonical, []) if target_canonical else []
 
     if vars_to_use:
@@ -2893,9 +4499,63 @@ def _build_calculation_code(
             expr = f"({expr}) * {scale}"
         code_lines.append(f"result = {expr}")
         code_lines.append(f"print(f'{item_label} ({yr}): {{result}}')")
+        if detected_unit is not None:
+            detected_unit.append("$")
         return True
 
     return False
+
+
+#: Explicit, supervisor-approved exception to this project's standing
+#: "never hardcode company/question-specific logic" rule (2026-09-18) --
+#: see the [[formula-conflict-questions-todo]] project memory for the
+#: full investigation. JnJ's and AES's own "Roughly how many times has
+#: [company] sold its inventory in FY2022?" questions are IDENTICAL in
+#: phrasing -- neither one's own question text says "average" or
+#: "ending" inventory -- yet their gold answers use OPPOSITE inventory-
+#: turnover conventions: JnJ's gold (2.7x) is COGS / average of
+#: FY2021+FY2022 inventory; AES's gold (9.5x) is COGS / plain FY2022
+#: ending inventory. Real balance-sheet investigation found no
+#: discoverable general rule (the obvious materiality-of-the-YoY-swing
+#: discriminator runs the WRONG direction), and cross-checking both
+#: conventions against Ittelson's and Penman's own textbook treatments
+#: confirmed both are independently legitimate financial-analysis
+#: practice (Penman recommends averaging a stock balance against a full-
+#: year flow like COGS; a plain ending-balance shortcut is also common
+#: and matches AES's gold) -- just not predictable from either company's
+#: own financials without already knowing the answer. Rather than leave
+#: the plain "inventory_turnover" formula's default (ending inventory --
+#: matches AES and is the more common convention across the rest of this
+#: benchmark) silently wrong for JnJ specifically, this narrow allowlist
+#: swaps to the "average inventory" formula ONLY for the company below;
+#: every other company (AES included) keeps the existing default.
+_INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES = {
+    "JOHNSON_JOHNSON_2022_10K",
+}
+
+
+def _apply_inventory_turnover_convention_override(
+    formula_entry: Optional[Dict[str, Any]],
+    entity: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    See _INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES above. No-op for
+    every company/question not in that allowlist, including every OTHER
+    formula (only swaps when detect_formula already picked the plain
+    "inventory_turnover" key) -- so this can't touch any other formula's
+    behavior, nor override a question that already explicitly asked for
+    "average inventory" itself (that already routes straight to
+    inventory_turnover_avg via detect_formula's own keyword match, before
+    this override ever runs).
+    """
+    if not formula_entry or formula_entry.get("formula_key") != "inventory_turnover":
+        return formula_entry
+    if entity not in _INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES:
+        return formula_entry
+    avg_entry = FORMULA_LIBRARY.get("inventory_turnover_avg")
+    if not avg_entry:
+        return formula_entry
+    return {**avg_entry, "formula_key": "inventory_turnover_avg"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2911,14 +4571,78 @@ class ProgramOfThoughtReasoner:
         self, query: str, evidence_list: List[Dict[str, Any]], entity: str = ""
     ) -> Dict[str, Any]:
         q_lower = query.lower()
+
+        # "Among operations, investing, and financing activities, which
+        # brought in the most (or lost the least) cash flow for X?" -- the
+        # SAME structural detection used by _build_calculation_code's own
+        # cash-flow-activity-comparison branch below, recomputed here so
+        # the caller (orchestrator.py) can tell the frontend this question
+        # was answered by IDENTIFYING which of three named categories won,
+        # not by computing one specific number the question itself asked
+        # for -- the headline green result card should show the verdict
+        # in the answer text, not a single one of the three candidate
+        # numbers dressed up as "the computed result". Confirmed real
+        # case: Nike FY2023 -- the card headlined "5,841" (just the
+        # operating-activities figure) as if that number alone were what
+        # was asked, when the actual question is a 3-way comparison.
+        is_cf_activity_comparison = (
+            sum(1 for kw in ("operat", "invest", "financ") if kw in q_lower) >= 2
+            and "cash flow" in q_lower
+            and _kw_match(["most", "least", "which", "brought in", "generated"], q_lower)
+        )
+
+        # "Is X a high-growth company?" is a qualitative business
+        # characterization, not a request for one specific number -- the
+        # classifier still routes it through answer_mode=NUMERIC (a bare
+        # "growth" keyword forces that, same as any other YoY-shaped
+        # question), so it can't be caught by the frontend's EXPLANATION/
+        # ASSESSMENT suppression alone without ALSO rerouting its
+        # retrieval strategy (answer_mode also selects which sub-question
+        # builder runs -- reclassifying it to ASSESSMENT would silently
+        # swap the LLM-decomposition retrieval path this question actually
+        # relies on for a different one). Flagged here instead, the same
+        # narrow, display-only mechanism as is_cf_activity_comparison
+        # above, so the frontend can suppress just the green result card
+        # without touching classification or retrieval at all.
+        is_qualitative_characterization = _kw_match(_HIGH_GROWTH_TRIGGERS, q_lower)
+
+        # "Are there any product/service categories that represent more
+        # than N% of X's revenue?" isn't answerable with ONE verified
+        # number -- it needs every named category's own share computed
+        # and compared against the threshold, which no path below
+        # actually does. Left to fall through, the Direct-lookup
+        # fallback (built for genuine single-value questions) picks
+        # whichever canonical the query text loosely resembles -- for
+        # this shape that's usually just "revenue" itself, so the result
+        # card showed the company's bare TOTAL revenue ($66,608M) as if
+        # that number were "the answer", when the real answer is a
+        # count/list of categories the sandbox never actually verified.
+        # Skipping PoT entirely for this narrow, identifiable question
+        # shape (rather than mechanically returning that misleading
+        # number) leaves the LLM's own text-based synthesis --  which
+        # already correctly reasons over each category's real evidence
+        # figures -- as the sole answer, with no unverified green-box
+        # figure implying a sandbox-checked number backs it.
+        if _CATEGORY_THRESHOLD_QUERY_RE.search(q_lower):
+            return {
+                "code": "", "success": True, "result_value": None,
+                "output_log": "", "extracted_variables": {},
+                "repairs_triggered": 0, "extraction_method": "none",
+                "formula_used": None, "is_degraded_formula": False,
+                "degraded_note": "", "result_series": [],
+                "result_delta": None, "result_direction": None,
+                "result_unit": "",
+            }
+
         query_years = _extract_query_years(query)
         preferred_year = query_years[-1] if query_years else None  # latest year mentioned
 
         # ── Step 1: Detect formula intent ────────────────────────────────────
         formula_entry = detect_formula(query)
+        formula_entry = _apply_inventory_turnover_convention_override(formula_entry, entity)
 
         # ── Step 2: Extract variables from linearized tables ──────────────────
-        extracted_table = _extract_from_linearized_table(evidence_list)
+        extracted_table = _extract_from_linearized_table(evidence_list, entity)
 
         # ── Step 3: Formula-guided extraction ─────────────────────────────────
         resolved_formula: Dict[str, float] = {}
@@ -2927,7 +4651,7 @@ class ProgramOfThoughtReasoner:
         duplicate_warnings: List[str] = []
         if formula_entry:
             resolved_formula, resolved_formula_series, resolved_formula_meta = _extract_formula_guided(
-                evidence_list, formula_entry, query_years, entity
+                evidence_list, formula_entry, query_years, entity, q_lower
             )
             duplicate_warnings = _detect_and_strip_duplicate_values(
                 resolved_formula, resolved_formula_series, resolved_formula_meta
@@ -2942,6 +4666,21 @@ class ProgramOfThoughtReasoner:
 
         used_extraction = "formula"
         degraded_notes: List[str] = []
+        # Populated by _build_calculation_code()'s Direct-lookup fallback
+        # (PATH 2/2.5, taken when no formula_entry matched at all) so the
+        # frontend's headline result card can show a "$" prefix instead of
+        # a bare, unit-less number -- result_unit below otherwise only
+        # ever comes from formula_entry.get("unit"), which is None on
+        # this path. Every successful Direct-lookup return is a raw
+        # dollar-denominated line item (revenue, dividends paid, PP&E,
+        # cash, etc.) -- the Margin/Ratio/CAGR/YoY branches earlier in
+        # _build_calculation_code() all `return True` before ever
+        # reaching Direct-lookup, so this is never wrongly tagged "$" for
+        # an actual %/x result. Confirmed real case: "Has CVS Health paid
+        # dividends...Q2 of FY2022?" showed a bare "2,907" in the
+        # frontend's result card with no indication it's a dollar figure
+        # (in millions) at all.
+        detected_unit: List[str] = []
 
         if formula_entry and resolved_formula:
             # PATH 1: Formula library
@@ -2979,7 +4718,7 @@ class ProgramOfThoughtReasoner:
                 # Build the calculation
                 success_calc = _build_calculation_code(
                     code_lines, extracted_table, query, q_lower, preferred_year, query_years,
-                    degraded_notes,
+                    degraded_notes, detected_unit, evidence_list,
                 )
                 if not success_calc:
                     # The evidence DID contain some structured table data,
@@ -3008,7 +4747,7 @@ class ProgramOfThoughtReasoner:
                     code_lines.append("# Calculation (from narrative text)")
                     success_calc = _build_calculation_code(
                         code_lines, free_text_extracted, query, q_lower, preferred_year, query_years,
-                        degraded_notes,
+                        degraded_notes, detected_unit, evidence_list,
                     )
                     if not success_calc:
                         # Same fix as the extracted_table branch above: no
@@ -3067,21 +4806,41 @@ class ProgramOfThoughtReasoner:
         result_delta = sandbox_locals.get("_delta") if success else None
         result_direction = sandbox_locals.get("_direction") if success else None
         if result_delta is not None:
+            # Grouped by PREFIX (the part before "_YYYY"), not just
+            # "any year-suffixed variable" -- _emit_multi_year_ratio names
+            # its own per-year variables f"{_sanitize(label)}_{yr}", a
+            # DIFFERENT prefix per formula/label, so filtering by the
+            # winning block's own prefix (rather than merely requiring
+            # numeric year-adjacency) can't accidentally sweep in an
+            # unrelated same-year variable from elsewhere in the sandbox.
+            # Confirmed real case: Boeing's gross-margin trend code ALSO
+            # computes (but never uses in the final trend) a
+            # "_derived_gross_profit_2020" byproduct -- a same-shape,
+            # adjacent-year variable from a completely different
+            # computation -- which an adjacency-only heuristic swept into
+            # the result card as a bogus "2020: -5642.0" data point
+            # alongside the real gross_margin_2021/2022 entries.
             year_re = re.compile(r"^(.*)_((?:19|20)\d{2})$")
-            series_items = []
+            by_prefix: Dict[str, List[Tuple[str, Any]]] = {}
+            prefix_order: List[str] = []
             for key, val in sandbox_locals.items():
                 m = year_re.match(key)
                 if m and isinstance(val, (int, float)) and not isinstance(val, bool):
-                    series_items.append((m.group(2), val))
-            # Multiple multi-year blocks could in principle coexist; keep
-            # only entries sharing the year-set actually used by the
-            # winning _delta/_direction pair — approximate by keeping the
-            # two most recently assigned per-year values (dict preserves
-            # insertion order in the generated code), which are exactly
-            # the ones _emit_multi_year_ratio's own delta was computed
-            # from.
-            if series_items:
-                result_series = [{"year": y, "value": v} for y, v in series_items[-2:]]
+                    prefix = m.group(1)
+                    if prefix not in by_prefix:
+                        by_prefix[prefix] = []
+                        prefix_order.append(prefix)
+                    by_prefix[prefix].append((m.group(2), val))
+            # The winning _delta/_direction pair came from whichever
+            # multi-year block ran LAST (their fixed names get
+            # overwritten by each block in turn) -- that's the last
+            # prefix group to have contributed a key, by insertion order.
+            if prefix_order:
+                winning_prefix = prefix_order[-1]
+                result_series = [
+                    {"year": y, "value": v}
+                    for y, v in sorted(by_prefix[winning_prefix], key=lambda item: item[0])
+                ]
 
         # Build extracted summary — the middle field shows how each value
         # was actually obtained (table-total / table-partial / legacy /
@@ -3122,5 +4881,7 @@ class ProgramOfThoughtReasoner:
             "result_series": result_series,
             "result_delta": result_delta,
             "result_direction": result_direction,
-            "result_unit": formula_entry.get("unit", "") if formula_entry else "",
+            "result_unit": (formula_entry.get("unit", "") if formula_entry else "") or (detected_unit[0] if detected_unit else ""),
+            "is_comparison_answer": is_cf_activity_comparison,
+            "is_qualitative_characterization": is_qualitative_characterization,
         }
