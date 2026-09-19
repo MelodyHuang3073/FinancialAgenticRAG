@@ -3,350 +3,350 @@
     "doc_name": "3M_2022_10K",
     "question": "Is 3M a capital-intensive business based on FY2022 data?",
     "gold": "No, the company is managing its CAPEX and Fixed Assets pretty efficiently, which is evident from below key metrics:\nCAPEX/Revenue Ratio: 5.1%\nFixed assets/Total Assets: 20%\nReturn on Assets= 12.4%",
-    "model_answer": "No — 3M does not appear capital‑intensive in FY2022: its ROA was **12.47%**, the assets-to-revenue ratio was **1.3572**, and net PP&E was **19.76%** of total assets. The double‑digit ROA indicates efficient use of its asset base, so despite a sizable asset stock, 3M generated healthy returns and therefore does not meet typical capital‑intensive criteria.",
+    "model_answer": "No — based on FY2022 metrics 3M does not appear capital‑intensive: assets-to-revenue ratio **1.3572**, ROA **12.47%**, fixed‑assets as a share of assets **19.76%**. These figures show that, although total assets exceed annual sales, 3M generated a double‑digit ROA (above the ~10% efficiency threshold) and only about one‑fifth of its assets are physical PP&E, indicating efficient use of its asset base rather than the low-return, heavy‑capex profile typical of capital‑intensive businesses.",
     "pass": true
   },
   {
     "doc_name": "3M_2022_10K",
     "question": "What drove operating margin change as of FY2022 for 3M? If operating margin is not a useful metric for a company like this, then please state that and explain why.",
     "gold": "Operating Margin for 3M in FY2022 has decreased by 1.7% primarily due to: \n-Decrease in gross Margin\n-mostly one-off charges including Combat Arms Earplugs litigation, impairment related to exiting PFAS manufacturing, costs related to exiting Russia and divestiture-related restructuring\ncharges",
-    "model_answer": "3M’s operating margin fell to **19.1037%** in FY2022 (from **20.8429%** in FY2021), a decline of **1.7392 percentage points**. \n\nExplanation — what drove the change:\n- One‑off / special items (primary): large net litigation costs (~**$2.3B** pre‑tax in 2022), the **$0.8B** pre‑tax impairment/charges tied to the PFAS exit, Russia‑exit/disposal charges, and divestiture-related lost income/stranded costs (Food Safety split‑off, Aearo deconsolidation).  \n- Recurring operational headwinds: raw‑material and logistics inflation (about **-2.4 percentage points** impact to margin), weaker demand for disposable respirators (**-0.3 pp**), and foreign‑exchange translation (≈**$271M** operating‑income drag).  \n- Offsets: pricing, spending discipline, restructuring and productivity actions (net benefit roughly **+1.0–1.3 pp**).",
+    "model_answer": "Operating margin fell to **19.1037%** in FY2022 (from **20.8429%** in FY2021), a decline of **1.7392 percentage points**. \n\nPrimary drivers (year‑over‑year): one‑off/special items — material litigation and legal costs (Combat Arms/Aearo and PFAS matters), the December 2022 impairment/charge tied to exiting PFAS manufacturing (~$0.8B pre‑tax) and costs to exit/exit‑related charges in Russia and Aearo deconsolidation; divestiture impacts (Food Safety split‑off lost income and stranded costs). Secondary drivers: significant raw‑material and logistics inflation (sizable negative operating‑margin impact), declines in disposable respirator demand, adverse foreign‑exchange translation, and manufacturing/supply‑chain headwinds. Offsetting positives included pricing, productivity, spending discipline and prior restructuring actions.",
     "pass": false
   },
   {
     "doc_name": "3M_2023Q2_10Q",
     "question": "Does 3M have a reasonably healthy liquidity profile based on its quick ratio for Q2 of FY2023? If the quick ratio is not relevant to measure liquidity, please state that and explain why.",
     "gold": "No. The quick ratio for 3M was 0.96 by Jun'23 close, which needs a bit of an improvement to touch the 1x mark",
-    "model_answer": "No — 3M’s quick ratio for Q2 FY2023 is **0.9578**, meaning liquid assets cover **95.78%** of current liabilities, which is below the 1.0 threshold and indicates slightly weak short-term liquidity. \n\nThe quick ratio is a relevant standard measure of near‑term liquidity, but it must be read in context (close to 1.0 here). To fully judge liquidity you’d also need the company’s short‑term debt maturities, available committed credit lines and recent operating cash flows, which are not provided in the excerpts.",
+    "model_answer": "No — 3M’s quick ratio for Q2 FY2023 is **0.9578**, slightly below 1.0, indicating its most liquid assets are marginally insufficient to cover current liabilities. \n\nThis is a borderline liquidity signal (not clearly healthy); to judge practical risk you should also review near‑term debt maturities, operating cash flow, and committed credit facilities, which are not shown here.",
     "pass": true
   },
   {
     "doc_name": "3M_2023Q2_10Q",
     "question": "Which debt securities are registered to trade on a national securities exchange under 3M's name as of Q2 of 2023?",
     "gold": "Following debt securities registered under 3M's name are listed to trade on the New York Stock Exchange:\n-1.500% Notes due 2026 (Trading Symbol: MMM26)\n-1.750% Notes due 2030 (Trading Symbol: MMM30)\n-1.500% Notes due 2031 (Trading Symbol: MMM31)",
-    "model_answer": "As of Q2 2023, 3M had three debt securities registered to trade on a national securities exchange: **1.500% Notes due 2026 (ticker MMM26)**, **1.750% Notes due 2030 (ticker MMM30)**, and **1.500% Notes due 2031 (ticker MMM31)**.  \n\nThis is per the Form 10‑Q cover page \"Securities registered pursuant to Section 12(b)...\" disclosure, which lists those notes as traded on the New York Stock Exchange.",
+    "model_answer": "As of Q2 2023, 3M had three debt securities registered to trade on a national exchange: **1.500% Notes due 2026 (MMM26)**, **1.750% Notes due 2030 (MMM30)**, and **1.500% Notes due 2031 (MMM31)** — all listed on the New York Stock Exchange. \n\nExplanation: This listing appears on 3M’s Form 10‑Q cover page under “Securities registered pursuant to Section 12(b) of the Act,” which names those specific note issues (in addition to common stock).",
     "pass": true
   },
   {
     "doc_name": "ADOBE_2022_10K",
     "question": "Does Adobe have an improving operating margin profile as of FY2022? If operating margin is not a useful metric for a company like this, then state that and explain why.",
     "gold": "No the operating margins of Adobe have recently declined from 36.8% in FY 2021 to 34.6% in FY2022. A drop by 2.2% in a year.",
-    "model_answer": "No — Adobe’s operating margin fell to **34.6359%** in FY2022 from **36.7564%** in FY2021, a decline of **2.1205 percentage points**.  \nRevenue grew from **$15,785 million** to **$17,606 million**, so margin compression occurred despite top-line growth. Operating margin is a useful profitability measure for Adobe, though subscription SaaS metrics (ARR, retention, subscription gross margin) are also important complements.",
+    "model_answer": "No — Adobe's operating margin declined to **34.6359%** in FY2022 from **36.7564%** in FY2021, a decrease of **2.1205 percentage points**, so its operating-margin profile was not improving in FY2022. \n\nOperating margin is a useful high-level profitability metric for Adobe, but analysts also rely on subscription gross margins and non‑GAAP adjusted operating margins (e.g., excluding stock‑based comp and amortization) for a clearer view of recurring SaaS performance; the provided excerpts do not disclose the specific drivers of the change.",
     "pass": true
   },
   {
     "doc_name": "AES_2022_10K",
     "question": "What is the quantity of restructuring costs directly outlined in AES Corporation's income statements for FY2022? If restructuring costs are not explicitly outlined then state 0.",
     "gold": "0",
-    "model_answer": "**0.0** — No restructuring costs are explicitly outlined in AES Corporation's FY2022 income statements within the provided excerpts.",
+    "model_answer": "AES’s FY2022 income statements do not explicitly show a restructuring-cost line item; the amount is **0**.  \nThe provided financial statement excerpts contain no explicit “restructuring” charge in the Consolidated Statements of Operations or related notes.",
     "pass": true
   },
   {
     "doc_name": "AES_2022_10K",
     "question": "Roughly how many times has AES Corporation sold its inventory in FY2022? Calculate inventory turnover ratio for the FY2022; if conventional inventory management is not meaningful for the company then state that and explain why.",
     "gold": "AES has converted inventory 9.5 times in FY 2022.",
-    "model_answer": "AES’s inventory turnover for FY2022 was **9.5441**, meaning it turned its inventory roughly **9.5441** times during the year. \n\nConventional inventory management metrics are only partly meaningful for AES because inventory mainly comprises fuel and operational spare parts used in power generation; the turnover ratio is useful to monitor fuel consumption and parts usage but is not directly comparable to turnover benchmarks for retailers or manufacturers.",
+    "model_answer": "AES's FY2022 inventory turnover was **9.5441**; the company turned its inventory roughly **9.5441** times in FY2022. \n\nConventional inventory management is meaningful here because AES's inventory is primarily fuel and spare parts consumed in power generation, so the turnover ratio is a relevant measure of how frequently those operational inventories are used.",
     "pass": true
   },
   {
     "doc_name": "AMCOR_2023_10K",
     "question": "Has AMCOR's quick ratio improved or declined between FY2023 and FY2022? If the quick ratio is not something that a financial analyst would ask about a company like this, then state that and explain why.",
     "gold": "The quick ratio has slightly improved from 0.67 times to 0.69 times between FY 2023 and FY 2022.(3.4% jump)",
-    "model_answer": "AMCOR's quick ratio improved from **0.669** in FY2022 to **0.6915** in FY2023, an increase of **0.0225** (about **3.36%**).  \n\nThis is a small but positive change, so the quick ratio — a standard short-term liquidity metric excluding inventories — is appropriate and shows a slight strengthening in AMCOR's near-term liquidity.",
+    "model_answer": "AMCOR's quick ratio improved between FY2022 and FY2023, rising from **0.669** in FY2022 to **0.6915** in FY2023 — an increase of **0.0225**.  \nThis is a slight improvement based on the provided consolidated balance sheet figures.",
     "pass": true
   },
   {
     "doc_name": "AMCOR_2023_10K",
     "question": "What are major acquisitions that AMCOR has done in FY2023, FY2022 and FY2021?",
     "gold": "Amcor completed these acquisitions during FY2023:\n-100% equity interest of a flexibles manufacturing company in the Czech Republic\n- 100% equity interest in a medical device packaging manufacturing site in\nShanghai, China.\n-acquisition of a New Zealand-based leading manufacturer of state-of-the-art, automated protein\npackaging machines.",
-    "model_answer": "FY2023: Amcor completed three Flexibles-related deals — a Czech flexible‑packaging plant for **$59 million (100% equity)**, a Shanghai medical‑device packaging site for **$60 million (100% equity, including $20m contingent)**, and a New Zealand automated protein‑packaging machine manufacturer for **$45 million (including $13m contingent)**.  \n\nThe provided excerpts do not list any material acquisitions for FY2022 or FY2021; instead they disclose disposals (notably the sale of the Russian business in Dec‑2022 with **$365m** cash proceeds and a **$215m** pre‑tax gain, and the FY2021 sale of AMVIG). If you want, I can search the full 10‑K for any smaller FY2022/FY2021 acquisitions not included in the excerpts.",
+    "model_answer": "Amcor’s filings show three disclosed FY2023 acquisitions totaling about **$164 million**: (1) **100% equity** purchase of a Czech flexible‑packaging plant for **$59m**; (2) **100% equity** purchase of a Shanghai medical‑device packaging site for **$60m** (includes up to **$20m** contingent); and (3) acquisition of a New Zealand automated protein‑packaging machine maker for **$45m** (includes up to **$13m** contingent). The provided excerpts do not disclose any major acquisitions for FY2022 or FY2021.",
     "pass": true
   },
   {
     "doc_name": "AMCOR_2023_10K",
     "question": "What industry does AMCOR primarily operate in?",
     "gold": "Amcor is a global leader in packaging production for various use cases.",
-    "model_answer": "Amcor primarily operates in the packaging industry, developing and manufacturing flexible and rigid packaging products — **76%** of its net sales come from Flexibles and **24%** from Rigid Packaging. \n\nExplanation: Amcor is a global packaging company supplying flexible films, rigid containers, specialty cartons and closures to food, beverage, pharmaceutical, medical, and home & personal-care markets, with a strong focus on responsible/sustainable packaging.",
+    "model_answer": "Amcor primarily operates in the packaging industry, manufacturing flexible and rigid packaging—**76%** of consolidated net sales come from Flexibles and **24%** from Rigid Packaging. \n\nExplanation: Amcor is a global packaging manufacturer that develops and produces responsible packaging solutions (flexible films, rigid containers, specialty cartons, closures) for food, beverage, pharmaceutical, medical device, home & personal-care and other consumer-goods markets across Europe, the Americas, Africa and Asia Pacific.",
     "pass": null
   },
   {
     "doc_name": "AMCOR_2023_10K",
     "question": "Does AMCOR have an improving gross margin profile as of FY2023? If gross margin is not a useful metric for a company like this, then state that and explain why.",
     "gold": "No. For AMCOR there has been a slight decline in gross margins by 0.8%.",
-    "model_answer": "No — AMCOR’s gross margin fell to **18.545%** in FY2023 from **19.3894%** in FY2022 (a decline of **0.8444 percentage points**). \n\nGross margin can be a limited gauge here: management disclosed significant raw‑material pass‑throughs (≈$260m) and currency effects, while operating margin actually improved (from **8.5%** to **10.3%**), indicating pricing, mix and cost recovery occurred below the gross‑profit line and making gross margin less indicative of underlying operational performance.",
+    "model_answer": "No — Amcor’s consolidated gross margin fell from **19.3894%** (FY2022) to **18.545%** (FY2023), a decrease of **0.8444%**, so its gross margin profile is not improving.  \n\nGross margin is also a limited metric here because Amcor passes through raw‑material cost inflation and faces mix/FX effects, so operating/adjusted segment margins (which management shows improving) are a better gauge of underlying performance.",
     "pass": false
   },
   {
     "doc_name": "AMD_2022_10K",
     "question": "Does AMD have a reasonably healthy liquidity profile based on its quick ratio for FY22? If the quick ratio is not relevant to measure liquidity, please state that and explain why.",
     "gold": "Yes. The quick ratio is 1.57, calculated as (cash and cash equivalents+Short term investments+Accounts receivable, net+receivables from related parties)/ (current liabilities).",
-    "model_answer": "Yes — AMD's FY22 quick ratio is **1.5674**, indicating a reasonably healthy liquidity position (it exceeds the 1.0 benchmark).  \n\nThe quick ratio is an appropriate liquidity measure here because it excludes inventory and focuses on cash/near-cash and receivables; AMD’s cash, short-term investments and receivables provide a comfortable buffer to meet current liabilities without relying on inventory sales.",
+    "model_answer": "Yes — AMD's FY22 quick ratio is **1.5674**, indicating a reasonably healthy liquidity profile (above the **1.0** benchmark).  \nThe quick ratio is a relevant short-term liquidity measure because it excludes inventory and focuses on immediately liquid assets; AMD’s result (>1) implies it has sufficient liquid resources to cover current liabilities, though analysts should also review cash-flow timing and debt maturities for a fuller view.",
     "pass": true
   },
   {
     "doc_name": "AMD_2022_10K",
     "question": "What are the major products and services that AMD sells as of FY22?",
     "gold": "AMD sells server microprocessors (CPUs) and graphics processing units (GPUs), data processing units (DPUs), Field Programmable Gate Arrays (FPGAs), and Adaptive System-on-Chip (SoC) products for data centers; CPUs, accelerated processing units (APUs) that integrate CPUs and GPUs, and chipsets for desktop and notebook personal computers; discrete GPUs, and semi-custom SoC products and development services; and embedded CPUs, GPUs, APUs, FPGAs, and Adaptive SoC products.",
-    "model_answer": "AMD’s major products and services in FY22 were high‑performance and adaptive semiconductor and software solutions; the company reported **$23.6 billion** in net revenue for FY22, a **44%** increase versus 2021. \n\nSpecifically, AMD sells: x86 server and client CPUs (EPYC and Ryzen families), GPUs (data‑center accelerators like Instinct, discrete gaming GPUs, Radeon/Pro visual GPUs), APUs (CPU+GPU), chipsets, semi‑custom SoCs, embedded processors, FPGAs and Adaptive SoCs/ACAP (from Xilinx), DPUs and data‑center software stacks (from Pensando), accelerator cards (e.g., Alveo), microprocessor/SoC development services and NRE engineering, software platforms/drivers/compilers, IP licensing and custom silicon design services.",
+    "model_answer": "AMD’s major FY22 products and services were high‑performance and adaptive compute hardware plus related software and design services — total net revenue was **$23.6B** and custom/development services represented about **24%** of revenue. \n\nMajor items sold (by category): server and client CPUs (EPYC server processors; x86 CPUs, APUs and chipsets for PCs), GPUs and accelerators (AMD Instinct MI200 series, discrete GPUs, Radeon PRO V visual‑cloud GPUs, Alveo accelerator cards), DPUs (Pensando P4 DPUs and software stack), FPGAs/Adaptive SoCs/ACAP (Virtex, Kintex, Zynq, Zynq MPSoC, Versal), semi‑custom SoCs, microprocessor/SoC development services and IP licensing, and software platforms/tools (ROCm, compilers, drivers).",
     "pass": null
   },
   {
     "doc_name": "AMD_2022_10K",
     "question": "What drove revenue change as of the FY22 for AMD?",
     "gold": "In 2022, AMD reported Higher sales of their EPYC server processors, higher semi-custom product sales, and the inclusion of Xilinx embedded product sales",
-    "model_answer": "AMD’s FY22 net revenue rose to **$23.6 billion** (up **44%**), driven mainly by a **64%** increase in Data Center revenue from higher EPYC server processor sales, a **21%** rise in Gaming revenue from stronger semi‑custom/console SoC sales, and a large Embedded revenue increase following the **Xilinx** acquisition; these gains were partially offset by a **10%** decline in Client revenue due to weak PC demand and inventory corrections despite a **19%** increase in average selling price.  \nThe company’s 2022 acquisitions (Xilinx closed Feb 2022; Pensando in May 2022) materially contributed to Embedded and Data Center growth.",
+    "model_answer": "AMD’s FY22 net revenue rose to **$23.6 billion** (up **44%** YoY), driven mainly by a **64%** increase in Data Center revenue from higher EPYC server processor sales, a **21%** rise in Gaming revenue from stronger semi‑custom console SoC sales, and a large Embedded revenue increase from the **Xilinx** acquisition; these gains were partially offset by a **10%** decline in Client revenue due to a **24%** drop in unit shipments (partially offset by a **19%** ASP increase) amid weak PC demand and inventory correction.  \nAcquisitions (Xilinx, and capability expansion with Pensando) materially expanded product mix and end‑markets, fueling the revenue growth.",
     "pass": true
   },
   {
     "doc_name": "AMD_2022_10K",
     "question": "What drove operating margin change as of the FY22 for AMD? If operating margin is not a useful metric for a company like this, then please state that and explain why.",
     "gold": "The decrease in AMD's operating income was primarily driven by amortization of intangible assets associated with the Xilinx acquisition",
-    "model_answer": "AMD’s FY22 GAAP operating margin was **5.36%** (Operating income **$1,264 million** on revenue **$23,601 million**). This decline was driven primarily by one‑time/transaction items from the Xilinx acquisition — notably large **amortization of acquisition‑related intangibles** (recorded in “All Other”), **acquisition‑related costs**, and higher **stock‑based compensation** — plus higher recurring operating expenses (R&D and MG&A) and weaker Client revenue in H2. \n\nBecause a large portion of the GAAP operating‑loss comes from acquisition amortization and transaction charges that management excludes when assessing segments, GAAP operating margin is of limited use to understand AMD’s underlying operating performance; segment operating income or adjusted (non‑GAAP) operating margin give a clearer picture.",
+    "model_answer": "AMD’s FY22 operating margin was **5.36%** (operating income **1,264.0**, revenue **23,601.0**). This decline versus prior year was driven chiefly by one‑time and acquisition-related items: large amortization of Xilinx‑related intangible assets, acquisition‑related costs, and elevated stock‑based compensation; these sit alongside higher R&D and MG&A spending and some inventory/pricing reserves and weaker Client demand that pressured margins. \n\nBecause FY22 operating margin is materially distorted by non‑cash/amortization and transaction charges, it is a less useful measure of underlying operating performance for AMD in 2022 — prefer adjusted (non‑GAAP) operating margin or segment operating income excluding acquisition amortization, acquisition costs and stock‑based compensation to assess core profitability.",
     "pass": null
   },
   {
     "doc_name": "AMD_2022_10K",
     "question": "Among operations, investing, and financing activities, which brought in the most (or lost the least) cash flow for AMD in FY22?",
     "gold": "In 2022, AMD brought in the most cashflow from Operations",
-    "model_answer": "Operating activities brought in the most cash: **$3,565 million**, representing **64.1%** of AMD’s positive cash inflows from operating and investing activities in FY2022.  \nInvesting provided **$1,999 million**, while financing was a net use of **$(3,264) million**.",
+    "model_answer": "Operating activities brought in the most cash in FY22: **$3,565.0 million**, compared with **$1,999.0 million** from investing and **-$3,264.0 million** from financing (operating = **64.1%** of total cash inflows and ≈**155%** of the $2,300.0 million net increase in cash).  \n\nConclusion: operating activities were the largest net source of cash.",
     "pass": true
   },
   {
     "doc_name": "AMERICANEXPRESS_2022_10K",
     "question": "Which debt securities are registered to trade on a national securities exchange under American Express' name as of 2022?",
     "gold": "There are none",
-    "model_answer": "No debt securities were registered to trade on a national securities exchange under American Express's name as of 2022 — **0 debt securities**; the only Section 12(b)–registered security was **Common Shares (AXP)** on the **New York Stock Exchange**. \n\nExplanation: The Form 10‑K’s cover‑page \"Securities registered pursuant to Section 12(b)\" lists only common stock; while the filing discloses long‑term debt outstanding elsewhere, those notes are not shown as exchange‑registered securities.",
+    "model_answer": "No debt securities of American Express were registered to trade on a national securities exchange as of 2022 — **0** debt securities; only **Common Shares (AXP)** were registered on the **New York Stock Exchange**. \n\nExplanation: The company’s Form 10‑K “Securities registered pursuant to Section 12(b)” disclosure lists only common stock (AXP) on the NYSE and does not show any debt securities registered for exchange trading.",
     "pass": null
   },
   {
     "doc_name": "AMERICANEXPRESS_2022_10K",
     "question": "What are the geographies that American Express primarily operates in as of 2022?",
     "gold": "United States, EMEA, APAC, and LACC",
-    "model_answer": "American Express primarily operates in the United States and internationally across EMEA, APAC and LACC — in 2022 **~78.4%** of revenues were from the **United States**, **~9.2%** from **EMEA**, **~7.3%** from **APAC**, and **~5.5%** from **LACC**. \n\nGeographies reported: United States; EMEA (Europe, the Middle East and Africa — e.g., UK, EU); APAC (Asia Pacific — including Japan, Australia and New Zealand); and LACC (Latin America, Canada and the Caribbean — including Canada and Mexico).",
+    "model_answer": "American Express primarily operates in the **United States** and internationally across **EMEA**, **APAC** and **LACC** — in 2022 the U.S. generated **$41.4B (≈78.4%)** of revenues, **EMEA $4.9B (≈9.2%)**, **APAC $3.8B (≈7.3%)**, and **LACC $2.9B (≈5.5%)**. \n\nEMEA = Europe, the Middle East and Africa; APAC = Asia Pacific, Australia and New Zealand; LACC = Latin America, Canada and the Caribbean.",
     "pass": null
   },
   {
     "doc_name": "AMERICANEXPRESS_2022_10K",
     "question": "Does AMEX have an improving operating margin profile as of 2022? If operating margin is not a useful metric for a company like this, then state that and explain why.",
     "gold": "Performance is not measured through operating margin",
-    "model_answer": "No — operating-margin analysis is not useful for American Express; PoT result: **0.0**.  \n\nOperating margin is a poor primary metric for AMEX because profitability is driven by **net interest income**, **provisions for credit losses**, and card-network/discount revenues rather than pure operating profit mechanics — interest and credit provisioning distort an \"operating\" line. The provided excerpts do not give a clean consolidated operating‑income / total‑revenue series to compute a trend, so an operating‑margin trend cannot be reliably calculated from the evidence. Use bank-style metrics instead (net interest margin, provision trends, efficiency ratio, ROA) to assess whether profitability is improving.",
+    "model_answer": "No — AMEX’s consolidated operating margin (pretax income ÷ revenues after provisions) fell from **30.0%** in 2021 to **23.6%** in 2022 (2020: **22.6%**).  \n\nReconciliation: revenues after provisions rose ~**15%** (19,841 → **22,893**), but total expenses rose ~**26%** (13,883 → **17,493**), producing pretax income decline ~**9%** (5,958 → **5,400**), which compressed margin.  \n\nNote: operating margin can be misleading for a card issuer because credit provisions and net interest dynamics drive profitability; analysts often prefer the efficiency ratio, net interest margin and provisions and pretax/ROE measures to assess franchise economics.",
     "pass": null
   },
   {
     "doc_name": "AMERICANEXPRESS_2022_10K",
     "question": "What drove gross margin change as of the FY2022 for American Express? If gross margin is not a useful metric for a company like this, then please state that and explain why.",
     "gold": "Performance is not measured through gross margin",
-    "model_answer": "**0.0 — Gross margin is not a useful metric for American Express; FY2022 performance was driven by higher discount revenue (billed business up ~**24–25%**), higher net interest income (U.S. Consumer net interest income up **~26%**), materially larger provisions for credit losses (U.S. Consumer provision = **$1,021 million**) and higher operating expenses (salaries, business development and marketing).**\n\nWhy not use gross margin: AmEx is a financial-services/network/issuer company, not a product manufacturer — “cost of goods sold” and gross-profit concepts don’t map well. The 10‑K focuses on discount revenue, net interest income, provisions for credit losses and expense/efficiency ratios as the appropriate drivers of profitability. The filing does not report a company-level FY2022 gross margin percentage, so use those alternative metrics instead.",
+    "model_answer": "Gross margin is not a useful metric for American Express and the FY2022 10‑K does not report a \"gross margin\" figure; instead AMEX reports revenue net of interest and segment profitability — consolidated revenues net of interest expense rose to **$52.9 billion** (≈**53%** YoY). \n\nExplanation: the 2022 improvement was driven by higher fee/discount revenue (discount revenue/billed business growth of about **24–25%**), materially higher net interest income (e.g., U.S. Consumer net interest income **$7.47B**, up **26%**) and stronger processed/merchant revenues, partially offset by much larger provisions for credit losses (e.g., U.S. Consumer provisions **$1.021B** vs a release prior year) and higher operating expenses (salaries, business development, marketing). Because AmEx is a financial-services issuer/acquirer (no COGS line), change in profitability is best explained by these items (revenue mix, interest income, credit provisions and expense) rather than a traditional gross margin.",
     "pass": null
   },
   {
     "doc_name": "AMERICANEXPRESS_2022_10K",
     "question": "How much has the effective tax rate of American Express changed between FY2021 and FY2022?",
     "gold": "The effective tax rate for American Express has changed/dropped from 24.6% in FY 2021 to 21.6% in FY 2022.",
-    "model_answer": "The effective tax rate decreased from **24.5954%** in FY2021 to **21.6067%** in FY2022 — a decline of **2.9887 percentage points**.",
+    "model_answer": "The effective tax rate decreased by **2.9887 percentage points**, from **24.5954%** in FY2021 to **21.6067%** in FY2022.",
     "pass": true
   },
   {
     "doc_name": "AMERICANWATERWORKS_2022_10K",
     "question": "Does American Water Works have positive working capital based on FY2022 data? If working capital is not a useful or relevant metric for this company, then please state that and explain why.",
     "gold": "No, American Water Works had negative working capital of -$1561M in FY 2022.",
-    "model_answer": "No — American Water Works had negative working capital of **-$1,561.0 million** as of FY2022. \n\nWorking capital is of limited usefulness for this rate‑regulated utility: the negative balance reflects the industry norm of funding long‑lived utility plant with short‑term commercial paper/revolving credit and the effects of regulatory assets/liabilities, so liquidity is better judged by available credit facilities and operating cash flow rather than the simple current‑assets minus current‑liabilities metric.",
+    "model_answer": "No — American Water Works had negative working capital of **-1561.0** (in $ millions) at FY2022, so it did not have positive working capital. \n\nExplanation: For a regulated water utility, a negative working capital balance is common and not necessarily a sign of distress. Short-term borrowings, commercial paper and scheduled debt maturities, regulatory assets/liabilities, and the timing of customer billing make the simple current-assets minus current-liabilities metric less informative. Liquidity for this business is better assessed by operating cash flow, available credit facilities and commercial paper capacity, and debt-maturity profile rather than by working capital alone.",
     "pass": true
   },
   {
     "doc_name": "BESTBUY_2023_10K",
     "question": "Are Best Buy's gross margins historically consistent (not fluctuating more than roughly 2% each year)? If gross margins are not a relevant metric for a company like this, then please state that and explain why.",
     "gold": "Yes, the margins have been consistent, there has been a minor decline of 1.1% in gross margins between FY2022 and FY2023.",
-    "model_answer": "Yes — Best Buy’s consolidated gross margin was **21.4091%** in FY2023 and moved from **22.371%** (FY2021) to **22.488%** (FY2022) to **21.4091%** (FY2023), so year-to-year swings were under roughly **1.1 percentage points**, well within a 2% band. \n\nSupporting: the evidence shows a modest decline in 2023 driven by lower product and services margins, increased promotions and higher supply-chain costs, but gross margin itself remained historically consistent.",
+    "model_answer": "Yes — Best Buy’s consolidated gross margins were **22.371% (2021)**, **22.488% (2022)** and **21.4091% (2023)**; year‑to‑year swings were about **+0.12** and **−1.08** percentage points, well within the ~2% threshold. \n\nGross margin is a relevant metric for Best Buy (a retail merchandiser) because it reflects product pricing, cost of goods sold and mix; the provided three-year series shows historically consistent margins.",
     "pass": true
   },
   {
     "doc_name": "BESTBUY_2023_10K",
     "question": "What are major acquisitions that Best Buy has done in FY2023, FY2022 and FY2021?",
     "gold": "Best Buy closed two acquisitions, both these companies were already partially owned by Best Buy, but Best Buy acquired all outstanding shares of these two companies during FY 2022: (1) Current Health Ltd and (2) Two Peaks, LLC d/b/a Yardbird Furniture",
-    "model_answer": "Best Buy's material deal activity in the provided filings occurred in FY2022: **Current Health Ltd. (100% acquired for $389 million)** and **Two Peaks, LLC d/b/a Yardbird Furniture (100% acquired for $79 million)**; the excerpts contain **no disclosed acquisitions for FY2023 or FY2021**. \n\nExplanation: Current Health bolsters Best Buy Health/virtual-care capabilities; Yardbird expanded outdoor-living assortment. Both were full-share purchases accounted for as business combinations and were described as not material to results in the filing.",
+    "model_answer": "Best Buy’s disclosed material acquisitions in the provided filings occurred in FY2022: **Current Health Ltd. — acquired (all outstanding shares) for $389 million (goodwill $351M)** and **Two Peaks, LLC d/b/a Yardbird — acquired (all outstanding shares) for $79 million (goodwill $47M)**; the excerpts show **no acquisitions** disclosed for FY2023 or FY2021. \n\nExplanation: Both deals closed in early November 2021 (Current Health on Nov 2; Yardbird on Nov 4), were accounted for as business combinations, and were included in the Domestic/Best Buy Health reporting units. The filing notes both were immaterial to consolidated results. If you need other FY acquisitions, I don’t see any in the supplied excerpts.",
     "pass": true
   },
   {
     "doc_name": "BESTBUY_2023_10K",
     "question": "Among operations, investing, and financing activities, which brought in the most (or lost the least) cash flow for Best Buy in FY2023?",
     "gold": "Best Buy generated the most cash flow from operating activities in FY 2023 ($1.8 bn)",
-    "model_answer": "Operating activities brought in the most cash in FY2023: **$1,824.0 million (≈39.7% of the combined cash-movement magnitude)**, while investing used **$(962.0) million** and financing used **$(1,806.0) million**.",
+    "model_answer": "Operating activities brought in the most cash in FY2023: **$1,824.0 million**, versus investing **($962.0 million)** and financing **($1,806.0 million)** — operating represented **~39.7%** of the total cash-flow activity magnitude. \n\nConclusion: Best Buy’s operating activities were the largest source of cash in FY2023.",
     "pass": false
   },
   {
     "doc_name": "BOEING_2022_10K",
     "question": "Are there any product categories / service categories that represent more than 20% of Boeing's revenue for FY2022?",
     "gold": "Yes. Boeing has product and service categories that represent more than 20% of Boeing's revenue for FY2022. These categories are Commercial Airplanes which comprises 39% of total revenue, Defence which comprises 35% of total revenue and Services which comprises 26% of total revenue.",
-    "model_answer": "Yes — three categories exceed 20% of FY2022 revenue: Commercial Airplanes **$25,867M (38.8%)**, Defense, Space & Security **$23,162M (34.8%)**, and Global Services **$17,611M (26.4%)**.",
+    "model_answer": "Yes — **3 categories** exceed 20% of Boeing’s FY2022 revenue: **Commercial Airplanes — 38.8%**, **Defense, Space & Security — 34.8%**, and **Global Services — 26.4%** (percentages of total FY2022 consolidated revenue).",
     "pass": true
   },
   {
     "doc_name": "BOEING_2022_10K",
     "question": "Has Boeing reported any materially important ongoing legal battles from FY2022?",
     "gold": "Yes. Multiple lawsuits have been filed against Boeing resulting from a 2018 Lion Air crash and a 2019 Ethiopian Airlines crash.",
-    "model_answer": "Yes. Boeing disclosed **two** materially important ongoing litigations arising from fatal aircraft accidents (Lion Air Flight 610 on Oct 29, 2018 and Ethiopian Airlines Flight 302 on Mar 10, 2019) and noted broader U.S. government inquiries that could have significant consequences. \n\n- The accident-related matters are lawsuits and claims connected to those two fatal crashes.  \n- Separately, Boeing is subject to U.S. government investigations that the company states could lead to civil, criminal or administrative actions, including **fines, penalties, restitution, forfeitures** and potential **suspension or debarment**.",
+    "model_answer": "Yes — Boeing’s FY2022 10‑K discloses **two** materially important, ongoing crash‑related litigations (the Oct 29, 2018 Lion Air Flight 610 and Mar 10, 2019 Ethiopian Airlines Flight 302 accidents) and continuing **U.S. government inquiries** that could lead to fines, penalties or debarment.\n\nExplanation: the filing (Note 21 and risk disclosures) identifies (1) product‑liability litigation tied to the two fatal 737 MAX crashes alleging design/manufacturing failures; (2) government investigations that could produce civil, criminal or administrative actions (fines/treble damages/restitution, suspension/debarment or loss of export privileges); and (3) routine legal matters (contracts, employment, environmental remediation) disclosed as ongoing contingencies.",
     "pass": true
   },
   {
     "doc_name": "BOEING_2022_10K",
     "question": "Does Boeing have an improving gross margin profile as of FY2022? If gross margin is not a useful metric for a company like this, then state that and explain why.",
     "gold": "Yes. Boeing has an improving gross margin profile as of FY2022. Gross profit improved from $3,017 million in FY2021 to $3,502 million in FY2022. Gross margin % improved from 4.8% in FY2021 to 5.3% in FY2022.",
-    "model_answer": "Yes — Boeing’s consolidated gross margin rose from **4.8952% (2021)** to **5.2997% (2022)**, an increase of **0.4045 percentage points**. \n\nNote: that gross margin was computed here as total revenues minus cost of products and services (so it’s a derived figure, not a separately reported line). Gross margin is of limited usefulness for Boeing because program accounting and long‑term fixed‑price contracts (with catch‑up adjustments, reach‑forward losses and heavy estimation uncertainty on programs like the 787/777X) can materially and irregularly swing reported margins, so segment- and program-level analysis (and cash/contract metrics) is generally more informative.",
+    "model_answer": "Yes — Boeing’s consolidated gross margin improved to **5.2997%** in FY2022 from **4.8952%** in FY2021, an increase of **0.4045 percentage points**. \n\nCaveat: gross profit was not reported as a standalone line in the filing; the percentage above was derived from total revenues less cost of products and services and therefore may not match any single company-reported “gross profit” line. \n\nIs gross margin useful here? Only partially. The metric moved slightly higher, but Boeing’s results are heavily affected by program accounting, long‑term/fixed‑price contracts, catch‑up adjustments and program‑specific reach‑forward losses (small percentage changes can equal ≈$300M pre‑tax). Analysts should rely more on program- and segment-level margins and disclosed program adjustments to assess underlying profitability.",
     "pass": true
   },
   {
     "doc_name": "BOEING_2022_10K",
     "question": "Who are the primary customers of Boeing as of FY2022?",
     "gold": "Boeing's primary customers as of FY2022 are a limited number of commercial airlines and the US government. The US government accounted for 40% of Boeing's total revenues in FY2022.",
-    "model_answer": "Boeing’s primary customers in FY2022 were commercial airlines worldwide and government customers (the U.S. government and foreign militaries); the U.S. government (including foreign military sales) accounted for **40%** of consolidated revenues and non‑U.S. customers about **41%**. \n\nExplanation: Commercial Airplanes (BCA) sells principally to the commercial airline industry; Defense, Space & Security (BDS) primarily to the U.S. government and other governments; Global Services (BGS) serves both commercial and government customers with parts, maintenance and support; Boeing Capital provides financing mainly to airlines/lessors.",
+    "model_answer": "Boeing’s primary customers in FY2022 were commercial airlines worldwide and government customers (notably the U.S. government and other national governments); **U.S. government-related revenues were 40%** of consolidated revenues and **non‑U.S. customers accounted for ~41%** of revenue. \n\nExplanation: Commercial Airplanes (BCA) sells principally to the commercial airline industry; Defense, Space & Security (BDS) mainly serves the U.S. government and foreign military sales; and Global Services (BGS) provides parts, maintenance and services to both commercial airlines and government customers.",
     "pass": true
   },
   {
     "doc_name": "CORNING_2022_10K",
     "question": "How much has the effective tax rate of Corning changed between FY2021 and FY2022?",
     "gold": "The effective tax rate of Corning has changed from 20% in FY2021 to 23% in FY 2022.",
-    "model_answer": "The effective tax rate increased from **20.2%** in FY2021 to **22.9%** in FY2022 — an increase of **2.7 percentage points**.",
+    "model_answer": "The effective tax rate increased by **2.7 percentage points**, from **20.2%** in FY2021 to **22.9%** in FY2022.  \nNumeric change: **+2.7 percentage points**.",
     "pass": true
   },
   {
     "doc_name": "CORNING_2022_10K",
     "question": "Does Corning have positive working capital based on FY2022 data? If working capital is not a useful or relevant metric for this company, then please state that and explain why.",
     "gold": "Yes. Corning had a positive working capital amount of $831 million by FY 2022 close. This answer considers only operating current assets and current liabilities that were clearly shown in the balance sheet.",
-    "model_answer": "Yes — Corning had positive working capital in FY2022 of **$2,278.0 million** (current assets exceeded current liabilities by that amount). \n\nThis is a meaningful short-term liquidity signal for Corning (a manufacturing company with inventory and receivables); working capital is a useful metric here because it shows the company’s ability to meet near-term obligations and fund operations.",
+    "model_answer": "Yes — Corning had positive working capital of **$2,278.0 million** for FY2022.  \n\nThat means its current assets exceeded current liabilities by that amount, so working capital is a useful, positive liquidity signal for Corning; however, analysts should also review cash flow, debt maturities and significant current obligations (e.g., inventory composition or repurchase-related liabilities) for a fuller liquidity assessment.",
     "pass": false
   },
   {
     "doc_name": "CVSHEALTH_2022_10K",
     "question": "Is CVS Health a capital-intensive business based on FY2022 data?",
     "gold": "Yes, CVS Health requires an extensive asset base to operate, which is evident from its ROA of only 1.82% in 2022 and 3.39% in 2021, though it should be noted that a significant portion of this asset base is goodwill, and CVS's fixed assets/total assets ratio is on the lower side of 5.6%.",
-    "model_answer": "Yes — CVS Health is capital-intensive in FY2022: capital intensity ratio **0.7079**, ROA **1.82%**, and fixed assets are **5.64%** of total assets. \n\nReason: the company earns a low return on a large asset base (ROA 1.82%), which is the primary signal of capital intensity; although physical PP&E is a small share of assets (5.64%), the substantial total asset base relative to revenue (0.7079) means significant capital is tied up (likely in goodwill/intangibles from prior acquisitions), supporting a \"capital‑intensive\" assessment.",
+    "model_answer": "Yes — CVS Health is capital‑intensive in FY2022: capital‑intensity ratio **0.7079**, ROA **1.82%**, and fixed assets were **5.64%** of total assets.  \n\nThe decisive signal is the low ROA (1.82%), which indicates the company ties up a large asset base relative to the returns it generates; even though physical PP&E is a small share of assets, the sizable overall asset base (including intangibles/goodwill) makes the business capital‑intensive.",
     "pass": true
   },
   {
     "doc_name": "CVSHEALTH_2022_10K",
     "question": "Has CVS Health reported any materially important ongoing legal battles from 2022, 2021 and 2020?",
     "gold": "Yes, CVS Health has been involved in multiple ongoing legal battles. Some notable legal dispute areas for CVS are: (1) usual and customary pricing litigation: where it's claimed that CVSâs retail pharmacies overcharged for prescription drugs; (2) PBM litigation and investigations: where it's claimed that that rebate agreements between the drug manufacturers and PBMs caused inflated prices for certain drug products; and (3) controlled substances litigation: legal matters around opioids for which CVS has agreed to pay up to $4.3 billion to claimants in remediation and $625 million to attorneys and fees",
-    "model_answer": "Yes. CVS disclosed materially important litigation in these years — most notably opioid-related charges and settlement exposure: the company recognized approximately **$5.8 billion** of opioid-related charges in 2022 and agreed in principle to a government/tribal settlement with maximum remediation of about **$4.3 billion** plus **$625 million** in fees (the charges were roughly **75%** of 2022 GAAP operating income). \n\nKey categories (one line each):\n- Controlled Substances (opioids): MDL and state suits, DOJ subpoenas/CIDs, recorded large 2022 charges and reached broad settlement agreements; an Ohio jury’s **$651M** judgment is on appeal.  \n- PBM/drug-pricing and U&C pricing: multiple state AG suits and putative class actions alleging improper rebates/pricing.  \n- Prescription-processing/qui tam: false‑claims allegations (Omnicare/cycle‑fill).  \n- Medicare/Medicaid risk‑adjustment CIDs and related investigations.  \n- Stockholder/ERISA suits tied to LTC disclosures and Aetna 401(k) actions (pleadings/appeals ongoing).",
+    "model_answer": "Yes — CVS disclosed materially important litigation, led in 2022 by opioid matters where it recorded pre‑tax charges of **$5.2 billion** (plus **$99 million**) and agreed in principle to settlements with potential payments of about **$4.3 billion** plus **$625 million** in fees. \n\nOpioid litigation: alleges pharmacy/PBM role in the opioid epidemic; resulted in large settlements/charges (also a Florida $484M settlement and an Ohio $651M jury judgment under appeal).  \nPBM/drug‑pricing suits: multiple state AGs and class actions allege improper rebate/pricing practices.  \nUsual & customary pricing litigation: alleges pharmacies overcharged by misreporting prices.  \nPrescription‑processing / False Claims qui tam: alleges improper dispensing/claims submissions in certain care settings.  \nGovernment investigations/CIDs: DOJ and SDNY subpoenas/CIDs re controlled substances and Medicare/Part D issues.  \nSecurities/ERISA actions: shareholder securities suits and ERISA class actions tied to LTC and Aetna matters remain pending.",
     "pass": true
   },
   {
     "doc_name": "CVSHEALTH_2022_10K",
     "question": "Has CVS Health paid dividends to common shareholders in Q2 of FY2022?",
     "gold": "Yes, CVS paid a $ 0.55 dividend per share every quarter in FY2022",
-    "model_answer": "Yes — CVS Health paid a quarterly cash dividend of **$0.55 per share** in Q2 FY2022.",
+    "model_answer": "Yes — CVS Health paid a quarterly cash dividend of **$0.55 per share** in 2022 (covering Q2 FY2022). 0.55\n\nNote: the provided excerpts show the per‑share rate but do not report the aggregate cash amount of dividends paid specifically in Q2 2022.",
     "pass": true
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2022_10K",
     "question": "Are JnJ's FY2022 financials that of a high growth company?",
     "gold": "No, JnJ's FY2022 financials are not of a high growth company as sales grew by 1.3% in FY2022.",
-    "model_answer": "No — Johnson & Johnson’s FY2022 results do not reflect a high‑growth company: **Revenue grew 1.3%** in 2022 (filing‑reported), with a **5‑year CAGR of 4.4%** and **10‑year CAGR of 3.5%**, and consolidated earnings before tax of **$21.7B** (≈**22.9%** of sales), consistent with a large, mature slow‑growth company rather than a high‑growth profile.",
+    "model_answer": "No — Johnson & Johnson’s FY2022 results are not those of a high‑growth company: **Revenue growth +1.3% (YoY)**; **5‑year CAGR +4.4%**; **pre‑tax margin 22.9%**. By common “high‑growth” standards (sustained double‑digit top‑line growth), J&J’s single‑digit/low single‑digit revenue expansion and modest multi‑year CAGR indicate mature, slow‑growth performance rather than high growth.",
     "pass": true
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2022_10K",
     "question": "What drove gross margin change as of FY2022 for JnJ? If gross margin is not a useful metric for a company like this, then please state that and explain why.",
     "gold": "For FY22, JnJ had changes in gross margin due to: One-time COVID-19 vaccine manufacturing exit related costs, Currency impacts in the Pharmaceutical segment, Commodity inflation in the MedTech and Consumer Health segments, partially offset by Supply chain benefits in the Consumer Health segment.",
-    "model_answer": "Gross margin decreased to **67.2551%** in FY2022 (from **68.1632%** in FY2021), a decline of **0.9081 percentage points**.  \n\nExplanation — what drove the change:\n- Principal one‑off drag: **$1.5 billion** of COVID‑19 vaccine manufacturing exit costs (Pharmaceuticals) and a **$0.1 billion** COGS charge related to restructuring.  \n- Recurring/operational drags: unfavorable currency translation in Pharmaceuticals and commodity inflation in MedTech and Consumer Health increased cost of products sold.  \n- Partial offsets: supply‑chain benefits in Consumer Health and lower intangible amortization in COGS (**$4.3bn** in 2022 vs **$4.7bn** in 2021) moderated the margin decline.",
+    "model_answer": "Gross margin fell to **67.2551%** in FY2022, a decrease of **0.9081 percentage points** versus FY2021.  \n\nThe decline was driven by a higher cost of products sold as a percent of sales — principally one‑time COVID‑19 vaccine manufacturing exit costs, currency impacts in the Pharmaceutical segment, and commodity inflation in the MedTech and Consumer Health segments. Partially offsetting the drag were Consumer Health supply‑chain benefits and a reduction in intangible‑asset amortization included in COGS (amortization fell to $4.3B from $4.7B). A small portion of restructuring charges (~$0.1B) was also recorded in COGS. Evidence supports all these factors as contributors to the FY2022 gross‑margin change.",
     "pass": true
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2022_10K",
     "question": "Roughly how many times has JnJ sold its inventory in FY2022? Calculate inventory turnover ratio for FY2022; if conventional inventory management is not meaningful for the company then state that and explain why.",
     "gold": "JnJ sold its inventory 2.7 times in FY2022.",
-    "model_answer": "Inventory turnover ratio for FY2022: **2.7188**. \n\nThis is based on cost of products sold of **31,089** and year‑end inventories of **10,387** (2021) and **12,483** (2022). Conventional inventory metrics are meaningful for Johnson & Johnson because its Pharmaceuticals, MedTech and Consumer Health businesses hold and manage physical product inventories across manufacturing and distribution networks.",
+    "model_answer": "Inventory turnover for Johnson & Johnson in FY2022 was **2.7188**. \n\nConventional inventory-turnover metrics are meaningful here but should be interpreted cautiously because J&J’s mix of Pharmaceuticals, MedTech and Consumer businesses have very different inventory dynamics (long production/quality/regulatory lead times and strategic safety stocks), so segment-level comparisons are more informative than the consolidated ratio.",
     "pass": true
   },
   {
     "doc_name": "JPMORGAN_2022_10K",
     "question": "Are JPM's gross margins historically consistent (not fluctuating more than roughly 2% each year)? If gross margins are not a relevant metric for a company like this, then please state that and explain why.",
     "gold": "Since JPM is a financial institution, gross margin is not a relevant metric.",
-    "model_answer": "**0.0** — No. Gross margins are not a meaningful/consistent metric for JPMorgan Chase (banks don’t report a traditional “gross margin” and the provided evidence contains no gross‑margin percentages). \n\nUse bank metrics such as **net interest margin**, **pre‑tax margin**, or the **efficiency ratio** to assess profitability; those are the relevant, multi‑year comparators and are not supplied in the excerpts above.",
+    "model_answer": "No — “gross margin” is not a relevant metric for JPMorgan Chase; the bank reports net yield/NIM instead: **2.00% (2022), 1.64% (2021), 1.98% (2020)**, with year-to-year changes of **+0.36** and **−0.34** percentage points (well under a 2 percentage‑point swing).  \nThe 10‑K does not disclose a traditional gross margin (missing), because banks generate interest and noninterest revenue and are analyzed by net interest margin, net yield and efficiency ratios rather than gross margin.",
     "pass": null
   },
   {
     "doc_name": "MGMRESORTS_2022_10K",
     "question": "Has MGM Resorts paid dividends to common shareholders in FY2022?",
     "gold": "Yes. MGM maintained 0.01$ per share annual dividend through out FY 2022.",
-    "model_answer": "Yes — **$0.01 per share** annual dividend was paid to common shareholders in FY2022.  \nThis comprised quarterly payments of **$0.0025 per share** (four times) and totaled **$4 million** in cash for 2022.",
+    "model_answer": "Yes — MGM Resorts paid dividends in FY2022 of **$0.01 per share**, totaling **$4 million** (four quarterly payments of $0.0025 per share).",
     "pass": true
   },
   {
     "doc_name": "MICROSOFT_2023_10K",
     "question": "Has Microsoft increased its debt on balance sheet between FY2023 and the FY2022 period?",
     "gold": "No. Microsoft decreased its debt by $2.5bn in FY 2023 vs FY 2022.",
-    "model_answer": "No — Microsoft’s total debt **decreased by -2,544.0** (i.e., down **$2,544.0 million**) between FY2022 and FY2023. \n\nNumeric answer: **-2,544.0**.",
+    "model_answer": "No — Microsoft's total debt decreased by **-2,544.0** (million), a **5.11%** decline, from **49,781** to **47,237** (amounts in millions).  \nNumeric answer: **0** (No increase).",
     "pass": false
   },
   {
     "doc_name": "NIKE_2023_10K",
     "question": "Among operations, investing, and financing activities, which brought in the most (or lost the least) cash flow for Nike in FY2023?",
     "gold": "Among the three, cash flow from operations was the highest for Nike in FY2023.",
-    "model_answer": "Operating activities brought in the most cash in FY2023: **$5,841.0 million** (about **91.2%** of cash inflows from operations + investing). Investing provided **$564.0 million**, while financing used **-$7,447.0 million**.",
+    "model_answer": "Operating activities brought in the most cash in FY2023: **$5,841.0 million (≈91.2% of the combined positive cash from operations + investing)**, vs. investing **$564.0 million** and financing **–$7,447.0 million**.",
     "pass": true
   },
   {
     "doc_name": "PAYPAL_2022_10K",
     "question": "Does Paypal have positive working capital based on FY2022 data? If working capital is not a useful or relevant metric for this company, then please state that and explain why.",
     "gold": "Yes. Paypal has a positive working capital of $ 1.6Bn as of FY2022 end.",
-    "model_answer": "Yes — PayPal had positive working capital of **$1,548.0 million** for FY2022 (current assets exceeded current liabilities by that amount).  \n\nHowever, working capital is of limited usefulness for PayPal because its balance sheet is dominated by customer-related balances (e.g., funds receivable and customer accounts) that are effectively pass-through items; these inflate current assets while corresponding customer obligations sit in current liabilities, making simple current-asset minus current-liability figures misleading. More informative liquidity checks are cash and cash equivalents, net cash excluding customer funds, operating cash flow, or regulatory capital metrics.",
+    "model_answer": "Yes — PayPal reported positive working capital of **$1,548.0 million** for FY2022 (current assets exceeded current liabilities by **$1,548.0 million**). \n\nExplanation: that surplus is real, but working capital is a limited liquidity signal for a payments business because large \"funds receivable and customer accounts\" inflate both current assets and the matching customer-related current liabilities. For PayPal, analysts prefer liquidity measures that exclude customer float (e.g., cash & short‑term investments, operating cash flow, or working capital excluding customer balances) to judge operational liquidity and flexibility.",
     "pass": false
   },
   {
     "doc_name": "PEPSICO_2022_10K",
     "question": "What are the geographies that Pepsico primarily operates in as of FY2022?",
     "gold": "As of FY2022, Pepsico primarily operates in the following geographies: North America, Latin America, Europe, Africa, Middle East, South Asia, Asia Pacific, Australia, New Zealand and China.",
-    "model_answer": "PepsiCo primarily operates across **7 reporting geographic divisions**, and in 2022 its consolidated net-revenue mix was **~40% beverages / 60% convenient foods**.  \n\nExplanation: The seven reporting geographies are:  \n- Frito‑Lay North America, Quaker Foods North America and PepsiCo Beverages North America (collectively North America)  \n- Latin America (LatAm)  \n- Europe  \n- Africa, the Middle East and South Asia (AMESA) — i.e., Africa; the Middle East; South Asia  \n- Asia Pacific, Australia and New Zealand and China Region (APAC) — i.e., Asia Pacific; Australia; New Zealand; China\n\nThese are PepsiCo’s primary operating geographies as reported in the FY2022 Form 10‑K.",
+    "model_answer": "PepsiCo primarily operates across **10 geographies** as of FY2022; the provided excerpts do not include a geographic revenue percentage breakdown. \n\nThe geographies (per PepsiCo’s FY2022 reporting-segment definitions) are: \n1. **North America** \n2. **Europe** \n3. **Latin America** \n4. **Africa** \n5. **Middle East** \n6. **South Asia** \n7. **Asia Pacific** \n8. **Australia** \n9. **New Zealand** \n10. **China**\n\nExplanation: these come from PepsiCo’s FY2022 10‑K division definitions (North America segments: FLNA/QFNA/PBNA; LatAm; Europe; AMESA = Africa/Middle East/South Asia; APAC = Asia Pacific/Australia/New Zealand/China).",
     "pass": true
   },
   {
     "doc_name": "PEPSICO_2022_10K",
     "question": "Has Pepsico reported any materially important ongoing legal battles from FY2022 and FY2021?",
     "gold": "No, Pepsico is not involved in material legal battles.",
-    "model_answer": "No — PepsiCo reported **0** materially important ongoing legal battles for FY2022 and FY2021; management concluded pending litigation would not have a material adverse effect on its financial condition, results of operations, or cash flows. \n\nExplanation: Both the FY2022 and FY2021 10‑K filings disclose various ordinary-course lawsuits, claims and investigations, but company management assessed none as material to the business or financial statements.",
+    "model_answer": "No — PepsiCo reported **0** ongoing legal proceedings that management deemed materially important in FY2022 or FY2021; management concluded the disclosed matters are **not expected** to have a material adverse effect on its financial condition, results of operations or cash flows. \n\nExplanation: The 2022 and 2021 10‑K filings acknowledge various routine litigation, claims and investigations (advertising, product, IP, tax, environmental, etc.) but explicitly assess their aggregate outcome as unlikely to be material, so no individual matter was reported as materially important.",
     "pass": null
   },
   {
     "doc_name": "PEPSICO_2022_10K",
     "question": "What is the quantity of restructuring costs directly outlined in Pepsico's income statements for FY2022? If restructuring costs are not explicitly outlined then state 0.",
     "gold": "Pepsico's restructuring costs in FY2022 amounted to $411 million .",
-    "model_answer": "PepsiCo’s FY2022 restructuring costs directly outlined in the financial statements are **411.0** million (USD).",
+    "model_answer": "PepsiCo’s FY2022 income statements report restructuring and impairment charges of **411.0** (millions).  \n411.0",
     "pass": true
   },
   {
     "doc_name": "ULTABEAUTY_2023_10K",
     "question": "Which debt securities are registered to trade on a national securities exchange under Ulta Beauty's name as of FY2023?",
     "gold": "There are none",
-    "model_answer": "None — as of FY2023 Ulta Beauty had **0** debt securities registered to trade on a national securities exchange; **100%** of its exchange‑registered securities were its common stock (ticker ULTA). \n\nExplanation: The Form 10‑K’s \"Securities registered pursuant to Section 12(b)\" disclosure lists only common stock as registered for exchange trading and does not show any bonds, notes, or other debt securities registered under Ulta Beauty’s name.",
+    "model_answer": "No debt securities are registered to trade on a national securities exchange for Ulta Beauty as of FY2023; **0** debt securities and **1** class of equity (common stock, ULTA) are listed. \n\nExplanation: The Form 10‑K’s Section 12(b) disclosure shows only Ulta Beauty’s common stock (trading symbol ULTA on NASDAQ Global Select Market) as registered — it does not list any bonds, notes, or other debt securities as exchange‑registered.",
     "pass": null
   },
   {
     "doc_name": "ULTABEAUTY_2023_10K",
     "question": "What are major acquisitions that Ulta Beauty has done in FY2023 and FY2022?",
     "gold": "Ulta Beauty did not make any acquisitions in FY2023 and FY2022.",
-    "model_answer": "I cannot identify any major acquisitions for Ulta Beauty in FY2023 or FY2022 from the provided excerpts; **0 material acquisitions disclosed in the supplied 10‑K pages**. \n\nExplanation: the excerpts include financial statements, cash flows, risk factors and audit opinions but do not contain a note or section listing acquisitions (names, dates, purchase consideration, or ownership stakes). To answer definitively I need the 10‑K’s “Acquisitions and Divestitures” note (or management discussion of M&A) or press releases/transaction disclosures for FY2023 and FY2022 — please provide those or allow me to retrieve the full Form 10‑K.",
+    "model_answer": "Conclusion: **No major acquisitions are disclosed for FY2023 or FY2022 in the provided excerpts of Ulta Beauty’s FY2023 Form 10‑K.**\n\nExplanation: I reviewed the supplied pages (financials, MD&A, auditor’s report and related tables) and found no acquisition disclosures or a named “Acquisitions and Divestitures” note. Therefore the evidence is insufficient to list any deals. To answer definitively, please provide the full 10‑K acquisition note(s), the company’s press releases for FY2022–FY2023, or the complete “Notes to Consolidated Financial Statements” section.",
     "pass": true
   },
   {
     "doc_name": "VERIZON_2022_10K",
     "question": "Does Verizon have a reasonably healthy liquidity profile based on its quick ratio for FY 2022? If the quick ratio is not relevant to measure liquidity, please state that and explain why.",
     "gold": "No. The quick ratio was approximately 0.54 for Verizon. It indicated that Verizon does not have a healthy liquidity profile.",
-    "model_answer": "No — Verizon’s FY2022 quick ratio is **0.5404**, meaning its quick assets cover only **54%** of current liabilities, which is below the usual ≥1.0 benchmark for a “healthy” quick-ratio liquidity buffer. \n\nThat said, the quick ratio is a limited gauge for a large, capital‑intensive telecom: liquidity is better judged by operating cash flow generation, available/undrawn credit facilities, and the debt‑maturity schedule (none of which are fully shown here). In short, the quick ratio signals a weak short‑term cushion, but a full liquidity assessment requires cash‑flow and financing‑capacity details.",
+    "model_answer": "No — Verizon’s quick ratio for FY2022 is **0.5404**, which is **well below 1.0**, indicating its liquid current assets do not cover current liabilities.  \nThat said, the quick ratio is a useful short-term liquidity signal but should be interpreted with context for a capital‑intensive telecom: Verizon’s substantial operating cash flow and access to capital markets can mitigate a low quick ratio, so assess liquidity also by cash flow from operations and available credit facilities.",
     "pass": true
   },
   {
     "doc_name": "VERIZON_2022_10K",
     "question": "Is Verizon a capital intensive business based on FY 2022 data?",
     "gold": "Yes. Verizon's capital intensity ratio was approximately 2.774729. This means that it took approximately $2.77 of assets to generate $1 of revenue and thus, Verizon can be considered capital intensive.",
-    "model_answer": "Yes — Verizon was capital‑intensive in FY2022: assets/revenue ratio **2.7747**, with a low ROA of **5.73%** and fixed assets equal to **28.3%** of total assets.  \n\nConclusion driven by the low ROA (well under ~10%), which indicates a large asset base relative to earnings and supports the capital‑intensive verdict.",
+    "model_answer": "Yes — Verizon is capital‑intensive for FY2022: capital‑intensity ratio **2.7747**, ROA **5.73%**, and fixed assets were **28.3%** of total assets.  \nA low single‑digit ROA (the primary signal) alongside a large asset base indicates substantial capital tied up in network infrastructure and equipment, supporting the capital‑intensive classification.",
     "pass": true
   },
   {
     "doc_name": "VERIZON_2022_10K",
     "question": "Has Verizon increased its debt on balance sheet between 2022 and the 2021 fiscal period?",
     "gold": "No. Verizon's debt decreased by $229 million.",
-    "model_answer": "No — Verizon's total debt **decreased by -229.0** (a reduction of **$229.0 million**) from fiscal 2021 to 2022. \n\nThis conclusion comes from the reported net change in total borrowings of **-229.0** between the two years.",
-    "pass": true
+    "model_answer": "No — Verizon’s total debt declined; the change was **-229.0**, a **0.15%** decrease between fiscal 2021 and 2022. \n\nThis indicates Verizon did not increase its balance-sheet debt year‑over‑year.",
+    "pass": false
   }
 ]
