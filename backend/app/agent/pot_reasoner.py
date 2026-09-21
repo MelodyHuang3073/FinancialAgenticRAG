@@ -396,6 +396,16 @@ _EXISTENCE_QUERY_RE = re.compile(
 )
 
 
+#: Yes/No direction question about an item expressed as a share of sales
+#: ("Did X's wages expense as a percent of net sales increase or decrease?").
+_RATIO_DIRECTION_QUERY_RE = re.compile(
+    r'^\s*(?:did|does|do|was|were|is|are|has|have)\b[^?]{0,140}'
+    r'\bas\s+a\s+(?:percent(?:age)?|%|share|proportion)\s+of\b[^?]{0,80}'
+    r'\b(?:increase[sd]?|decrease[sd]?|rise[n]?|fall|fell|grow|improve[sd]?|change[sd]?|decline[sd]?)\b',
+    re.IGNORECASE,
+)
+
+
 def _no_calculation_path(q_lower: str) -> bool:
     """True for selection / guidance / group-comparison question shapes."""
     return bool(
@@ -1209,6 +1219,12 @@ _SUPPLEMENTARY_SCHEDULE_MARKERS = (
     # row (2,320) on an exact-label-match tie.
     "previously held equity interest", "previously held equity investment",
     "purchase price allocation", "assets acquired and liabilities assumed",
+    # An equity-method note's summarized balance sheet of the joint ventures
+    # ("Current assets 870.0 / Current liabilities 1,365.6") reuses the same
+    # labels as the filer's own statements. Confirmed real case: General Mills
+    # FY2020 working-capital ratio came out 0.64 (870 / 1,365.6) instead of
+    # 0.68 (5,121.3 / 7,491.5) once that note's date header was labelled.
+    "on a 100 percent basis", "summary combined financial information",
     "recognized amounts of identified assets",
     # ASC 805's required "pro forma" disclosure for a business
     # combination presents a HYPOTHETICAL combined-company figure "as
@@ -3932,7 +3948,7 @@ def _pick_best_in_group(
         return None
     aliases = _CANONICAL_TO_ALIASES.get(canonical, [canonical])
 
-    def sort_key(x: Dict) -> Tuple[int, int, int, int, float]:
+    def sort_key(x: Dict) -> Tuple[int, int, int, int, int, float]:
         score = _score_row_match(x["item"], aliases)
         year_match = 1 if preferred_year and x["year"] == preferred_year else 0
         is_net = 1 if _NET_QUALIFIER_RE.search(x["item"].lower()) else 0
@@ -3953,7 +3969,15 @@ def _pick_best_in_group(
         # tier max() silently fell back to whichever was discovered
         # first -- purely a function of retrieval order, not correctness.
         magnitude = abs(x["val"])
-        return (score, year_match, is_net, -len(x["item"]), magnitude)
+        # a canonical whose primary alias is a "total ..." line (total current
+        # assets, total assets ...) prefers the row carrying that total wording
+        # over a shorter plain sibling: General Mills FY2020's working-capital
+        # ratio took a joint-venture note's "Current assets 870.0 / Current
+        # liabilities 1,365.6" (0.64) instead of the balance sheet's "Total
+        # current assets 5,121.3 / Total current liabilities 7,491.5" (0.68)
+        # because the shorter label won the tie
+        is_total = 1 if aliases and aliases[0].startswith("total") and aliases[0] in x["item"].lower() else 0
+        return (score, year_match, is_total, is_net, -len(x["item"]), magnitude)
 
     return max(items, key=sort_key)
 
@@ -4810,6 +4834,22 @@ class ProgramOfThoughtReasoner:
         # ── Step 1: Detect formula intent ────────────────────────────────────
         formula_entry = detect_formula(query)
         formula_entry = _apply_inventory_turnover_convention_override(formula_entry, entity)
+
+        # "Did X as a percent of sales increase or decrease?" for an item with
+        # no formula: the generic YoY fallback headlined the growth of an
+        # unrelated line (Ulta wages -> net-sales growth 18.2%; JnJ net
+        # earnings % of sales -> 25,430% from a "% to Sales" column read as
+        # 2022). The direction is answered from the evidence text; no card.
+        if formula_entry is None and _RATIO_DIRECTION_QUERY_RE.search(q_lower):
+            return {
+                "code": "", "success": True, "result_value": None,
+                "output_log": "", "extracted_variables": {},
+                "repairs_triggered": 0, "extraction_method": "none",
+                "formula_used": None, "is_degraded_formula": False,
+                "degraded_note": "", "result_series": [],
+                "result_delta": None, "result_direction": None,
+                "result_unit": "",
+            }
 
         # ── Step 2: Extract variables from linearized tables ──────────────────
         extracted_table = _extract_from_linearized_table(evidence_list, entity)

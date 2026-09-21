@@ -528,6 +528,51 @@ def _close_enough(t: float, m: float, decimals: int) -> bool:
     return decimals >= 1 and abs(t - m) <= 0.5 * 10 ** (-decimals) + 1e-9
 
 
+_TERM_STOPWORDS = {
+    "yes", "not", "the", "and", "for", "are", "was", "were", "has", "have", "had", "its", "their",
+    "that", "this", "with", "from", "into", "over", "under", "than", "which", "also", "such",
+    "been", "being", "will", "would", "could", "should", "may", "might", "any", "all", "some",
+    "there", "these", "those", "other", "more", "most", "less", "about", "during", "while",
+    "company", "companies", "year", "years", "fiscal",
+}
+
+
+def _key_terms(gold_answer: str) -> list:
+    """The NAMED things in a short gold answer (lower-cased): capitalised words or
+    acronyms that are not the first word of the sentence, after the leading yes/no
+    ("Yes, the gain on completion of Consumer Healthcare JV Transaction" ->
+    consumer, healthcare, jv, transaction). Descriptive wording is never checked,
+    it is too paraphrase-prone."""
+    text = re.sub(r"^\W*(?:yes|no)\b[\s,.:;-]*", "", gold_answer or "", flags=re.IGNORECASE)
+    words = re.findall(r"[A-Za-z][A-Za-z&'-]*", text)
+    terms = []
+    for k, w in enumerate(words):
+        lw = w.lower()
+        if k == 0 or not w[0].isupper() or lw in _TERM_STOPWORDS:
+            continue
+        lw = re.sub(r"'s$", "", lw)
+        if len(lw) < 2:
+            continue
+        if lw not in terms:
+            terms.append(lw)
+    return terms
+
+
+def _check_key_terms(gold_answer: str, model_answer: str):
+    """True/False for a short (<= 25 words) gold answer that names at least two
+    things, None otherwise: at least 60% of the named terms must appear in the
+    model answer (5-letter prefix match, so 'transactions' matches
+    'transaction')."""
+    if len((gold_answer or "").split()) > 25:
+        return None
+    terms = _key_terms(gold_answer)
+    if len(terms) < 2:
+        return None
+    model = (model_answer or "").lower().replace("’", "'")
+    hits = sum(1 for t in terms if t[:5] in model)
+    return hits >= max(1, int(round(0.6 * len(terms) + 0.49)))
+
+
 def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
     """
     Qualitative gold answers (e.g. 'The consumer segment shrunk by 0.9%
@@ -558,7 +603,10 @@ def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
 
     gold_nums = _numbers_in(gold_answer)
     if not gold_nums:
-        return None  # no numeric ground truth to check — informational only
+        # no numeric ground truth: a SHORT gold that only names things ("Yes, the
+        # gain on completion of Consumer Healthcare JV Transaction") is checked by
+        # its key terms; a long qualitative gold stays informational only
+        return _check_key_terms(gold_answer, model_answer)
     model_nums = _numbers_in(model_answer)
     if not model_nums:
         return False

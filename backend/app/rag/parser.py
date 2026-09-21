@@ -387,6 +387,28 @@ class FinancialFileParser:
         glyph and its digits ("$  1,503" -> "$1,503")."""
         return re.sub(r'^\$\s+', '$', token.strip())
 
+    @staticmethod
+    def _split_text_header(line: str, n_cols: int) -> list:
+        """Column names from a header line made of words only ("By Business Segment
+        Organic sales Acquisitions Divestitures Translation Total sales change",
+        3M p25): each column caption starts with a capital letter; a short row-label
+        caption at the left is dropped. Only when exactly n_cols captions come out."""
+        toks = (line or "").split()
+        if not (3 <= n_cols <= 8) or len(toks) < n_cols or len(toks) > 24 or re.search(r"[0-9$%]", line or ""):
+            return []
+        caps = [i for i, t in enumerate(toks) if t[:1].isupper()]
+        for k in range(len(caps)):
+            starts = caps[k:]
+            if len(starts) != n_cols or starts[0] > 5:
+                continue
+            names = [
+                " ".join(toks[starts[j]: starts[j + 1] if j + 1 < n_cols else len(toks)])
+                for j in range(n_cols)
+            ]
+            if all(len(nm.split()) <= 4 for nm in names):
+                return names
+        return []
+
     def _layout_text_to_markdown_and_prose(self, layout_text: str) -> Tuple[List[str], str]:
         """
         Fallback table reconstruction for pages where find_tables() (ruled
@@ -411,8 +433,14 @@ class FinancialFileParser:
         # above the block, used instead of scanning the whole page (which
         # can be dominated by blank vertical padding above the table).
         header_candidate = [""]
+        deferred_labels: List[str] = []
+        prev_prose = [""]          # last prose line seen
+        block_text_header = [""]   # the prose line directly above the current block
 
         def _flush():
+            if deferred_labels:
+                prose_lines.extend(deferred_labels)
+                deferred_labels.clear()
             if len(current_rows) >= 3:
                 n_cols = current_n_cols[0]
                 years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
@@ -422,6 +450,8 @@ class FinancialFileParser:
                     _qs = re.findall(r"(?<![A-Za-z0-9])([1-4])Q(\d{2})(?![A-Za-z0-9])", header_candidate[0])
                     if len(_qs) == n_cols:
                         years = [f"{q}Q 20{yy}" for q, yy in _qs]
+                if len(years) < n_cols:
+                    years = self._split_text_header(block_text_header[0], n_cols) or years
                 headers = ["Line Item"] + [
                     years[i] if i < len(years) else f"Col{i + 1}"
                     for i in range(n_cols)
@@ -445,9 +475,25 @@ class FinancialFileParser:
                 # subtotal breathing room) — it must NOT break an
                 # otherwise-contiguous table block into fragments.
                 continue
-            m = self._LAYOUT_ROW_RE.match(stripped)
+            # "(Note 11)" style footnote references would otherwise be read as a
+            # value column ("... charges (Note 11) (769) (817) (813)" = 4 values)
+            _masked = re.sub(r"\((Notes?)\s+(\d+[A-Za-z]?)\)", r"(\1_\2)", stripped)
+            # "1.0 %   — %   (4.2) %" : a percent sign printed as its own token
+            _masked = re.sub(r"([0-9)])\s+%", r"\1%", _masked)
+            _masked = re.sub(r"([—–])\s*%", r"\1", _masked)
+            m = self._LAYOUT_ROW_RE.match(_masked)
             if m:
-                label = m.group("label").strip()
+                label = m.group("label").strip().replace("(Note_", "(Note ").replace("(Notes_", "(Notes ")
+                _vals_probe = self._LAYOUT_VALUE_RE.findall(m.group("values"))
+                _yr_tokens = [v for v in _vals_probe if re.fullmatch(r"(?:19|20)\d{2}", v.strip())]
+                if len(_yr_tokens) >= 2 and all(
+                    re.fullmatch(r"(?:19|20)\d{2}|[0-3]?\d,?", v.strip()) for v in _vals_probe
+                ):
+                    # "Years Ended December 31,   2021  2020  2019" is the column
+                    # header, not a data row of years
+                    _flush()
+                    header_candidate[0] = stripped
+                    continue
                 # findall (not a whitespace split) because a '$' and its
                 # digits can legitimately be separated by the SAME width of
                 # space as separates two different columns — the token
@@ -458,11 +504,31 @@ class FinancialFileParser:
                 ]
                 if current_n_cols[0] is not None and len(values) != current_n_cols[0]:
                     _flush()
+                if deferred_labels:
+                    # sub-headings survive as prose; the table continues past them
+                    prose_lines.extend(deferred_labels)
+                    deferred_labels.clear()
+                if not current_rows:
+                    block_text_header[0] = prev_prose[0]
                 current_rows.append((label, values))
                 current_n_cols[0] = len(values)
             else:
+                # a short label-only sub-heading printed INSIDE a table
+                # ("Operating Income", "Reconciling items:") must not end the
+                # block: the rows above and below it are one table (Verizon p100
+                # segment reconciliation lost its first five rows to prose)
+                if (
+                    current_rows
+                    and len(stripped) <= 60
+                    and not re.search(r"\d", stripped)
+                    and not stripped.endswith(".")
+                    and len(stripped.split()) <= 6
+                ):
+                    deferred_labels.append(stripped)
+                    continue
                 _flush()
                 prose_lines.append(stripped)
+                prev_prose[0] = stripped
                 # Only overwrite the header candidate when the new line
                 # itself looks like a year header, or none has been found
                 # yet — a section subheading with no years (e.g. "Revenue:",
@@ -2641,6 +2707,21 @@ class FinancialFileParser:
                 # pages came out with sentences as column labels)
                 if any(len(c) > 60 or len(c.split()) > 8 for c in cand):
                     continue
+                # ... and it is not a data row of the table above split by
+                # x-position ("Provision for credit losses 761 (1,868) NM",
+                # "Return on equity 24 % 44 % 14 %"): such a line used to override
+                # the real names (JPM p21: three of four stacked segment tables came
+                # out with data rows as group names, labels shifted by one table).
+                # Dates ("June 30, 2022") and bare years are not figures.
+                if any(
+                    sum(
+                        1 for t in c.split()
+                        if re.fullmatch(r"\(?\$?\d[\d,.]*\)?%?", t)
+                        and not re.fullmatch(r"(?:19|20)\d{2},?|\d{1,2},", t)
+                    ) >= 2
+                    for c in cand
+                ):
+                    continue
                 names = cand
                 names_idx = i - back
                 if any(re.search(r"(?:19|20)\d{2}|months", c, re.IGNORECASE) for c in cand):
@@ -2659,6 +2740,22 @@ class FinancialFileParser:
                 nm = re.sub(r"(?i)\b(?:fiscal\s+)?years?\s+ended\b", "FY", nm)
                 return nm.strip()
             names = [_short(nm) for nm in names]
+
+            # a period heading printed alone above the names line ("Three months
+            # ended June 30," / "Six months ended June 30,") tells stacked tables
+            # apart; without it the 3-month and 6-month CCB/CIB/CB tables of JPM
+            # p21 carried identical labels
+            _lead_period = ""
+            for k in range(names_idx, max(-1, names_idx - 3), -1):
+                mp = re.match(
+                    r"(?i)^\s*(three|six|nine|twelve)\s+months?\s+ended\b",
+                    " ".join(w["text"] for w in lines[k]["words"]),
+                )
+                if mp:
+                    _lead_period = self._GROUP_CODE[mp.group(1).lower()]
+                    break
+            if _lead_period and not any(re.search(r"\b\d{1,2}M\b", nm) for nm in names):
+                names = [f"{nm} ({_lead_period})" for nm in names]
 
             def _sub_label(g: int, s: int) -> str:
                 sub_tok = unit[s]
@@ -2764,6 +2861,20 @@ class FinancialFileParser:
             i = max(j, i + 1)
         return tables
 
+    _UNIT_MENTION_RE = re.compile(
+        r"(?i)(?:\$\s*|usd\s*|dollars\s+in\s+|\bin\s+)(millions?|billions?|thousands?)\b"
+    )
+
+    def _page_unit(self, page_text: str) -> str:
+        """The single monetary unit a page states in its captions ("($ million)",
+        "(in millions, except per share)", "(dollars in millions)"), or "" when
+        the page states none or several. Table rows do not carry it, so an answer
+        built from a row alone said "EBITDA 2,018" with the unit unknown (Amcor)."""
+        units = {m.group(1).lower().rstrip("s") for m in self._UNIT_MENTION_RE.finditer(page_text or "")}
+        if len(units) != 1:
+            return ""
+        return "USD " + next(iter(units)) + "s"
+
     def _linearize_markdown_tables(
         self,
         company_name: str,
@@ -2788,6 +2899,8 @@ class FinancialFileParser:
         passages = []
         table_name = f"{filename} (Page {page_num} – Financial Table)"
         parent_id = f"parent_{company_name}_p{page_num}_tbl"
+        unit_note = self._page_unit(page_text)
+        report_label = f"{table_name} [{unit_note}]" if unit_note else table_name
 
         # The section heading/title text immediately BEFORE the first
         # table block (e.g. "Amcor plc and Subsidiaries / Consolidated
@@ -2838,6 +2951,9 @@ class FinancialFileParser:
             headers, data_rows = self._merge_tail_artifact_column(headers, data_rows)
             data_rows = self._drop_garbled_caption_rows(data_rows)
             value_headers = self._refine_value_headers(headers[1:], header_prose)
+            block_headers_raw = [c.strip() for c in block.split("\n")[0].strip().strip("|").split("|")]
+            md_value_headers = list(value_headers)
+            md_header_rows: list = []
 
             for row_no, row in enumerate(data_rows):
                 if not row or not row[0].strip():
@@ -2859,11 +2975,15 @@ class FinancialFileParser:
                                 per = nvals // len(groups)
                                 names = [f"Fiscal {groups[i // per]} {nm}" for i, nm in enumerate(names)]
                             value_headers = names
+                            md_value_headers = list(names)
+                            md_header_rows.append([c.strip() for c in row])
                     continue
                 if self._is_date_header_row(row):
                     # the table's real column header, printed as a row: label
                     # the rows that follow with these dates instead
                     value_headers = [c.strip() for c in row if c and c.strip()]
+                    md_value_headers = list(value_headers)
+                    md_header_rows.append([c.strip() for c in row])
                     continue
                 line_item = row[0].strip()
                 values = row[1:]
@@ -2881,7 +3001,11 @@ class FinancialFileParser:
                 passages.append({
                     "id": f"pdf_tbl_{company_name}_p{page_num}r{row_idx}",
                     "company": company_name,
-                    "table_name": table_name,
+                    # the page's unit rides on the display name only (shown to the
+                    # LLM); inside `content` it changed BM25 length normalisation
+                    # for every unit-annotated row and reshuffled retrieval (Verizon
+                    # debt lost its "Total debt" row from the top 10)
+                    "table_name": report_label,
                     "period": "-".join(value_headers) if value_headers else "N/A",
                     "page_number": page_num,
                     "content": (
@@ -2897,7 +3021,30 @@ class FinancialFileParser:
                     "is_child": True,
                 })
 
+            # The parent markdown (what the Source Evidence panel and the LLM's
+            # parent context show) still carried the generic "2023 | 2022 | Col3 ..."
+            # / "Col1 .. Col5" header, and date/label header lines as data rows,
+            # while only the per-row chunks used the refined labels (JnJ p10
+            # "2022" over the % to Sales column; JPM p3 "Col1..Col5" for 1Q21 ..
+            # 1Q20; Best Buy p8 "2023 | 2023 | 2022"). Rewrite the block's header.
+            if len(md_value_headers) == len(block_headers_raw) - 1 and (
+                md_value_headers != block_headers_raw[1:] or md_header_rows
+            ):
+                blines = block.split("\n")
+                drop = {tuple(r) for r in md_header_rows}
+                kept = blines[:2]
+                for ln in blines[2:]:
+                    cells = tuple(c.strip() for c in ln.strip().strip("|").split("|"))
+                    if cells in drop:
+                        continue
+                    kept.append(ln)
+                kept[0] = "| " + " | ".join([block_headers_raw[0]] + md_value_headers) + " |"
+                parent_content = parent_content.replace(block, "\n".join(kept), 1)
+
             prose_only_text = prose_only_text.replace(block, "", 1)
+
+        for _p in passages:
+            _p["parent_content"] = parent_content
 
         return passages, prose_only_text
 
