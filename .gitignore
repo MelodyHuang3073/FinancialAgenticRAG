@@ -44,3 +44,6 @@ Thumbs.db
 *.log
 backend/uploaded_files/
 .llm_daily_usage.json
+
+.llm_usage/
+.llm_usage_notified_*

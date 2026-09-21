@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-from datetime import date
 from typing import Any, Dict, List, Optional
 
 from app.tools.table_parser import is_markdown_separator_row
@@ -19,20 +18,11 @@ if load_dotenv is not None and os.path.exists(ENV_PATH):
     load_dotenv(ENV_PATH)
 
 
-# ── Daily free-token-quota tracker ──────────────────────────────────────────
-# OpenAI's response body/headers never say "this call was billed against
-# your paid balance instead of the free daily grant" -- there is no direct
-# per-call signal for that (confirmed via OpenAI's own docs/help center: the
-# only usage data a response carries is its OWN token counts, not a running
-# daily total or free/paid split). The account still has funds, so a call
-# past the free daily allowance succeeds exactly like any other call --
-# nothing fails, nothing looks different -- so this has to be tracked
-# locally: sum each call's own `usage.total_tokens` into a small per-day
-# file and flag once the known daily free-tier cap for mini/nano models
-# (10,000,000 tokens/day, confirmed by the user against their own OpenAI
-# account) is crossed. Notifies once per day, not on every call after.
-_USAGE_TRACK_PATH = os.path.join(BASE_DIR, ".llm_daily_usage.json")
-DAILY_FREE_TOKEN_CAP = 10_000_000
+# ── Daily free-token-quota tracking ─────────────────────────────────────────
+# Every model call in the project reports to app/agent/usage_tracker.py (an
+# append-only ledger, safe with parallel shards). This module reports its answer
+# calls as caller="answer"; the decomposer reports as caller="decomposer".
+from app.agent.usage_tracker import record_usage, DAILY_FREE_TOKEN_CAP  # noqa: E402,F401
 
 # How many of the retrieved evidence items (sorted by relevance_score)
 # actually get formatted into the prompt text the LLM sees -- see
@@ -51,44 +41,6 @@ DAILY_FREE_TOKEN_CAP = 10_000_000
 # expected-benefit-payments page (score-rank 14, holds the 2024 figures)
 # were both retrieved but never reached the prompt.
 EVIDENCE_PROMPT_CAP = 16
-
-
-def _record_daily_usage(model: str, total_tokens: int) -> None:
-    if not total_tokens:
-        return
-    today = date.today().isoformat()
-    state = {"date": today, "total_tokens": 0, "notified": False}
-    try:
-        if os.path.exists(_USAGE_TRACK_PATH):
-            with open(_USAGE_TRACK_PATH, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-            if loaded.get("date") == today:
-                state = loaded
-    except Exception:
-        pass  # a corrupt/unreadable tracker file just resets for today
-
-    state["date"] = today
-    state["total_tokens"] = state.get("total_tokens", 0) + total_tokens
-
-    crossed_now = (
-        not state.get("notified")
-        and state["total_tokens"] >= DAILY_FREE_TOKEN_CAP
-    )
-    if crossed_now:
-        state["notified"] = True
-        print(
-            f"[LLM DAILY FREE QUOTA] model='{model}' has used "
-            f"{state['total_tokens']:,} tokens today, past the "
-            f"{DAILY_FREE_TOKEN_CAP:,}-token/day free-tier cap -- further "
-            f"calls today are being billed against your paid balance.",
-            file=sys.stderr, flush=True,
-        )
-
-    try:
-        with open(_USAGE_TRACK_PATH, "w", encoding="utf-8") as f:
-            json.dump(state, f)
-    except Exception:
-        pass  # tracking is best-effort; never let it break a real LLM call
 
 
 def _is_reasoning_model(model_name: str) -> bool:
@@ -879,10 +831,7 @@ Available Evidence:
                 if not _is_reasoning_model(self._model):
                     create_kwargs["temperature"] = 0.2
                 response = client.chat.completions.create(**create_kwargs)
-                usage = getattr(response, "usage", None)
-                total_tokens = getattr(usage, "total_tokens", None) if usage else None
-                if total_tokens:
-                    _record_daily_usage(self._model, total_tokens)
+                record_usage(self._model, "answer", getattr(response, "usage", None), len(prompt))
                 if response and getattr(response, "choices", None):
                     first_choice = response.choices[0]
                     message = getattr(first_choice, "message", None)
@@ -891,6 +840,7 @@ Available Evidence:
                         return str(content).strip()
             else:
                 response = client.models.generate_content(model=self._model, contents=prompt)
+                record_usage(self._model, "answer", getattr(response, "usage_metadata", None), len(prompt))
                 if hasattr(response, "text") and response.text:
                     return str(response.text).strip()
                 if hasattr(response, "candidates") and response.candidates:
