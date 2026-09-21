@@ -890,7 +890,18 @@ class HybridFinancialRetriever:
             # it applies to ANY "Total ..." row regardless of topic) for a
             # question that isn't about a financial total at all.
             if not prefer_narrative and self._TOTAL_ROW_RE.search(content):
-                multiplier *= 1.3
+                # ... but only when the total row is ABOUT something the query
+                # names: a bare "Total ..." row (Total equity, Total reportable
+                # segments, Total net lease cost) used to outrank the question's
+                # own "Total debt" row after the corpus gained rows (Verizon debt
+                # change came out -2,749 instead of -229)
+                _lab = re.search(r'Line Item:\s*([^|]+)', content)
+                _lab_stems = {
+                    t[:5] for t in self._tokenize(_lab.group(1)) if len(t) > 2
+                } - {"total", "other", "and", "the", "of"} if _lab else set()
+                _q_stems = {t[:5] for t in query_tokens}
+                if not _lab_stems or (_lab_stems & _q_stems):
+                    multiplier *= 1.3
 
             # ── Narrative-content boost (only when prefer_narrative) ──────────
             # Counteracts BM25's inherent length bias: a table row chunk
@@ -989,6 +1000,18 @@ class HybridFinancialRetriever:
             # for a narrative one. See _LOW_CONFIDENCE_COLUMN_RE's docstring.
             if self._LOW_CONFIDENCE_COLUMN_RE.search(content):
                 multiplier *= 0.5
+
+            # ── Unrequested "restricted" qualifier ────────────────────────────
+            # "Cash and cash equivalents" must not be answered from the
+            # "Total cash, cash equivalents and restricted cash" row (the total
+            # row also got the Total boost above: Best Buy's cash-drop question
+            # ranked 2,253 -> 1,491 (-33.8%) first, the plain row is -41.7%).
+            if (
+                doc.get("type") == "table_row"
+                and re.search(r'Line Item:[^|]*\brestricted\b', content, re.IGNORECASE)
+                and "restricted" not in query.lower()
+            ):
+                multiplier *= 0.6
 
             # ── Year / quarter boost ───────────────────────────────────────
             doc_period = str(doc.get('period', '')) + " " + content

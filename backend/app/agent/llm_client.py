@@ -781,7 +781,10 @@ Available Evidence:
     guidance growth midpoint for EACH basis together with the prior-year
     growth figure(s) the evidence gives, then give the verdict and say
     which basis it rests on; if the bases point in different directions,
-    say so. Do not silently pick one line. Confirmed real case: J&J's
+    say so and LEAD the verdict with the operational / constant-currency
+    basis (it removes currency noise), then mention the other basis as a
+    caveat -- do not open with a plain "Yes" that only holds for the other
+    line. Do not silently pick one line. Confirmed real case: J&J's
     FY2023 guidance table lists Adjusted EPS (midpoint +4.0%) and
     Adjusted Operational EPS (midpoint +3.5%) against FY2022's +3.6% --
     the answer cited only the first and called it acceleration.
@@ -850,6 +853,18 @@ Available Evidence:
     liability or other total that the evidence breaks into components, give
     each component's amount AND its percentage of the total (for example
     "employee-related $81 million, about 87% of the $93 million liability").
+32. When the question asks whether an unusual / non-recurring / one-time event
+    affected a result, NAME each event using the wording of the statement line
+    or the filing's own description, not only its amount -- for example "the
+    gain on completion of the Consumer Healthcare JV transaction ($8,107
+    million)", not just "a one-time gain of $8,107 million". Confirmed real
+    case: Pfizer 2019 -- one run gave the $8,107 million figure without ever
+    saying what event it came from. The same goes for a margin / income /
+    expense driver that comes from an acquisition, merger or divestiture:
+    name the other company or deal the evidence names (for example "amortization
+    of intangibles from the Xilinx acquisition"), never just "acquisition-
+    related". Confirmed real case: AMD FY2022 operating margin -- one run said
+    "one-off acquisition-related amortization" and never named Xilinx.
 """
 
         try:
