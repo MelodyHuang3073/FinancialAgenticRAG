@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from app.tools.table_parser import is_markdown_separator_row
+from app.agent.evidence_selection import select_with_quota
 
 try:
     from dotenv import load_dotenv
@@ -40,11 +41,16 @@ DAILY_FREE_TOKEN_CAP = 10_000_000
 # slice index) so orchestrator.py can import it and report to the
 # frontend EXACTLY this same subset as "evidence_sources", instead of
 # the full unfiltered evidence_buffer (which can hold up to
-# RETRIEVAL_MAX_TOTAL=45 items) -- the frontend's own Source Evidence
+# retrieved items) -- the frontend's own Source Evidence
 # panel was showing candidates the LLM never actually saw, making it
 # impossible to tell from the UI alone whether an answer's evidence
 # panel and its actual grounding agreed.
-EVIDENCE_PROMPT_CAP = 12
+# 16, not 12: a real-LLM run showed the one correct page sitting just past
+# the 12-item cut -- Amcor's Q2 FY2023 restructuring note (score-rank 15,
+# holds the "87% employee liabilities" fact) and Verizon's FY2021
+# expected-benefit-payments page (score-rank 14, holds the 2024 figures)
+# were both retrieved but never reached the prompt.
+EVIDENCE_PROMPT_CAP = 16
 
 
 def _record_daily_usage(model: str, total_tokens: int) -> None:
@@ -130,22 +136,43 @@ def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_row
     if sep_idx is None:
         return content[:max_chars]
 
-    prefix_lines = lines[:sep_idx - 1]
-    header_line = lines[sep_idx - 1]
-    separator_line = lines[sep_idx]
-
-    data_lines: List[str] = []
-    for line in lines[sep_idx + 1:]:
-        stripped = line.strip()
-        if not stripped or "|" not in stripped:
+    # ALL table blocks are kept (each row-truncated), not just the first:
+    # a real statement page routinely splits one statement into several
+    # blank-line-separated blocks, and keeping only the first silently hid
+    # everything after it. Confirmed real case: Adobe FY2022's cash-flow
+    # page has five blocks; only the first (depreciation/stock comp) reached
+    # the LLM, so "Net cash provided by operating activities" and "Purchases
+    # of property and equipment" (capex) were invisible and the model said
+    # capex was not disclosed. A total budget stops extra blocks once the
+    # item is already large; the first block is always kept.
+    table_budget = max_chars * 2
+    out: List[str] = list(lines[:sep_idx - 1])
+    cur: Optional[int] = sep_idx
+    first_block = True
+    while cur is not None:
+        data_lines: List[str] = []
+        j = cur + 1
+        while j < len(lines):
+            stripped = lines[j].strip()
+            if not stripped or "|" not in stripped:
+                break
+            data_lines.append(lines[j])
+            j += 1
+        block = [lines[cur - 1], lines[cur]] + data_lines[:max_table_rows]
+        if len(data_lines) > max_table_rows:
+            block.append("...(more rows omitted)")
+        if not first_block and len("\n".join(out)) + len("\n".join(block)) > table_budget:
+            out.append("...(more tables omitted)")
             break
-        data_lines.append(line)
-
-    kept_rows = data_lines[:max_table_rows]
-    result_lines = prefix_lines + [header_line, separator_line] + kept_rows
-    if len(data_lines) > max_table_rows:
-        result_lines.append("...(more rows omitted)")
-    return "\n".join(result_lines)
+        if not first_block:
+            out.append("")
+        out.extend(block)
+        first_block = False
+        cur = next(
+            (k for k in range(j, len(lines)) if k > 0 and is_markdown_separator_row(lines[k])),
+            None,
+        )
+    return "\n".join(out)
 
 
 class LLMAnswerGenerator:
@@ -245,9 +272,10 @@ class LLMAnswerGenerator:
         # considered together. A local copy -- `evidence` itself is left
         # untouched for any other consumer (e.g. the Source Evidence
         # panel) that may rely on its original order.
-        sorted_evidence = sorted(
-            evidence, key=lambda item: item.get("relevance_score") or 0, reverse=True
-        )
+        # Score-sorted, with each sub-query keeping its own top passages
+        # (BM25 scores of different queries are not comparable) -- see
+        # evidence_selection.select_with_quota.
+        sorted_evidence = select_with_quota(evidence, EVIDENCE_PROMPT_CAP)
         # 12, not 6 -- a genuinely multi-page narrative topic (e.g. a
         # litigation/legal-proceedings discussion, or a list of several
         # acquisitions each described on its own page) routinely has its
@@ -285,7 +313,7 @@ class LLMAnswerGenerator:
         # window.
         evidence_text = "\n".join(
             f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] "
-            f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=4000)}"
+            f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=4000, max_table_rows=30)}"
             for item in sorted_evidence[:EVIDENCE_PROMPT_CAP]
         )
 
@@ -486,6 +514,10 @@ Available Evidence:
    numbers -- the per-share rate is usually the more specific fact a
    dividend question is really asking for, and citing only the aggregate
    total is an incomplete answer even when that total is itself correct.
+   If the question is about whether the dividend is STABLE/growing/consistent
+   over time and the evidence states an explicit streak ("the 65th
+   consecutive year of dividend increases"), you MUST state that streak in
+   your answer -- it is the decisive fact for a trend question.
 10. For a ratio/multiple result (turnover ratio, current ratio, quick
     ratio, etc.), state the number by itself (e.g. "17.98") -- do NOT
     append a trailing "x" ("17.98x"). Percentages still get a trailing
@@ -584,7 +616,7 @@ Available Evidence:
     question asks for (an acquisition, a litigation category, a specific
     figure, a named note like "Acquisitions and Divestitures"), you MUST
     actually scan every evidence item listed above first -- there are up
-    to 12 of them, and the one that answers the question is not always
+    to 16 of them, and the one that answers the question is not always
     the first or the most prominent-looking one. Do not conclude
     "not disclosed in the provided excerpts" / "the relevant note is not
     included" while an evidence item literally contains that note's own
@@ -668,6 +700,156 @@ Available Evidence:
     while the litigation/PFAS/Russia/divestiture items were relegated to
     an "other contributors" list -- gold's own framing treats the one-off
     items as the primary story.
+16. If the question names a fiscal year (e.g. "FY2023") that no evidence
+    item is labeled with, but the evidence DOES contain data for the
+    company's fiscal year that ENDS in January or February of that
+    named calendar year (a common retail convention: the year ended
+    Jan 28, 2023 is the company's own "fiscal 2022" yet is widely
+    called FY2023), do NOT refuse for lack of "FY2023" data. Use that
+    period's figures, state the assumption in ONE short clause (e.g.
+    "treating the year ended Jan 28, 2023, which the company calls
+    fiscal 2022, as FY2023"), and give the answer. Only decline when
+    the evidence has no such adjacent period at all -- and never apply
+    this to a company whose fiscal year ends in December, where the
+    labels are unambiguous. Confirmed real case: Ulta Beauty's "What
+    percent of total stock-repurchase spend for FY2023 occurred in Q4"
+    question -- the evidence stated Q4 fiscal 2022 repurchases of
+    $328.1 million and full fiscal 2022 repurchases of $900.0 million
+    (year ended Jan 28, 2023), enough to answer 36%, but the model
+    refused twice because neither figure was literally labeled
+    "FY2023".
+17. If the question asks WHICH region/segment/geography had the biggest
+    drop, highest growth, lowest value, etc., and the evidence lists BOTH
+    an aggregate row (e.g. "International") AND finer rows that make it up
+    (e.g. "Developed Europe", "Developed Rest of World", "Emerging
+    Markets"), rank the FINEST rows the evidence gives, not the aggregate --
+    an aggregate averages away the extreme sub-region. Compare every
+    non-overlapping finest-level row for the same period and name the
+    winner among those. Confirmed real case: Pfizer's Q2 2023 "biggest
+    percentage drop by region" -- the answer named "International (-60%)"
+    while the same evidence lists Developed Rest of World at -74%.
+18. If the question asks how MANY of something a company has (stores,
+    locations, employees, branches) without naming a brand/banner/
+    format, and the evidence shows per-brand rows plus a "Total" row,
+    answer with the Total row, not one brand's row. Confirmed real case:
+    Best Buy's store count question was answered with the "Best Buy"
+    banner alone (930 -> 907) instead of the Total row (982 -> 969) that
+    also includes Outlet Centers, Pacific Sales and Yardbird. The company's
+    OWN name in the question ("the number of Best Buy stores") is NOT a
+    banner filter: even when one row happens to be labeled with the same
+    name as the company, that row is only one banner -- the question
+    means every store, so use the row labeled Total.
+19. If the question asks for the MAIN/MAJOR companies (or businesses)
+    the filer ACQUIRED, use the acquisitions/business-combination
+    disclosures -- the ones stating a purchase price, closing date and
+    accounting -- and name the ones the filing itself features for the
+    periods it covers. Do NOT pick a company that is merely mentioned in
+    passing elsewhere (litigation history, a decades-old deal, an
+    executive's biography). Confirmed real case: Pfizer FY2021 -- the
+    answer listed King (a 2010 acquisition mentioned in litigation text)
+    and omitted Trillium (a 2021 acquisition in the business section).
+20. If the question asks what SHARE/percent/contribution of "company
+    level" or total EBITDA/EBITDAR/operating income/revenue a segment or
+    region made, divide by the company-level consolidated figure the
+    filing reports for that measure (the total after corporate/other
+    and eliminations), not by the sum of the segment figures shown.
+    Confirmed real case: MGM FY2022 -- Las Vegas Strip Resorts Adjusted
+    Property EBITDAR of 3,142,308 over the company-level Adjusted
+    EBITDAR of 3,497,254 is about 90%, but dividing by the segment sum
+    gave 78.6%.
+21. A business-segment table's figures belong to the segment named in the
+    section heading of the SAME page (e.g. a page headed "Defense, Space &
+    Security" -- its revenue share and operating margin are that
+    segment's). Never attribute them to a different segment (such as
+    Commercial Airplanes) just because the answer is about that one. If
+    the page does not clearly say which segment a table is for, omit the
+    figure. Confirmed real case: Boeing's cyclicality answer cited a 35%
+    revenue share and a 5.8% -> (15.3)% margin swing as Commercial
+    Airplanes' when they are Defense, Space & Security's.
+22. If the question asks whether a company's dividend is STABLE, growing or
+    consistent over time, and the evidence states an explicit streak (for
+    example "the 65th consecutive year of dividend increases"), state that
+    streak in the answer alongside the per-share figures -- it is the
+    strongest evidence of a stable trend. Confirmed real case: 3M's
+    dividend-trend answer gave 2020-2022 per-share amounts but left out
+    the "65th consecutive year of dividend increases" sentence that sat
+    in the evidence.
+23. If the question asks whether a growth rate is expected to accelerate,
+    slow, improve or decline, and the evidence gives forward guidance on
+    MORE THAN ONE basis (for example "Adjusted EPS" AND "Adjusted
+    Operational EPS", or reported vs constant-currency), state the
+    guidance growth midpoint for EACH basis together with the prior-year
+    growth figure(s) the evidence gives, then give the verdict and say
+    which basis it rests on; if the bases point in different directions,
+    say so. Do not silently pick one line. Confirmed real case: J&J's
+    FY2023 guidance table lists Adjusted EPS (midpoint +4.0%) and
+    Adjusted Operational EPS (midpoint +3.5%) against FY2022's +3.6% --
+    the answer cited only the first and called it acceleration.
+24. Earnings-release wording "leverage" / "deleverage": "leverage of X" (or
+    "X leveraged") means expense X FELL as a percent of net sales;
+    "deleverage of X" means X ROSE as a percent of net sales. When the
+    question asks whether a cost's percent of net sales increased or
+    decreased and the text uses this wording for that cost (store payroll
+    and benefits, wages, marketing, corporate overhead, incentive
+    compensation), answer from it -- do not say the information is
+    missing just because no explicit percentage is printed. Confirmed real
+    case: Ulta's release says SG&A improved "primarily due to leverage of
+    marketing expenses and incentive compensation ... partially offset by
+    deleverage of store payroll and benefits due to wage investments" --
+    so wages rose as a percent of sales, yet the answer said it was not
+    disclosed.
+25. If the question asks WHICH segment/business had the highest or lowest
+    value of some measure, first list the value for EVERY segment shown
+    on the page before choosing. A segment table is often printed as
+    several blocks, each with its own header line naming DIFFERENT
+    segments (for example one block for three segments and a second
+    block below it for the remaining segments and the firm total); the
+    answer may sit in a later block. A negative value is LOWER than any
+    positive value. Do not treat the firm-total column as a segment.
+    Confirmed real case: JPMorgan Q1 2021 -- the answer named Commercial
+    Banking ($2,393 million) as lowest net revenue by looking only at the
+    first block, while the second block shows Corporate at $(473) million.
+26. If the question asks which item "performed the best" / "worst" (or was
+    the "top" / "best performer") WITHOUT saying whether it means the
+    largest amount or the fastest growth, give BOTH readings in one short
+    answer: the item with the largest figure (with its value and share) AND
+    the item with the highest percentage growth or comparable-sales change
+    (with that percentage), each named with its period. Confirmed real case:
+    Best Buy Q2 FY2024 domestic categories -- the answer named only the
+    largest category (Computing and Mobile Phones, $3,674 million) on one run
+    and only the fastest-growing one (Entertainment, +9.0%) on another.
+27. If the question says "if <metric> is not a useful metric ... state that
+    and explain why" and the company is a bank, card issuer, insurer or other
+    financial institution (no cost of goods sold, gross profit or ordinary
+    operating income line), START the answer by saying that this metric is not
+    how such a company's performance is measured and why. Only then may you
+    mention a proxy figure. Do not open with "Yes" or "No" about the metric
+    itself.
+28. When you list legal matters, acquisitions or similar events, also state
+    the dollar amount the filing discloses for each one (settlement cap,
+    attorneys' fees, purchase price, total consideration) whenever the
+    evidence gives it, next to that item -- not a different, only loosely
+    related total. Confirmed real case: CVS opioid litigation answered with
+    "$5.8 billion of charges" but without the filing's own "up to about $4.3
+    billion in remediation plus $625 million in attorneys' fees".
+29. A 10-K states its own fiscal year on its cover. If the evidence comes from
+    the filing for the fiscal year the question asks about, answer from it and
+    never say that year's disclosure is missing because of the file's name; a
+    10-K also carries the prior-year comparatives. Confirmed real case:
+    PepsiCo's FY2022 Item 3 (management believes the outcome of legal matters
+    will not have a material adverse effect) was in the evidence, yet the
+    answer said FY2022 could not be confirmed.
+30. If the question asks what each shareholder could receive if the company
+    went bankrupt / was liquidated, the headline figure is the TANGIBLE book
+    value per share (goodwill and other intangibles are not distributable);
+    state that figure first and mention plain book value per share only as
+    context. Confirmed real case: JPMorgan Q1 2021 -- the answer led with
+    $82.31 (book value per share) and only mentioned $66.56 (tangible book
+    value per share) in passing.
+31. If the question asks about the nature, composition or purpose of a
+    liability or other total that the evidence breaks into components, give
+    each component's amount AND its percentage of the total (for example
+    "employee-related $81 million, about 87% of the $93 million liability").
 """
 
         try:

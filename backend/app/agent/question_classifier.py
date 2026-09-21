@@ -129,6 +129,22 @@ _METRIC_KEYWORDS = {
 _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
     (["legal battle", "litigation", "lawsuit", "legal proceeding"],
      "Item 3 Legal Proceedings litigation lawsuit claims"),
+    # "Is Boeing's business subject to cyclicality?" is answered by the risk
+    # factor "We depend heavily on commercial airlines ... the airline industry
+    # has been cyclical ... significant profit swings" (10-K p8); the bare
+    # question retrieved p12/p14 etc. and never that page, so the verdict was
+    # right but unsupported. Zero collision: only that question of the 150 uses
+    # the word.
+    (["cyclical", "cyclicality"],
+     "industry has been cyclical significant profit swings market conditions demand risk factors"),
+    # A dividend TREND question ("does X maintain a stable trend of dividend
+    # distribution?") is decided by the filing's own streak sentence ("the
+    # 65th consecutive year of dividend increases"), which the generic
+    # per-share query below does not target. Listed BEFORE the generic
+    # dividend entry because the first matching entry wins. Zero collision:
+    # only 3M's question of the 150 uses this wording.
+    (["dividend distribution", "dividend trend", "trend of dividend"],
+     "consecutive year of dividend increases Board of Directors declared dividend per share"),
     (["dividend"], "dividends declared per share common stock quarterly"),
     (["restructuring"], "restructuring charges costs plan"),
     (["debt securit", "registered to trade", "national securities exchange"],
@@ -161,7 +177,13 @@ _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
     # statement's own "Acquisitions, net of cash acquired | 2023: — |
     # 2022: —" row (the actual, retrievable proof), because that row
     # never made evidence at all under the narrative-only topic query.
-    (["major acquisitions", "acquisitions that", "acquisitions has"],
+    # "companies acquired" / "acquired by X" phrasing (Pfizer: "What are three
+    # main companies acquired by Pfizer mentioned in this 10K report?") never
+    # reached the acquisitions note (10-K p70, Trillium's $18.50/share, $2.0B),
+    # because none of the triggers below matched. Zero collision: only that
+    # question of the 150 contains either phrase.
+    (["major acquisitions", "acquisitions that", "acquisitions has",
+      "companies acquired", "acquired by"],
      "business combinations acquisitions and divestitures completed "
      "acquisition equity interest acquisitions, net of cash acquired"),
     # "Is X a high-growth company?" needs the filer's OWN stated revenue
@@ -196,6 +218,95 @@ _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
     # alone, "Total revenue 2022", at the standard RETRIEVAL_TOP_K=5).
     (["high growth", "high-growth", "growth company"],
      "total percent change results of operations"),
+    # "Free cash flow conversion" (FCF / net income, typically compared
+    # across 2 years to judge whether it's "improving") isn't a single
+    # financial-statement line item -- it's a computed ratio needing THREE
+    # separate line items (operating cash flow, capex, net income) that no
+    # single _METRIC_KEYWORDS entry maps to as one concept, so target_
+    # metrics comes back empty and (like the other topics above) the bare
+    # question text alone became the entire retrieval query. Confirmed
+    # real case: Adobe's own "Does Adobe have an improving Free cashflow
+    # conversion as of FY2022?" question retrieved 12/12 evidence items
+    # completely unrelated to cash flow or net income at all (audit
+    # report boilerplate, hedge accounting policy, product description
+    # pages) -- the bare question's own wording ("improving", "Free",
+    # "cashflow", "conversion") has essentially no overlap with how a real
+    # cash-flow-statement or income-statement page is actually worded.
+    # Zero keyword collision confirmed across all 150 official
+    # FinanceBench questions ("cash flow conversion"/"cashflow
+    # conversion"/"fcf conversion" appears in exactly this one question).
+    (["cash flow conversion", "cashflow conversion", "fcf conversion"],
+     "cash flow from operations capital expenditures net income"),
+    # "Number of stores" is an operational headcount metric, not a dollar
+    # line item -- no _METRIC_KEYWORDS entry maps to it, so target_metrics
+    # comes back empty and the bare question text alone became the query.
+    # A retailer's 10-K/10-Q standardly discloses this in a "Store Data"/
+    # "store count" reconciliation table captioned "Total Stores at
+    # Beginning of [period] | Stores Opened | Stores Closed | Total Stores
+    # at End of [period]" -- vocabulary that has almost no overlap with
+    # how the question itself is phrased ("number of stores", "change in
+    # stores"). Confirmed real case: Best Buy's own Q2 FY2024 10-Q has
+    # this exact table on page 17 (Total Stores at End of Second Quarter:
+    # 969 for FY2024, 982 for FY2023 -- matching gold's own figures
+    # exactly), but it never reached the top evidence with only the bare
+    # question as the query; unrelated cash-flow/debt/operating-income
+    # tables dominated instead. Zero keyword collision confirmed across
+    # all 150 official FinanceBench questions (only this one question
+    # matches "number of stores"/"store count").
+    # Bare "stores"/"store" (not "number of stores" as one contiguous
+    # phrase) -- the real question inserts the company name in between
+    # ("number of Best Buy stores"), so a phrase-shaped trigger silently
+    # never matched. Confirmed zero collision: "store"/"stores" appears in
+    # exactly this one question across all 150 official questions.
+    (["stores", "store count"],
+     "total stores beginning end stores opened stores closed"),
+    # "Stock repurchases"/"share buybacks" -- no _METRIC_KEYWORDS entry
+    # maps to this (it's a capital-allocation activity, not a single
+    # financial-statement line item with a fixed name), so target_metrics
+    # comes back empty and the bare question text alone became the query.
+    # A quarterly earnings release's own "Share Repurchase Program"
+    # narrative section (not a table) states BOTH the quarter's own spend
+    # AND the full-year total in the same short paragraph -- exactly the
+    # two numbers a "what % of the year's repurchases happened in Q4"
+    # question needs -- but with only the bare question as the query,
+    # unrelated balance-sheet/stock-compensation tables dominated instead.
+    # Confirmed real case: Ulta Beauty's FY2022 Q4 earnings release page 3
+    # states "the Company repurchased 722,457 shares... at a cost of
+    # $328.1 million" for Q4 alone and "$900.0 million" for the full year
+    # (328.1/900.0 = 36.4%, matching gold's own "36%" almost exactly), but
+    # this page never reached the top evidence. Zero keyword collision
+    # confirmed across all 150 official questions (only this one question
+    # mentions "repurchase"/"buyback" at all).
+    (["repurchas", "buyback", "buy-back"],
+     "share repurchase program fourth quarter fiscal cost of shares"),
+    # "Full year guidance" questions: target_metrics resolves to EPS, so the
+    # numeric path only searched EPS/net-income line items and never
+    # reached the earnings release's own outlook paragraph. Confirmed real
+    # case: PepsiCo's Q1 FY2023 release page 3 ("...9 percent core constant
+    # currency EPS growth (previously 8 percent)") was never retrieved, so
+    # the model answered "cannot determine". Zero collision: only the two
+    # PepsiCo guidance questions in the 150 use "guidance"/"outlook".
+    (["guidance", "outlook"],
+     "full year guidance outlook raised previously percent growth"),
+    # "Largest liability" -- a comparison ACROSS the balance sheet's liability
+    # lines, so no single _METRIC_KEYWORDS entry applies and the bare
+    # question was the only query; none of the top-15 evidence pages was the
+    # consolidated balance sheet. Confirmed real case: American Express's FY2022
+    # "largest liability" question -- Customer deposits ($110,239M of $203,643M
+    # total liabilities, on the balance-sheet page) never reached the prompt and
+    # the model refused. Zero collision: only this one question of the 150 uses
+    # "largest/biggest liability".
+    # Value-at-Risk questions: the question says only "VaR"/"risk", so the
+    # bare text also matches an unrelated interest-rate-sensitivity page in
+    # the same filing; the real answer is the market-risk section's "Total
+    # VaR" table (average/min/max by quarter). Confirmed real case: JPM Q2
+    # 2023 -- runs varied between the correct "$54M -> $47M, decreased" and
+    # a wrong "No" built from the 100bp/200bp sensitivity table. Zero
+    # collision: only this one of the 150 questions mentions VaR.
+    (["value at risk", "value-at-risk", " var,", " var ", " var?", " var)"],
+     "Risk Management VaR Total VaR average 95% confidence level CIB trading VaR"),
+    (["largest liability", "biggest liability", "largest liabilities"],
+     "consolidated balance sheets total liabilities customer deposits long-term debt"),
 ]
 
 
@@ -272,6 +383,8 @@ _CALC_KEYWORDS = {
     "change":["變動", "change", "difference", "差異", "增加多少", "減少多少"],
     "compare":["比較", "compare", "versus", "vs", "對比"],
 }
+
+_CHANGE_VERBS = ["grow", "drop", "decline", "decrease", "increase", "rise", "fell"]
 
 _EXPLANATION_KEYWORDS = [
     "why", "what drove", "what caused", "driver", "drove", "explain",
@@ -490,6 +603,24 @@ class FinanceBenchClassifier:
             "google": "Google", "alphabet": "Google",
             "meta": "Meta",
             "jpmorgan": "JPMorgan", "jp morgan": "JPMorgan",
+            # Bare ticker "JPM" was missing even though "jpmorgan"/"jp
+            # morgan" were already registered -- confirmed real case:
+            # "Looking at VaR, did the risk that JPM faced in the second
+            # fiscal quarter of 2023 decrease..." fell through to the
+            # fragile capitalized-token fallback below (same failure
+            # class as the MGM/AmEx/Ulta/Verizon gaps noted above) and
+            # resolved entity to "Looking" (the sentence-initial
+            # capitalized word), which then matched FOOTLOCKER_2022_8K's
+            # document entirely by accident -- every retrieved evidence
+            # item was Foot Locker/Johnson & Johnson content, none of it
+            # JPMorgan's, so the PoT sandbox found no real VaR numbers at
+            # all and fell back to citing an arbitrary unrelated number
+            # (8.0) from that wrong evidence as if it were the answer.
+            # Confirmed zero collision: every question in the corpus
+            # using the standalone word "jpm" is genuinely about
+            # JPMorgan (checked via \bjpm\b against the full question
+            # set).
+            "jpm": "JPMorgan",
             "3m": "3M",
             "pfizer": "Pfizer",
             "costco": "Costco",
@@ -581,6 +712,12 @@ class FinanceBenchClassifier:
             # the same corpus), pulling in 3M's total debt figures for a
             # question entirely about Verizon.
             "verizon": "Verizon",
+            # "Foot Locker" (two words) was never registered, so the
+            # single-token fallback below returned just "Foot" -- entity
+            # resolution then picked the wrong Foot Locker 8-K (the
+            # 2022-05-20 one, which has no CEO/Ulta text). The one-word
+            # spelling "Footlocker" already resolved fine.
+            "foot locker": "Foot Locker", "footlocker": "Foot Locker",
         }
         # Plain "if keyword in q" substring matching lets a short key match
         # INSIDE an unrelated word — confirmed real case: the "ge" key
@@ -669,6 +806,19 @@ class FinanceBenchClassifier:
         for calc_key, keywords in _CALC_KEYWORDS.items():
             if _kw_match(keywords, q_lower):
                 return calc_key
+        # Plain verbs of increase/decrease ("Did X grow its PPNE between
+        # FY20 and FY21?", "Was there any drop in cash between...") ask for
+        # the same year-over-year change as the word "change" itself but
+        # left calc_type empty, so the PoT fell back to a single-year value
+        # lookup (the card showed only FY21's $14,882 for Pfizer PPNE, and
+        # 0 for Best Buy's cash drop). Checked only AFTER every keyword
+        # above so an explicit ratio/margin/compare/yoy wording keeps its
+        # own calc_type, and skipped for "what drove/why" and "which ...
+        # highest/lowest" questions, which are asking for something else.
+        if (_kw_match(_CHANGE_VERBS, q_lower)
+                and not _kw_match(_EXPLANATION_KEYWORDS, q_lower)
+                and not re.search(r"\bwhich\b", q_lower)):
+            return "change"
         return ""
 
     def _classify_question_type(self, target_metrics, calc_type, years, has_expl, has_assess, has_excl) -> str:
