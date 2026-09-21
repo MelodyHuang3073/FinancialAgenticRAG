@@ -15,6 +15,8 @@ import os
 import re
 from typing import List, Dict, Any, Optional
 
+from app.agent.usage_tracker import record_usage
+
 
 def _is_reasoning_model(model_name: str) -> bool:
     """
@@ -222,6 +224,7 @@ class QueryDecomposer:
                 if not reasoning:
                     create_kwargs["temperature"] = 0
                 response = client.chat.completions.create(**create_kwargs)
+                record_usage(self._llm_model, "decomposer", getattr(response, "usage", None), len(user_content))
                 raw = response.choices[0].message.content or ""
             else:
                 # Gemini
@@ -229,6 +232,7 @@ class QueryDecomposer:
                 response = client.models.generate_content(
                     model=self._llm_model, contents=full_prompt
                 )
+                record_usage(self._llm_model, "decomposer", getattr(response, "usage_metadata", None), len(full_prompt))
                 raw = getattr(response, "text", "") or ""
 
             # Extract JSON array from the response
