@@ -146,6 +146,16 @@ _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
     (["dividend distribution", "dividend trend", "trend of dividend"],
      "consecutive year of dividend increases Board of Directors declared dividend per share"),
     (["dividend"], "dividends declared per share common stock quarterly"),
+    # "Did <a cost> as a percent of net sales increase or decrease?" is answered
+    # by the MD&A's own leverage sentence ("... basis points of deleverage of
+    # store payroll and benefits due to wage investments"), which shares no word
+    # with "wages expense" (wages vs wage) and never reached the prompt: the 10-K
+    # evidence was all income-statement rows and the answer said "cannot
+    # determine". Zero collision: only the two Ulta questions of the 150 use
+    # this wording.
+    (["expense as a percent", "expenses as a percent", "expense as a %"],
+     "basis points of leverage deleverage percent of net sales due to payroll "
+     "benefits wage investments marketing incentive compensation corporate overhead"),
     (["restructuring"], "restructuring charges costs plan"),
     (["debt securit", "registered to trade", "national securities exchange"],
      "debt securities registered exchange listing notes"),
@@ -552,6 +562,15 @@ class FinanceBenchClassifier:
         ):
             # Has numerical signals → always route through NUMERIC path first.
             # The synthesizer/LLM will still produce the assessment narrative.
+            answer_mode = "NUMERIC"
+        elif (
+            re.search(r"\bhow\s+much\b", query, re.IGNORECASE)
+            and re.search(r"\b(?:usd|dollars?|millions?|billions?)\b|\$", query, re.IGNORECASE)
+            and not has_assessment
+        ):
+            # "How much ... in USD million?" asks for one amount even when no
+            # metric keyword is recognised (Pfizer "how much does it expect to pay
+            # to spin off Upjohn": EXPLANATION, so no PoT and no result card)
             answer_mode = "NUMERIC"
         elif has_assessment:
             answer_mode = "ASSESSMENT"
