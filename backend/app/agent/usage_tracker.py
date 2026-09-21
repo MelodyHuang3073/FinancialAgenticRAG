@@ -28,11 +28,13 @@ USAGE_DIR = os.path.join(BASE_DIR, ".llm_usage")
 #: Daily free allowance for mini/nano models (10,000,000 tokens/day, confirmed by
 #: the user against their own OpenAI account).
 DAILY_FREE_TOKEN_CAP = 10_000_000
-WARN_FRACTION = 0.8
+WARN_FRACTIONS = (0.5, 0.8)  # a notice at 50% and again at 80% of the free cap
 
 
 def _today() -> str:
-    return time.strftime("%Y-%m-%d")
+    # OpenAI's usage dashboard and the free-token allowance work in UTC days
+    # (they reset at 00:00 UTC = 08:00 Taiwan time), not local days.
+    return time.strftime("%Y-%m-%d", time.gmtime())
 
 
 def _usage_numbers(usage: Any) -> Dict[str, Optional[int]]:
@@ -71,6 +73,7 @@ def _read_today() -> Dict[str, Any]:
         files = []
     by_caller: Dict[str, Dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     by_model: Dict[str, int] = defaultdict(int)
+    by_pid: Dict[Any, Dict[str, Any]] = {}
     for path in files:
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -90,10 +93,15 @@ def _read_today() -> Dict[str, Any]:
                     by_caller[r.get("caller", "?")]["calls"] += 1
                     by_caller[r.get("caller", "?")]["tokens"] += t
                     by_model[r.get("model", "?")] += t
+                    p = by_pid.setdefault(r.get("pid"), {"calls": 0, "tokens": 0, "first": r.get("ts"), "last": r.get("ts")})
+                    p["calls"] += 1
+                    p["tokens"] += t
+                    p["last"] = max(p["last"] or "", r.get("ts") or "")
+                    p["first"] = min(p["first"] or "9", r.get("ts") or "9")
         except OSError:
             continue
     return {"date": day, "total_tokens": total, "calls": calls, "calls_without_usage": unknown,
-            "by_caller": dict(by_caller), "by_model": dict(by_model)}
+            "by_caller": dict(by_caller), "by_model": dict(by_model), "by_pid": by_pid}
 
 
 def today_total() -> int:
@@ -142,12 +150,14 @@ def record_usage(model: str, caller: str, usage: Any = None, prompt_chars: int =
                 f"{DAILY_FREE_TOKEN_CAP:,}-token/day free-tier cap -- further calls are billed "
                 f"against your paid balance.",
             )
-        elif total >= WARN_FRACTION * DAILY_FREE_TOKEN_CAP:
-            _notify_once(
-                "warn",
-                f"[LLM DAILY FREE QUOTA] {total:,} tokens used today "
-                f"({total * 100 // DAILY_FREE_TOKEN_CAP}% of the {DAILY_FREE_TOKEN_CAP:,} free cap).",
-            )
+        else:
+            for frac in WARN_FRACTIONS:
+                if total >= frac * DAILY_FREE_TOKEN_CAP:
+                    _notify_once(
+                        f"warn{int(frac * 100)}",
+                        f"[LLM DAILY FREE QUOTA] {total:,} tokens used today "
+                        f"({total * 100 // DAILY_FREE_TOKEN_CAP}% of the {DAILY_FREE_TOKEN_CAP:,} free cap).",
+                    )
     except Exception:
         pass  # tracking is best-effort; never let it break a real LLM call
 
@@ -164,6 +174,10 @@ def format_report() -> str:
         out.append(f"  {caller:<12} {v['calls']:>6} calls  {v['tokens']:>12,} tokens")
     for model, t in sorted(d["by_model"].items()):
         out.append(f"  model {model}: {t:,}")
+    # one line per process: a long-lived server process with sparse calls is a manual
+    # session in the app; a burst of calls from a short-lived pid is a script/regression
+    for pid, v in sorted(d["by_pid"].items(), key=lambda kv: -kv[1]["tokens"])[:12]:
+        out.append(f"  pid {pid}: {v['calls']} calls, {v['tokens']:,} tokens, {v['first']} .. {v['last']}")
     if d["calls_without_usage"]:
         out.append(f"  {d['calls_without_usage']} call(s) returned no usage data (not in the total)")
     return "\n".join(out)
