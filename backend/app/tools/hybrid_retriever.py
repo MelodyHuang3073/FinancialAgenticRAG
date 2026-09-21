@@ -635,6 +635,7 @@ class HybridFinancialRetriever:
         Returns a multiplier based on how well doc_company matches entity.
           2.0  → strong match  (boost)
           1.0  → neutral
+          0.4  → same company, WRONG specific filing period (demotion)
           0.05 → mismatch      (heavy penalty, not hard exclusion)
 
         Deliberately still a SOFT penalty, not a hard filter — several
@@ -651,6 +652,32 @@ class HybridFinancialRetriever:
         noise concern, verified via the full calc-question suite to
         confirm no previously-correct answer actually depended on a
         wrong-company candidate surviving at the old, looser penalty.
+
+        The 0.4 same-company-wrong-period tier applies uniformly across
+        EVERY match tier below (exact/substring/collapsed/word-overlap),
+        computed once up front via _extract_company_filing_year -- not
+        just the exact-match branch. Confirmed real regression this fixes
+        (2026-09-19): with 21 non-10-K filings added alongside the
+        original 63 10-Ks, several companies now have 3-5 same-year
+        filings of different types (10-K/10-Q/8-K/earnings release) in
+        the corpus. The OLD demotion (1.5, still a BOOST above the 1.0
+        neutral tier) was calibrated back when the only same-company
+        rivals were adjacent FISCAL YEARS of one 10-K series -- still
+        boosting a wrong-year 10-K over an unrelated company was
+        reasonable then. It's no longer safe now that a same-BASE-YEAR
+        but wrong-filing-type document (e.g. AMCOR_2023_10K, a much
+        longer, keyword-denser annual report) can and does raw-BM25-
+        outrank the actual intended AMCOR_2023Q2_10Q content even with
+        the entity correctly resolved -- three DIFFERENT wrong-period
+        Amcor filings (the 2023 10-K, the 2023Q4 earnings release, and
+        even the unrelated 2020 10-K) filled the top several ranks ahead
+        of the one correct-document hit for "Amcor restructuring charges
+        costs plan 2023", because 1.5-1.8x was still enough of a boost
+        for their sheer raw term density to win outright. 0.4 is a real
+        penalty (below the 1.0 neutral baseline), not just a smaller
+        boost, so a same-company-wrong-period candidate now has to lose
+        to ANY correctly-scoped or genuinely neutral candidate on raw
+        relevance alone rather than starting from a multiplier head start.
         """
         if not entity or entity.lower() in ("company", "unknown", ""):
             return 1.0  # no filter if entity is generic
@@ -661,39 +688,31 @@ class HybridFinancialRetriever:
         if not norm_doc or not norm_ent:
             return 1.0
 
-        # Exact normalised match. _normalise_company deliberately STRIPS
-        # the fiscal year (see its own docstring — needed to fix Best
-        # Buy's word-boundary bug), which means it can no longer tell
-        # apart two DIFFERENT fiscal years of the SAME company once both
-        # are in the corpus — "MGMRESORTS_2022_10K" and
-        # "MGMRESORTS_2018_10K" both normalise to "mgmresorts" and would
-        # otherwise tie at this same top tier. Demote to 1.5 (still well
-        # above the 0.05 different-company penalty and the 1.0 neutral
-        # tier, but below the exact-right-year match below it AND below
-        # the 1.8 substring/word-overlap tiers) whenever BOTH sides carry
-        # a detectable year that DIFFERS — a real disambiguating signal
-        # this project's own doc-id convention (COMPANY_YEAR_10K) always
-        # carries. Left at the full 2.0 boost whenever either side has no
-        # detectable year (a generic entity like "company", or a doc-id
-        # convention without one) — unchanged from before, since there is
-        # then no year signal to disambiguate with at all. Confirmed real
-        # case: "Has MGM Resorts paid dividends to common shareholders in
-        # FY2022?" — the real answer's own "Dividend Policy" paragraph
-        # (MGMRESORTS_2022_10K) ranked #8, just outside the top-6 sent to
-        # the LLM, while two malformed, blank-period rows from
-        # MGMRESORTS_2018_10K (a completely different filing year) rode
-        # this same 2.0 tier into #2/#3 purely because "mgmresorts" ==
-        # "mgmresorts" post year-stripping.
+        # _normalise_company deliberately STRIPS the fiscal year (see its
+        # own docstring — needed to fix Best Buy's word-boundary bug),
+        # which means none of the match tiers below can tell apart two
+        # DIFFERENT filing periods of the SAME company on their own —
+        # "MGMRESORTS_2022_10K" and "MGMRESORTS_2018_10K" (or
+        # "AMCOR_2023_10K" and "AMCOR_2023Q2_10Q") all normalise to the
+        # same base company string. Computed once, applied uniformly
+        # below as the 0.4 demotion tier whenever BOTH sides carry a
+        # detectable period that DIFFERS -- a real disambiguating signal
+        # this project's own doc-id convention (COMPANY_YEAR[Q#]_TYPE)
+        # always carries. Left unset (no demotion) whenever either side
+        # has no detectable period (a generic entity like "company", or a
+        # doc-id convention without one), since there's then no signal to
+        # disambiguate with at all.
+        doc_period = self._extract_company_filing_year(doc_company)
+        ent_period = self._extract_company_filing_year(entity)
+        period_mismatch = bool(doc_period and ent_period and doc_period != ent_period)
+
+        # Exact normalised match.
         if norm_doc == norm_ent:
-            doc_year = self._extract_company_filing_year(doc_company)
-            ent_year = self._extract_company_filing_year(entity)
-            if doc_year and ent_year and doc_year != ent_year:
-                return 1.5
-            return 2.0
+            return 0.4 if period_mismatch else 2.0
 
         # One is a substring of the other
         if norm_ent in norm_doc or norm_doc in norm_ent:
-            return 1.8
+            return 0.4 if period_mismatch else 1.8
 
         # Collapsed (no-space) comparison: catches a human-readable name
         # like "Best Buy"/"General Mills"/"Coca Cola" against this
@@ -714,7 +733,7 @@ class HybridFinancialRetriever:
         collapsed_doc = norm_doc.replace(' ', '')
         collapsed_ent = norm_ent.replace(' ', '')
         if collapsed_ent and (collapsed_ent in collapsed_doc or collapsed_doc in collapsed_ent):
-            return 1.8
+            return 0.4 if period_mismatch else 1.8
 
         # Word-level overlap
         ent_words = [w for w in norm_ent.split() if len(w) >= 2]
@@ -724,9 +743,9 @@ class HybridFinancialRetriever:
 
         matches = sum(1 for w in ent_words if w in doc_words)
         if matches == len(ent_words):
-            return 1.8   # all entity words found in doc company name
+            return 0.4 if period_mismatch else 1.8   # all entity words found in doc company name
         if matches > 0:
-            return 1.2   # partial match — mild boost
+            return 0.4 if period_mismatch else 1.2   # partial match — mild boost
         return 0.05      # no word overlap → very likely a different company
 
     # ──────────────────────────────────────────────────────────────
