@@ -360,6 +360,52 @@ _CATEGORY_THRESHOLD_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: Question shapes the sandbox has no calculation path for -- the answer is
+#: a selection, a guidance statement or a group-vs-group comparison read
+#: from evidence text, not one computed number. Left to the generic
+#: fallbacks these used to headline an UNRELATED figure as "the result"
+#: (confirmed real cases: "which JPM segment had the lowest net revenue"
+#: showed the firm-wide total $32,266; "which JPM segment had the highest
+#: net income" showed the six-month firm net income $16,931; "by how many
+#: points did PepsiCo raise EPS growth guidance" showed 1.4 = Q1 net
+#: income / shares; "how did JnJ's US sales growth compare to
+#: international" showed 77.29% computed from an MGM row). Skipping PoT
+#: (result_value None) leaves the LLM's own reading of the evidence as the
+#: only answer and hides the misleading card, same treatment as
+#: _CATEGORY_THRESHOLD_QUERY_RE above.
+_SELECTION_QUERY_RE = re.compile(
+    r'\bwhich\b[^.?]{0,120}\b(?:highest|lowest|largest|biggest|smallest|greatest|fewest|most|least|best|worst)\b'
+    r'|\b(?:highest|lowest|largest|biggest|smallest)\b[^.?]{0,60}\b(?:segments?|regions?|categor(?:y|ies)|types?|divisions?|geograph\w*)\b',
+    re.IGNORECASE,
+)
+_GUIDANCE_QUERY_RE = re.compile(
+    r'\b(?:guidance|outlook|forecast(?:s|ed|ing)?)\b'
+    r'|\bexpected\s+to\s+(?:accelerate|decelerate|grow|increase|decrease|decline|slow)\b',
+    re.IGNORECASE,
+)
+_GROUP_COMPARE_QUERY_RE = re.compile(
+    r'\b(?:u\.?s\.?|domestic|international|foreign)\b[^.?]{0,60}\bcompare[sd]?\b'
+    r'|\bcompare[sd]?\b[^.?]{0,60}\b(?:u\.?s\.?|domestic|international|foreign)\b',
+    re.IGNORECASE,
+)
+
+
+_EXISTENCE_QUERY_RE = re.compile(
+    r'\b(?:were|are|is|was|has|have)\s+there\s+any\s+(?:[a-z-]+\s+){0,3}?(?:events?|items?|factors?|matters?|transactions?|nominees?)\b',
+    re.IGNORECASE,
+)
+
+
+def _no_calculation_path(q_lower: str) -> bool:
+    """True for selection / guidance / group-comparison question shapes."""
+    return bool(
+        _SELECTION_QUERY_RE.search(q_lower)
+        or _GUIDANCE_QUERY_RE.search(q_lower)
+        or _GROUP_COMPARE_QUERY_RE.search(q_lower)
+        or _EXISTENCE_QUERY_RE.search(q_lower)
+    )
+
+
 #: Not every filer states its dividend rate as a clean standalone
 #: "Dividends declared per share" table row the way CVS does — many
 #: only ever state it in a narrative sentence (e.g. "we paid dividends
@@ -1016,6 +1062,8 @@ def _extract_from_linearized_table(
     def _entity_ok(ev_company: str) -> bool:
         if entity_target_words is None:
             return True
+        if _entity_period_conflicts(entity, ev_company):
+            return False
         doc_words = _entity_words(ev_company)
         if not doc_words:
             return True  # no company tag at all — nothing to contradict the target
@@ -1428,6 +1476,45 @@ def _score_row_match(label: str, aliases: List[str]) -> float:
     label_norm = re.sub(r'\s+', ' ', label_norm).strip()
     if _CARVEOUT_ANYWHERE_RE.search(label_norm):
         return 0
+    # A statement line that could go either way is conventionally
+    # captioned "X (loss)"/"X (deficit)"/"X (expense)"/"X (benefit)" to
+    # cover both possibilities regardless of which sign actually
+    # occurred that year (e.g. "Operating income (loss)", "Net income
+    # (loss)", "Income tax (benefit)") -- the parenthetical is boilerplate
+    # covering the sign, not a different line item. Without stripping it,
+    # a real consolidated "Operating income (loss)" row only substring-
+    # matches the "operating income" alias (score ~1.02) while an
+    # unrelated table's bare "Operating income" row (e.g. an
+    # unconsolidated-affiliate/segment footnote's own single-year total)
+    # wins the exact-match score of 2 purely because it happens to omit
+    # the qualifier. Confirmed real case: MGM's real consolidated
+    # "Operating income (loss)" row ($1,439,372, appearing identically on
+    # 4 separate pages) lost to an unconsolidated-affiliate summary
+    # table's bare "Operating income" row ($4,981,058, a single, unrelated
+    # year) for interest_coverage's ebit variable, producing a nonsensical
+    # -2,490,529x ratio. Computed as a SEPARATE candidate string (not a
+    # replacement) so a label that's ALREADY an exact match is unaffected,
+    # and only checked at the end-of-string per real 10-K captioning
+    # convention (mid-label qualifiers like "Income (loss) from
+    # operations" are a different shape, not covered here).
+    label_norm_unqualified = re.sub(
+        r'\s*\((?:loss|deficit|expense|benefit)\)\s*$', '', label_norm
+    ).strip()
+    # "Interest expense, net of amounts capitalized" is the standard GAAP
+    # caption for interest expense at a company that capitalizes interest
+    # during construction -- confirmed used this way (not as a distinct,
+    # separately-disclosed line alongside a plain "Interest expense") by
+    # 10 different filers in this corpus (AES, Amcor, MGM, Verizon), so
+    # this is a real accounting-caption convention, not a company-specific
+    # quirk. Same class of fix as the (loss)/(deficit) stripping above,
+    # but deliberately its OWN narrow phrase match rather than a general
+    # "strip any net of X" rule -- unlike this suffix, a bare "net" (e.g.
+    # "Property, plant and equipment, net") marks a GENUINELY different
+    # figure (net of depreciation vs. gross) and must never be stripped;
+    # see this function's own docstring for that confirmed 3M case.
+    label_norm_unqualified = re.sub(
+        r',?\s*net of amounts capitalized\s*$', '', label_norm_unqualified
+    ).strip()
     # A per-share row should only ever match an alias that is ITSELF
     # asking for a per-share figure (the "eps"/"dividends per share"
     # placeholder's own alias list) — for every other placeholder, it's
@@ -1446,7 +1533,10 @@ def _score_row_match(label: str, aliases: List[str]) -> float:
             continue
         if _is_carveout_attribution_match(label_norm, idx, len(a)):
             continue
-        if label_norm == a or label_norm == f"total {a}":
+        if (
+            label_norm == a or label_norm == f"total {a}"
+            or label_norm_unqualified == a or label_norm_unqualified == f"total {a}"
+        ):
             return 2
         best_substring_len = max(best_substring_len, len(a))
     if best_substring_len:
@@ -1625,6 +1715,50 @@ def _entity_words(name: str) -> set:
     n = re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', name)
     n = re.sub(r'[_\-]+', ' ', n)
     return {w for w in n.lower().split() if len(w) >= 2 and w != "10k"}
+
+
+#: Year, optionally with an adjacent "Q1"-"Q4" suffix (e.g. "2022Q4" in
+#: "MGMRESORTS_2022Q4_EARNINGS"). Same pattern as orchestrator.py's own
+#: _match_entity_to_corpus fix for the identical underlying issue in a
+#: different function.
+_ENTITY_PERIOD_RE = re.compile(r'(?<!\d)((?:20|19)\d{2})(q[1-4])?(?!\d)', re.IGNORECASE)
+
+
+def _entity_period_conflicts(entity: str, doc_company: str) -> bool:
+    """
+    True when `entity` and `doc_company` each have an extractable
+    year(+quarter) period token AND those periods differ -- a hard veto
+    that _entity_words'/_entity_collapsed's word-overlap check can't
+    express, because stripping the year (by design, so "Corning" matches
+    either CORNING_2021_10K or CORNING_2022_10K) also erases the ability
+    to tell "MGMRESORTS_2022_10K" apart from "MGMRESORTS_2022Q4_EARNINGS"
+    once a company has multiple same-year filings in the corpus (a
+    situation that didn't exist before this project added 21 non-10-K
+    filings alongside the original 63 10-Ks). Confirmed real case: with
+    entity correctly resolved to "MGMRESORTS_2022Q4_EARNINGS" (see
+    orchestrator._match_entity_to_corpus's own quarter-aware fix),
+    extraction still accepted rows from "MGMRESORTS_2022_10K" --
+    _entity_words("MGMRESORTS_2022_10K") = {"mgmresorts"} is a SUBSET of
+    _entity_words("MGMRESORTS_2022Q4_EARNINGS") = {"mgmresorts", "q4",
+    "earnings"}, satisfying the existing "doc_words <= entity_target_
+    words" branch even though it's a different document entirely,
+    letting a wrong-filing "Operating income" row win the "table-total"
+    high-confidence extraction slot over the right filing's own value.
+
+    Returns False (no conflict -- defer to the existing word-overlap
+    check) whenever EITHER side lacks an extractable period, so this can
+    only ever narrow an existing match into a non-match; it never turns
+    an existing non-match into a match, and companies with only one
+    filing per year are completely unaffected (their own period token
+    trivially always matches itself).
+    """
+    em = _ENTITY_PERIOD_RE.search(entity or "")
+    dm = _ENTITY_PERIOD_RE.search(doc_company or "")
+    if not em or not dm:
+        return False
+    e_period = (em.group(1), (em.group(2) or "").lower())
+    d_period = (dm.group(1), (dm.group(2) or "").lower())
+    return e_period != d_period
 
 
 def _entity_collapsed(name: str) -> str:
@@ -1857,11 +1991,14 @@ def _extract_formula_guided(
             return True
         if ev_idx not in entity_match_cache:
             doc_company = evidence_list[ev_idx].get("company", "") or ""
-            doc_words = _entity_words(doc_company)
-            entity_match_cache[ev_idx] = bool(entity_target_words) and (
-                entity_target_words <= doc_words or doc_words <= entity_target_words
-                or bool(entity_target_words & doc_words)
-            )
+            if _entity_period_conflicts(entity, doc_company):
+                entity_match_cache[ev_idx] = False
+            else:
+                doc_words = _entity_words(doc_company)
+                entity_match_cache[ev_idx] = bool(entity_target_words) and (
+                    entity_target_words <= doc_words or doc_words <= entity_target_words
+                    or bool(entity_target_words & doc_words)
+                )
         return entity_match_cache[ev_idx]
 
     summary_table_cache: Dict[int, bool] = {}
@@ -3977,6 +4114,21 @@ def _synthesize_gross_profit(
         rev = _pick_best_in_group(revenue_by_year[yr], "revenue")
         if rev is None:
             continue
+        # Never add a RATIO row ("Cost of sales as a % of revenue") as if it were
+        # dollars, and never add a row together with the subtotal it is already
+        # part of. Confirmed real case: Boeing FY2022 summed cost of products +
+        # cost of services + "Cost of sales" (their own total) + the "% of
+        # revenue" row, giving a gross margin of -89.6% instead of ~5.3%.
+        rows = [r for r in rows if not re.search(r"%|percent|ratio", r.get("item", ""), re.IGNORECASE)]
+        if len(rows) >= 3:
+            _vals = [abs(r["val"]) for r in rows]
+            for _k, _r in enumerate(rows):
+                _others = sum(_vals) - _vals[_k]
+                if _others > 0 and abs(_vals[_k] - _others) / _others <= 0.02:
+                    rows = [_r]  # this row IS the total of the others
+                    break
+        if not rows:
+            continue
         sum_terms = " + ".join(f"abs({r['code_key']})" for r in rows)
         var = f"_derived_gross_profit_{yr}"
         code_lines.append(
@@ -4088,6 +4240,11 @@ def _emit_multi_year_ratio(
             )
 
 
+#: Toggle for the no-subject YoY guard in _build_calculation_code (kept as a
+#: module flag so the change can be A/B-compared across the whole question set).
+_YOY_REQUIRES_TARGET = True
+
+
 def _build_calculation_code(
     code_lines: List[str],
     extracted_table: Dict[str, Dict],
@@ -4141,8 +4298,21 @@ def _build_calculation_code(
 
     # ── YoY Growth ────────────────────────────────────────────────────────────
     yoy_triggers = ["yoy", "year over year", "成長率", "年增", "growth rate", "growth",
-                    "변동", "change", "增加多少", "減少多少"]
-    if _kw_match(yoy_triggers, q_lower):
+                    "변동", "change", "增加多少", "減少多少",
+                    # Plain verbs of increase/decrease ask for the same two-year
+                    # change ("Did Pfizer grow its PPNE between FY20 and FY21?"
+                    # used to fall through to a single-year lookup and the card
+                    # showed only FY21's $14,882); mirrors _CHANGE_VERBS in
+                    # question_classifier.py.
+                    "grow", "drop", "decline", "decrease", "increase", "rise", "fell"]
+    # A question that names NO recognizable financial metric (e.g. "...change in
+    # the number of Best Buy stores...") has no item to take a growth rate of;
+    # _find_same_item_pair would otherwise fall through to whichever
+    # canonical happens to have two years of data (Net earnings) and the
+    # sandbox would present that unrelated -47% as THE result. Confirmed real
+    # case: Best Buy's store-count question.
+    _yoy_has_subject = (not _YOY_REQUIRES_TARGET) or _infer_target_canonical(q_lower) is not None
+    if _kw_match(yoy_triggers, q_lower) and _yoy_has_subject:
         # Bug 3 fix: pass q_lower so _find_same_item_pair prefers the item the user asked about
         v1, v2 = _find_same_item_pair(list(extracted_table.values()), q_lower, query_years)
         if v1 and v2:
@@ -4623,7 +4793,7 @@ class ProgramOfThoughtReasoner:
         # already correctly reasons over each category's real evidence
         # figures -- as the sole answer, with no unverified green-box
         # figure implying a sandbox-checked number backs it.
-        if _CATEGORY_THRESHOLD_QUERY_RE.search(q_lower):
+        if _CATEGORY_THRESHOLD_QUERY_RE.search(q_lower) or _no_calculation_path(q_lower):
             return {
                 "code": "", "success": True, "result_value": None,
                 "output_log": "", "extracted_variables": {},
@@ -4881,7 +5051,14 @@ class ProgramOfThoughtReasoner:
             "result_series": result_series,
             "result_delta": result_delta,
             "result_direction": result_direction,
-            "result_unit": (formula_entry.get("unit", "") if formula_entry else "") or (detected_unit[0] if detected_unit else ""),
+            "result_unit": (
+                (formula_entry.get("unit", "") if formula_entry else "")
+                or (detected_unit[0] if detected_unit else "")
+                # The generic YoY/CAGR branches print "... Growth (y1->y2): 8.27%"
+                # without a formula entry, so no unit was attached and the card
+                # showed a bare 8.2721.
+                or ("%" if re.search(r"(?:YoY Growth|CAGR)[^:]*:\s*-?[0-9.]+%\s*$", stdout_err or "") else "")
+            ),
             "is_comparison_answer": is_cf_activity_comparison,
             "is_qualitative_characterization": is_qualitative_characterization,
         }

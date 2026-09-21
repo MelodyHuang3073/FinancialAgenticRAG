@@ -203,6 +203,56 @@ class FinancialFileParser:
             re.IGNORECASE), "cover_page"),
     ]
 
+    @staticmethod
+    def _without_overlapping_spaces(page):
+        """Return the pdfplumber page minus "space" characters that sit INSIDE
+        another character's horizontal extent on the same line.
+
+        Some generators (JnJ's earnings releases) emit right-aligned padding
+        spaces whose boxes overlap the digits they pad, e.g. the text layer of
+        "100.0" holds a space with x0 484.58 inside the "1" (484.22-489.37).
+        pdfplumber then ends the word at that space and layout text reads
+        "1 00.0"; the table builder turned that into two cells (`2022: 1 |
+        Col3: 00.0`, and "67.0" into "6" + "7.0"), and the sandbox later
+        picked "Sales to customers (2022): 1.0" as its answer. Real
+        inter-word spaces sit BETWEEN glyphs and never overlap one, so they
+        are kept; PyMuPDF already ignores these spaces.
+        """
+        try:
+            from bisect import bisect_right
+            rows: Dict[int, List[Any]] = {}
+            for c in page.chars:
+                if not c.get("text", " ").isspace():
+                    rows.setdefault(round(c["top"]), []).append((c["x0"], c["x1"]))
+            for lst in rows.values():
+                lst.sort()
+            xs_by_row = {k: [x0 for x0, _ in v] for k, v in rows.items()}
+
+            def _stray(c) -> bool:
+                if not c.get("text", "x").isspace():
+                    return False
+                key = round(c["top"])
+                for k in (key - 1, key, key + 1):
+                    lst = rows.get(k)
+                    if not lst:
+                        continue
+                    i = bisect_right(xs_by_row[k], c["x0"] + 0.5)
+                    # candidates: chars starting at or (within 0.5pt) after the
+                    # space's own x0, whose box still extends past it
+                    for j in range(max(0, i - 3), min(len(lst), i)):
+                        x0, x1 = lst[j]
+                        if x0 - 0.5 < c["x0"] and c["x0"] < x1 - 0.5:
+                            return True
+                return False
+
+            if not any(_stray(c) for c in page.chars if c.get("text", "x").isspace()):
+                return page
+            return page.filter(
+                lambda o: not (o.get("object_type") == "char" and _stray(o))
+            )
+        except Exception:
+            return page
+
     def _detect_section(self, page_text: str) -> str:
         """
         Scan the first 600 characters of a page for known 10-K section headers.
@@ -366,6 +416,12 @@ class FinancialFileParser:
             if len(current_rows) >= 3:
                 n_cols = current_n_cols[0]
                 years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
+                if not years and header_candidate[0]:
+                    # quarterly highlights tables head their columns "1Q21 4Q20 3Q20 2Q20
+                    # 1Q20" (JPM p3): label them "1Q 2021" ... so the year is visible
+                    _qs = re.findall(r"(?<![A-Za-z0-9])([1-4])Q(\d{2})(?![A-Za-z0-9])", header_candidate[0])
+                    if len(_qs) == n_cols:
+                        years = [f"{q}Q 20{yy}" for q, yy in _qs]
                 headers = ["Line Item"] + [
                     years[i] if i < len(years) else f"Col{i + 1}"
                     for i in range(n_cols)
@@ -1445,8 +1501,31 @@ class FinancialFileParser:
         # Nothing above the table either — check whether one of the next
         # few rows is itself the real (split-out) header.
         for i in range(1, min(4, len(rows))):
-            candidate_years = self._extract_year_headers(" ".join(c or "" for c in rows[i]))
+            row_i = rows[i]
+            candidate_years = self._extract_year_headers(" ".join(c or "" for c in row_i))
             if not candidate_years:
+                continue
+            # A row with only ONE cell (no value columns of its own) is
+            # far more likely a standalone year/section DIVIDER label
+            # sitting between repeated year-blocks of the SAME table than
+            # a genuine multi-column header row. Confirmed real case:
+            # American Express's FY2022 geographic-operations table is
+            # laid out as "2022" (its own lone row) / 2 data rows / "2021"
+            # (lone row) / 2 data rows / "2020" (lone row) / 2 data rows,
+            # with the REAL column header ("United States | EMEA | APAC |
+            # LACC | Other Unallocated | Consolidated") sitting just
+            # above the ruled-line table's own detected bbox and never
+            # reaching `rows` at all. Without this check, the lone "2021"
+            # divider row got accepted here as if it were the real
+            # header, mislabeling the FIRST two rows (actually 2022's own
+            # data) under "2021" and leaving a stray, unconsumed "2020"
+            # row sitting mid-table later on -- real values, completely
+            # wrong column semantics. Require either a genuine multi-cell
+            # row (this fallback's originally intended shape, e.g.
+            # Corning's own "(units caption) 2020 2019" row, still
+            # accepted below) or 2+ years packed into the single cell
+            # (unambiguous even alone, e.g. "2018 2017 2016").
+            if len(row_i) <= 1 and len(candidate_years) < 2:
                 continue
             n_value_cols = max((len(r) - 1 for r in rows[i + 1:]), default=len(candidate_years))
             n_value_cols = max(n_value_cols, len(candidate_years))
@@ -1478,15 +1557,63 @@ class FinancialFileParser:
             nearby_text = ""
         for line in nearby_text.split("\n"):
             years = self._extract_year_headers(line)
-            if years:
-                n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
-                n_value_cols = max(n_value_cols, len(years))
-                synthesized = ["Line Item"] + [
-                    years[j] if j < len(years) else f"Col{j + 1}" for j in range(n_value_cols)
-                ]
-                return [synthesized] + rows
+            # Same "genuine multi-year header, not a single-year block
+            # divider" safety requirement as the "above the table" search
+            # earlier in this function (min_years_needed) -- without it,
+            # this window (which overlaps DOWN into the table's own top
+            # rows, per this branch's own docstring) can just as easily
+            # catch a lone year-block divider physically positioned a
+            # couple of rows into the table as the genuine split header
+            # this branch was written for. Confirmed real case: American
+            # Express's geography table (rows shaped "2022" (own row) / 2
+            # data rows / "2021" (own row) / 2 data rows / "2020" (own
+            # row) / 2 data rows, real header living OUTSIDE the detected
+            # bbox entirely) -- the earlier "next few rows" check now
+            # correctly rejects the lone "2021" row (see its own comment),
+            # but without this same guard here, THIS window's text-based
+            # scan still independently re-discovered "2021" a few lines
+            # into the table and used it as the header, reproducing the
+            # exact same mislabeling this function exists to prevent.
+            if len(years) < 2:
+                continue
+            n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
+            n_value_cols = max(n_value_cols, len(years))
+            synthesized = ["Line Item"] + [
+                years[j] if j < len(years) else f"Col{j + 1}" for j in range(n_value_cols)
+            ]
+            return [synthesized] + rows
 
-        return rows  # no candidate found anywhere — leave as-is
+        # No year/quarter/period signal found anywhere near this table.
+        # rows[0] is still about to be handed to _table_to_markdown(),
+        # which unconditionally treats row 0 as the header — fine when
+        # rows[0] genuinely IS a text header (e.g. a vote-tally table's
+        # real "Votes For | Votes Against | Abstentions | Broker
+        # Non-Votes" row), but when the table has no such row at all and
+        # rows[0] is actually the FIRST DATA ROW (e.g. the first board
+        # nominee's own name + vote counts), that row's raw numbers get
+        # used as the "header", and every OTHER row's real values end up
+        # paired against those numbers instead of a real column label —
+        # e.g. "Line Item: <2nd nominee> | 59,657,810: <value>" instead
+        # of "Votes For: <value>". Confirmed real case: Foot Locker's
+        # board-of-directors vote table and JPMorgan/American Express's
+        # wide comparison tables, none of which have any year column at
+        # all. Distinguish the two by checking whether rows[0]'s own
+        # value cells (excluding its label column) themselves look like
+        # numeric values, the same shape every other data row has — a
+        # real text header never does. When they do, synthesize the same
+        # generic "Line Item | Col1 | Col2 | ..." fallback Tier 2/Tier 3
+        # already use in this situation, and keep rows[0] as an ordinary
+        # data row instead of letting it masquerade as the header.
+        value_cells = [c for c in rows[0][1:] if c and str(c).strip()]
+        if value_cells:
+            value_like = sum(
+                1 for c in value_cells if self._LAYOUT_VALUE_RE.fullmatch(str(c).strip())
+            )
+            if value_like >= max(1, len(value_cells) // 2 + len(value_cells) % 2):
+                n_value_cols = max((len(r) - 1 for r in rows), default=0)
+                synthesized = ["Line Item"] + [f"Col{i + 1}" for i in range(n_value_cols)]
+                return [synthesized] + rows
+        return rows  # rows[0] already looks like a real text header — leave as-is
 
     def _reinject_year_header_if_missing(self, md: str, page, table_top: float) -> str:
         """
@@ -1735,6 +1862,36 @@ class FinancialFileParser:
             out_rows.append(new_row)
         return out_rows
 
+    _STRIP_YEAR_CELL_RE = re.compile(r'^(?:19|20)\d{2}$')
+    _STRIP_NUMBER_CELL_RE = re.compile(r'^\(?-?\$?\s*[\d,]+\.?\d*\)?\s*%?$')
+
+    def _is_wide_header_strip(self, rows: list) -> bool:
+        """
+        True when a ruled-line group holds ONLY a multi-group column header
+        and no data: at most 3 rows, at least 4 bare-year cells (e.g. "2021
+        2020 Change" repeated once per segment), and no cell that is a real
+        number other than a year. Confirmed real case: JPMorgan's 10-Q
+        "Segment results -- managed basis" page draws ruled bands around
+        only the two header strips (segment names + "2021 2020 Change" x3),
+        so Tier 1 turned each into a junk table and excluded those words
+        from the page -- the unruled data rows below then reached the chunk
+        text (as prose) with no segment names or period labels above them,
+        making it impossible to tell which number belongs to which segment.
+        """
+        if not rows or len(rows) > 3:
+            return False
+        year_cells = 0
+        for row in rows:
+            for cell in row:
+                c = (cell or "").strip()
+                if not c:
+                    continue
+                if self._STRIP_YEAR_CELL_RE.match(c):
+                    year_cells += 1
+                elif self._STRIP_NUMBER_CELL_RE.match(c):
+                    return False
+        return year_cells >= 4
+
     def _ruled_line_tables_and_prose(self, page) -> Tuple[List[str], str]:
         """
         Tier 1: ruled vector-line tables via pdfplumber's find_tables(),
@@ -1768,6 +1925,8 @@ class FinancialFileParser:
             found_tables = []
 
         md_tables = []
+        skipped_header_strip = False
+        self._last_strip_prose = None
         filtered_page = page
         merged_groups = self._merge_adjacent_tables(found_tables)
         for group in merged_groups:
@@ -1799,6 +1958,14 @@ class FinancialFileParser:
                 split_rows = [r for r in real_rows if len(r) >= 2]
                 well_split = bool(real_rows) and len(split_rows) >= max(1, len(real_rows) // 2)
                 if not well_split:
+                    continue
+                # A ruled-line "table" that is ONLY a multi-group header strip
+                # (segment names over repeated "2021 2020 Change" sub-headers)
+                # with its data rows unruled below it: leave its words in the
+                # page so they stay in the text above the rows Tier 2 recovers,
+                # instead of turning them into a junk table and REMOVING them.
+                if self._is_wide_header_strip(rows):
+                    skipped_header_strip = True
                     continue
                 rows = self._inject_missing_year_header(rows, page, group[0].bbox[1])
                 md = self._table_to_markdown(rows)
@@ -1862,6 +2029,14 @@ class FinancialFileParser:
             return md_tables, recovered_prose
 
         if not md_tables:
+            if skipped_header_strip:
+                # One row per line, header lines included -- far easier to read
+                # than the one-cell-per-line text the fitz engine produces for
+                # a wide multi-segment table (9 value columns per row).
+                try:
+                    self._last_strip_prose = page.extract_text() or None
+                except Exception:
+                    self._last_strip_prose = None
             return [], ""
         try:
             prose = filtered_page.extract_text() or ""
@@ -1989,6 +2164,606 @@ class FinancialFileParser:
             if _is_table_line(next((l for l in b.split('\n') if l.strip()), ""))
         ]
 
+    _DATE_CELL_RE = re.compile(
+        r"^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+(?:19|20)\d{2}$",
+        re.IGNORECASE,
+    )
+    _GROUP_PHRASE_RE = re.compile(
+        r"(three|six|nine|twelve)\s+months?\s+ended|(?:fiscal\s+)?year\s+ended",
+        re.IGNORECASE,
+    )
+    _GROUP_CODE = {"three": "3M", "six": "6M", "nine": "9M", "twelve": "12M"}
+
+    def _merge_tail_artifact_column(self, headers: list, data_rows: list):
+        """A last column that only ever holds the tail of the previous column's
+        text (")%" after "(10.9") is an extraction artifact: merge it back.
+        Best Buy p17 "Revenue % change (7.1)% ... (10.9 | )%" produced a 5th value
+        column, so no period-group header could match the 4 real columns."""
+        if len(headers) < 5 or not data_rows:
+            return headers, data_rows
+        last = [r[-1].strip() for r in data_rows if len(r) == len(headers) and r[-1].strip()]
+        if len(last) < 1:
+            return headers, data_rows
+        if not all(re.fullmatch(r"\)?%?\)?", c) for c in last):
+            return headers, data_rows
+        new_rows = []
+        for r in data_rows:
+            if len(r) == len(headers):
+                r = list(r)
+                tail = r.pop().strip()
+                if tail:
+                    r[-1] = (r[-1].strip() + tail)
+            new_rows.append(r)
+        return headers[:-1], new_rows
+
+    def _drop_garbled_caption_rows(self, data_rows: list) -> list:
+        """Word-split caption fragments printed as an early data row ("Three M None
+        | Mon th s Ended | Six Mo | o nt hs E nded") are noise in a numeric table."""
+        if len(data_rows) < 4:
+            return data_rows
+        numeric_rows = sum(1 for r in data_rows if any(re.search(r"\d", c or "") for c in r[1:]))
+        if numeric_rows < 0.6 * len(data_rows):
+            return data_rows
+        kept = []
+        for idx, r in enumerate(data_rows):
+            cells = [c.strip() for c in r if c and c.strip()]
+            if (idx < 2 and len(cells) >= 3 and not any(re.search(r"\d", c) for c in cells)
+                    and any(len(t) <= 2 and t.lower() not in {"of", "to", "at", "in", "on", "by", "vs", "us", "as", "or", "&", "%", "a"}
+                            for c in cells for t in c.split())):
+                continue
+            kept.append(r)
+        return kept
+
+    def _is_text_header_row(self, row: list) -> bool:
+        """Every filled cell (label included) is words with no digits at all --
+        a caption row, not data."""
+        cells = [c.strip() for c in row if c and c.strip()]
+        if not (len(cells) >= 3 and all(re.search(r"[A-Za-z]", c) and not re.search(r"\d", c) for c in cells)):
+            return False
+        # reject garbled captions whose words were split by the extractor
+        # ("Three M None", "Mon th s Ended"): every token must be a real word
+        short_ok = {"of", "to", "at", "in", "on", "by", "vs", "us", "as", "or", "&", "%", "a", "per"}
+        for c in cells:
+            for tok in c.split():
+                if len(tok) <= 2 and tok.lower() not in short_ok:
+                    return False
+        return True
+
+    def _is_date_header_row(self, row: list) -> bool:
+        """A data row whose label AND every filled cell is a calendar date
+        ("July 29, 2023 | January 28, 2023 | July 30, 2022") is really the
+        column header of the table that follows it, not data. Confirmed real
+        case: Best Buy's 10-Q liquidity table (p20) came out as the row
+        `Line Item: July 29, 2023 | 2023: January 28, 2023 | 2022: July 30,
+        2022` and its cash row was labeled `2023: 1,093 | 2022: 1,874`
+        (1,874 is January 2023, not 2022)."""
+        cells = [c.strip() for c in row if c and c.strip()]
+        return len(cells) >= 2 and all(self._DATE_CELL_RE.match(c) for c in cells)
+
+    def _refine_value_headers(self, value_headers: list, header_prose: str) -> list:
+        """Give ambiguous value-column labels ("Col3", or the same year twice)
+        a real meaning from the header lines printed above the table.
+
+        Two shapes, both from real filings:
+        * "Amount / Percent to Sales" pairs (JnJ statement of earnings:
+          Amount 2023 | % to sales 2023 | Amount 2022 | % to sales 2022 |
+          % change): amounts keep the bare year (the sandbox reads that),
+          the percent columns get a year-less label so they can never be
+          mistaken for that year's dollar figure.
+        * period groups ("Three months ended | Twelve months ended" x
+          two years, MGM/Amcor earnings releases): "2022 (3M)", "2022 (12M)".
+        Anything that does not match exactly is returned unchanged."""
+        n = len(value_headers)
+        if n < 3:
+            return value_headers
+        year_like = [h for h in value_headers if re.fullmatch(r"(?:19|20)\d{2}", h)]
+        ambiguous = any(re.fullmatch(r"Col\d+", h) for h in value_headers) or (
+            len(year_like) != len(set(year_like))
+        )
+        if not ambiguous:
+            return value_headers
+        lines = [l for l in header_prose.splitlines() if l.strip()]
+        zone = "\n".join(lines[:40])
+        raw_years = re.findall(r"(?<!\d)((?:19|20)\d{2})(?!\d)", zone)
+
+        # (a) Amount / percent-to-sales pairs
+        if (n in (4, 5) and re.search(r"(?:^|\s)amount(?:\s|$)", zone, re.IGNORECASE)
+                and re.search(r"to\s+sales", zone, re.IGNORECASE)):
+            years = list(dict.fromkeys(raw_years))
+            if len(years) == 2:
+                y1, y2 = years
+                labels = [y1, "% to Sales '" + y1[-2:], y2, "% to Sales '" + y2[-2:]]
+                if n == 5:
+                    labels.append("% Increase (Decrease)")
+                return labels
+
+        # (b) period groups x years: read the FIRST header block only (group
+        # phrases up to the first year, then the years that follow), so
+        # footnotes further down the page that repeat "Twelve months ended
+        # ... 2021" cannot pollute it.
+        tokens = sorted(
+            [(m.start(), "g", self._GROUP_CODE.get((m.group(1) or "").lower(), "FY"))
+             for m in self._GROUP_PHRASE_RE.finditer(zone)]
+            + [(m.start(1), "y", m.group(1))
+               for m in re.finditer(r"(?<!\d)((?:19|20)\d{2})(?!\d)", zone)]
+        )
+        i = 0
+        while i < len(tokens) and tokens[i][1] != "g":
+            i += 1
+        groups: list = []
+        while i < len(tokens) and tokens[i][1] == "g":
+            groups.append(tokens[i][2])
+            i += 1
+        years_block: list = []
+        while i < len(tokens) and tokens[i][1] == "y" and len(years_block) < n:
+            years_block.append(tokens[i][2])
+            i += 1
+        if len(groups) >= 2 and len(years_block) == n and n % len(groups) == 0:
+            per_group = n // len(groups)
+            block = years_block[:per_group]
+            if years_block == block * len(groups) and len(set(block)) == per_group:
+                return [f"{y} ({g})" for g in groups for y in block]
+
+        # (c) quarter headers "1Q21 4Q20 3Q20 2Q20 1Q20" (JPM's financial highlights):
+        # label the columns "1Q 2021" ... so the sandbox sees the year
+        if all(re.fullmatch(r"Col\d+", h) for h in value_headers):
+            qs = re.findall(r"(?<![A-Za-z0-9])([1-4])Q(\d{2})(?![A-Za-z0-9])", zone)
+            if len(qs) >= n:
+                first = qs[:n]
+                if len(set(first)) == n:
+                    return [f"{q}Q 20{yy}" for q, yy in first]
+        return value_headers
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Grouped-column tables (segment blocks / multi-period blocks)
+    # ──────────────────────────────────────────────────────────────────────
+    # Some filings print ONE table as several side-by-side column groups, each
+    # group headed by a name and made of the same few sub-columns, e.g.
+    #
+    #   Three months ended March 31, Consumer & Community Banking  Corporate & Investment Bank  Commercial Banking
+    #   (in millions, except ratios)  2021  2020  Change            2021  2020  Change           2021  2020  Change
+    #   Total net revenue           $ 12,517 $ 13,287 (6)%       $ 14,605 $ 10,003 46%      $ 2,393 $ 2,165 11%
+    #
+    # (JPMorgan's segment results), or a VaR table whose groups are the
+    # periods ("June 30, 2023 | March 31, 2023 | June 30, 2022") each with
+    # "Avg. Min Max". None of the other table tiers recognises this shape, so
+    # the page stayed one raw text block (the "lowest net revenue segment" /
+    # "highest net income segment" / VaR questions then depended on the LLM
+    # reading a wall of numbers, and the sandbox showed an unrelated firm
+    # total). The sub-header line is the anchor: its tokens repeat as a
+    # whole unit (2021 2020 Change x3, Avg. Min Max x3) and the unit contains
+    # a word, so plain repeated-year headers (already handled elsewhere) do
+    # not match.
+    _GC_BAD_UNIT_RE = re.compile(
+        r"^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?$|.*[,:]$|^\d{1,2}$|^(?:of|to|and|the|in|at|for|by|on|per|as)$",
+        re.IGNORECASE,
+    )
+    _GC_NUM_RE = re.compile(r"^\(?-?\$?\d[\d,]*(?:\.\d+)?\)?%?$|^NM$|^[—–-]$")
+    _GC_PERIOD_VOCAB = {
+        "three", "six", "nine", "twelve", "months", "month", "ended", "year", "fiscal",
+        "january", "february", "march", "april", "may", "june", "july", "august",
+        "september", "october", "november", "december",
+    }
+
+    @staticmethod
+    def _multi_number_cell_fraction(tables: List[str]) -> float:
+        """Share of non-empty value cells holding 2+ separate numbers."""
+        total = multi = 0
+        for t in tables:
+            for line in t.splitlines()[2:]:
+                if not line.startswith("|"):
+                    continue
+                for cell in line.strip("|").split("|")[1:]:
+                    c = cell.strip()
+                    if not c:
+                        continue
+                    total += 1
+                    if len(re.findall(r"(?<![\w.])\(?\$?\d[\d,]*\.?\d*\)?%?(?![\w.])", c)) >= 2:
+                        multi += 1
+        return multi / total if total >= 5 else 0.0
+
+    @staticmethod
+    def _md_data_rows(tables: List[str]) -> int:
+        """Data rows (excluding header + separator) across markdown tables."""
+        return sum(max(0, len([l for l in t.splitlines() if l.startswith("|")]) - 2) for t in tables)
+
+    def _periodic_subheader(self, words: list):
+        """(unit, groups, words) when the line ENDS with one short unit
+        (2-4 tokens, at least one alphabetic) repeated 2+ whole times; any
+        tokens before that run are the row-label caption, e.g. "(in
+        millions, except ratios)". `words` in the result is only the
+        periodic run."""
+        toks = [w["text"] for w in words]
+        n = len(toks)
+        best = None
+        for m in (2, 3, 4):
+            for g in range(n // m, 1, -1):
+                run = toks[n - m * g:]
+                unit = run[:m]
+                if run != unit * g:
+                    continue
+                if not any(re.search(r"[A-Za-z]", t) for t in unit):
+                    continue
+                # a run of dates ("July 2, July 3,"), connectors ("Amount to Sales"
+                # split into 3 tokens) or bare day numbers is not a set of column
+                # captions -- it made JnJ/Pfizer/3M/Amcor date headers and equity
+                # statements come out as mislabeled sparse tables
+                if any(self._GC_BAD_UNIT_RE.match(t) for t in unit):
+                    continue
+                if best is None or m * g > best[0]:
+                    best = (m * g, unit, g, words[n - m * g:])
+                break
+        if best is None:
+            return None
+        return best[1], best[2], best[3]
+
+    def _stacked_subheader(self, lines: list, i: int, run_words: list):
+        """Sub-column captions printed over several lines ("Rigid" above
+        "Packaging", Amcor p10): rebuild the captions from the numeric columns
+        themselves. Column anchors come from the first data rows, every non-
+        numeric word in the caption band is assigned to its nearest anchor and
+        the captions are read top-to-bottom. Returns (unit, groups, words) like
+        _periodic_subheader, or None when the captions do not repeat."""
+        data = None
+        for k in range(i + 1, min(len(lines), i + 6)):
+            if sum(1 for w in lines[k]["words"] if self._GC_NUM_RE.match(w["text"])) >= 3:
+                data = k
+                break
+        if data is None:
+            return None
+        # numbers left of the caption run are part of the row label ("Net sales fiscal
+        # year 2023"), not a value column
+        min_x = min(w["x0"] for w in run_words) - 60
+        # numbers are right-aligned, so their RIGHT edges line up per column
+        edges = sorted(
+            w["x1"]
+            for k in range(data, min(len(lines), data + 8))
+            for w in lines[k]["words"]
+            if self._GC_NUM_RE.match(w["text"]) and (w["x0"] + w["x1"]) / 2 >= min_x
+        )
+        anchors: List[List[float]] = []
+        for c in edges:
+            if anchors and c - anchors[-1][-1] <= 6:
+                anchors[-1].append(c)
+            else:
+                anchors.append([c])
+        # a typical figure is ~20pt wide: the caption is centred over its digits
+        anchors_x = [sum(a) / len(a) - 10 for a in anchors if len(a) >= 2]
+        n = len(anchors_x)
+        if n < 4 or n > 16:
+            return None
+        cols: List[List[Dict[str, Any]]] = [[] for _ in anchors_x]
+        for k in range(max(0, i - 1), data):
+            for w in lines[k]["words"]:
+                if self._GC_NUM_RE.match(w["text"]):
+                    continue
+                cx = (w["x0"] + w["x1"]) / 2
+                a = min(range(n), key=lambda q: abs(anchors_x[q] - cx))
+                if abs(anchors_x[a] - cx) <= 45:
+                    cols[a].append(w)
+        labels = []
+        for ws in cols:
+            ws.sort(key=lambda w: (round(w["top"]), w["x0"]))
+            labels.append(" ".join(w["text"] for w in ws).strip())
+        if any(not lab for lab in labels):
+            return None
+        for m in (2, 3, 4):
+            if (n % m == 0 and n // m >= 2 and labels == labels[:m] * (n // m)
+                    and any(re.search(r"[A-Za-z]", lab) for lab in labels[:m])
+                    and not any(self._GC_BAD_UNIT_RE.match(t) for lab in labels[:m] for t in lab.split())):
+                words = [
+                    {"text": labels[q], "x0": anchors_x[q] - 10, "x1": anchors_x[q] + 10, "top": lines[i]["top"]}
+                    for q in range(n)
+                ]
+                return labels[:m], n // m, words
+        return None
+
+    def _realign_sparse_rows(self, page, md_tables: List[str]) -> List[str]:
+        """Put the values of rows that have FEWER numbers than the table has value
+        columns back under the columns they were printed under.
+
+        Ruled-line cell compaction (`_compact_row_cells`) drops blank cells so
+        every row has the same shape, which left-shifts a sparse row: MGM's
+        "Adjusted EBITDAR $957,307 ... $3,497,254" total row (printed under the
+        three-month-2022 and twelve-month-2022 columns) came out under the first
+        TWO columns, i.e. the full-year figure labelled as the 2021 quarter. The
+        column positions come from the table's own full rows (right edges of
+        their numbers); a sparse row's numbers are assigned to the nearest one."""
+        # cheap pre-check first: pdfplumber word extraction is the expensive part, so
+        # only pages that actually contain a table with a sparse row pay for it
+        def _has_sparse(md: str) -> bool:
+            rows = [
+                [c.strip() for c in l.strip().strip("|").split("|")]
+                for l in md.splitlines() if l.startswith("|")
+            ]
+            if len(rows) < 5:
+                return False
+            n = len(rows[0]) - 1
+            body = rows[2:]
+            return n >= 3 and any(len(r) == n + 1 and 0 < sum(1 for c in r[1:] if c) < n for r in body)
+
+        if not any(_has_sparse(md) for md in md_tables):
+            return md_tables
+        try:
+            words = page.extract_words(x_tolerance=2, y_tolerance=2, keep_blank_chars=False)
+        except Exception:
+            return md_tables
+        lines: Dict[int, list] = {}
+        for w in words:
+            lines.setdefault(round(w["top"] / 3), []).append(w)
+
+        def _line_for(label: str):
+            toks = label.split()[:2]
+            if not toks:
+                return None
+            for key in sorted(lines):
+                ws = sorted(lines[key] + lines.get(key + 1, []), key=lambda w: w["x0"])
+                texts = [w["text"] for w in ws]
+                for k in range(len(texts) - len(toks) + 1):
+                    if texts[k:k + len(toks)] == toks:
+                        return [w for w in ws if self._GC_NUM_RE.match(w["text"])]
+            return None
+
+        out: List[str] = []
+        for md in md_tables:
+            rows_raw = [l for l in md.splitlines() if l.startswith("|")]
+            if len(rows_raw) < 5:
+                out.append(md)
+                continue
+            cells = [[c.strip() for c in l.strip().strip("|").split("|")] for l in rows_raw]
+            header, body = cells[0], cells[2:]
+            n = len(header) - 1
+            if n < 3:
+                out.append(md)
+                continue
+            # a last column holding only the tail of the previous cell (")%") is an
+            # extraction artifact, not a real column: leave such a table to
+            # _merge_tail_artifact_column
+            _tail = [r[-1] for r in body if len(r) == n + 1 and r[-1]]
+            if _tail and all(re.fullmatch(r"\)?%?\)?", c) for c in _tail):
+                out.append(md)
+                continue
+            full = [r for r in body if len(r) == n + 1 and all(c for c in r[1:])]
+            sparse = [r for r in body if len(r) == n + 1 and 0 < sum(1 for c in r[1:] if c) < n]
+            if len(full) < 2 or not sparse:
+                out.append(md)
+                continue
+            anchors: List[List[float]] = [[] for _ in range(n)]
+            for r in full[:8]:
+                nums = _line_for(r[0])
+                if nums and len(nums) == n:
+                    for q, w in enumerate(sorted(nums, key=lambda w: w["x0"])):
+                        anchors[q].append(w["x1"])
+            if any(not a for a in anchors):
+                out.append(md)
+                continue
+            anchor_x = [sum(a) / len(a) for a in anchors]
+            changed = False
+            for r in sparse:
+                filled = [c for c in r[1:] if c]
+                nums = _line_for(r[0])
+                if not nums or len(nums) != len(filled):
+                    continue
+                new_vals = [""] * n
+                ok = True
+                for w, val in zip(sorted(nums, key=lambda w: w["x0"]), filled):
+                    q = min(range(n), key=lambda q: abs(anchor_x[q] - w["x1"]))
+                    if abs(anchor_x[q] - w["x1"]) > 12 or new_vals[q]:
+                        ok = False
+                        break
+                    new_vals[q] = val
+                if ok and new_vals != r[1:]:
+                    r[1:] = new_vals
+                    changed = True
+            if not changed:
+                out.append(md)
+                continue
+            rebuilt = self._table_to_markdown([header] + body)
+            out.append(rebuilt if rebuilt else md)
+        return out
+
+    def _grouped_column_tables(self, page) -> List[str]:
+        try:
+            words = page.extract_words(x_tolerance=2, y_tolerance=2, keep_blank_chars=False)
+        except Exception:
+            return []
+        if len(words) < 30:
+            return []
+        lines: List[Dict[str, Any]] = []
+        for w in sorted(words, key=lambda w: (round(w["top"]), w["x0"])):
+            if lines and abs(lines[-1]["top"] - w["top"]) <= 2.5:
+                lines[-1]["words"].append(w)
+            else:
+                lines.append({"top": w["top"], "words": [w]})
+        for ln in lines:
+            ln["words"].sort(key=lambda w: w["x0"])
+
+        tables: List[str] = []
+        i = 1
+        while i < len(lines):
+            sub = self._periodic_subheader(lines[i]["words"])
+            if sub is None:
+                i += 1
+                continue
+            unit, ngroups, sub_words = sub
+            # more numbers in the first data row than sub-columns: the captions are
+            # stacked over several lines -- rebuild them from the numeric columns
+            _first_data = next(
+                (lines[k] for k in range(i + 1, min(len(lines), i + 6))
+                 if sum(1 for w in lines[k]["words"] if self._GC_NUM_RE.match(w["text"])) >= 3),
+                None,
+            )
+            if _first_data is not None and sum(
+                1 for w in _first_data["words"] if self._GC_NUM_RE.match(w["text"])
+            ) > len(sub_words):
+                stacked = self._stacked_subheader(lines, i, sub_words)
+                if stacked is None:
+                    i += 1
+                    continue
+                unit, ngroups, sub_words = stacked
+            m = len(unit)
+            groups_x = [(sub_words[g * m]["x0"], sub_words[g * m + m - 1]["x1"]) for g in range(ngroups)]
+            bounds = [(groups_x[g][1] + groups_x[g + 1][0]) / 2 for g in range(ngroups - 1)]
+            sub_centers = [(w["x0"] + w["x1"]) / 2 for w in sub_words]
+
+            # group names: taken from the nearest line above the sub-header whose
+            # words split into DIFFERENT names per group (stacked captions such as
+            # "Net US | Net US" or "EPS | EPS" repeat the same text in every group
+            # and are skipped; a caption carrying a year or period wording wins)
+            def _is_vocab(t: str) -> bool:
+                tl = t.lower().strip(",:")
+                return tl in self._GC_PERIOD_VOCAB or bool(re.fullmatch(r"\d{1,2}|(?:19|20)\d{2}", tl))
+
+            def _names_from(line_words: list):
+                prev = list(line_words)
+                if not all(_is_vocab(w["text"]) for w in prev):
+                    k = 0
+                    while k < len(prev) and _is_vocab(prev[k]["text"]):
+                        k += 1
+                    prev = prev[k:]
+                parts: List[List[str]] = [[] for _ in range(ngroups)]
+                for w in prev:
+                    cx = (w["x0"] + w["x1"]) / 2
+                    parts[sum(1 for b in bounds if cx > b)].append(w["text"])
+                return [" ".join(pp).strip() for pp in parts]
+
+            names = None
+            names_idx = i - 1
+            for back in range(1, 5):
+                if i - back < 0:
+                    break
+                cand = _names_from(lines[i - back]["words"])
+                if any(not c for c in cand) or len(set(cand)) < ngroups:
+                    continue
+                # a group name is a short caption ("Consumer & Community Banking",
+                # "Twelve Months Ended June 30, 2022"); a whole prose line above the
+                # table split by x-position is not (Adobe/Amazon/Microsoft/Ulta
+                # pages came out with sentences as column labels)
+                if any(len(c) > 60 or len(c.split()) > 8 for c in cand):
+                    continue
+                names = cand
+                names_idx = i - back
+                if any(re.search(r"(?:19|20)\d{2}|months", c, re.IGNORECASE) for c in cand):
+                    break
+            if names is None:
+                i += 1
+                continue
+            # keep the labels short: BM25 row length normalisation ranked the JPM/Pfizer
+            # rows with long "Three Months Ended '23: ..." labels below their old
+            # short-labelled versions and pushed them out of the LLM's 16 chunks
+            # (Pfizer "which region had the biggest drop" lost its p38 rows)
+            def _short(nm: str) -> str:
+                nm = re.sub(
+                    r"(?i)\b(three|six|nine|twelve)\s+months?\s+ended\b",
+                    lambda mm: self._GROUP_CODE[mm.group(1).lower()], nm)
+                nm = re.sub(r"(?i)\b(?:fiscal\s+)?years?\s+ended\b", "FY", nm)
+                return nm.strip()
+            names = [_short(nm) for nm in names]
+
+            def _sub_label(g: int, s: int) -> str:
+                sub_tok = unit[s]
+                name = names[g]
+                if re.fullmatch(r"(?:19|20)\d{2}", sub_tok):
+                    if re.search(r"(?:19|20)\d{2}", name):
+                        return f"{name} {sub_tok}"
+                    return f"{name} '{sub_tok[-2:]}"  # year-less: never read as that year's figure by the sandbox
+                return f"{name} {sub_tok}"
+
+            # caption: the nearest sentence/heading above the group-name line ("The
+            # following summarizes revenues by geographic area:"). Stored in the first
+            # header cell and written into every row, so a query about "geographic
+            # region" can find rows whose own label ("Developed Rest of World") never
+            # says it (Pfizer's three-month region table ranked ~30th and dropped out
+            # of the LLM's evidence).
+            caption = ""
+            for k in range(names_idx - 1, max(-1, names_idx - 7), -1):
+                ws_k = lines[k]["words"]
+                txt_k = " ".join(w["text"] for w in ws_k).strip()
+                n_num = sum(1 for w in ws_k if self._GC_NUM_RE.match(w["text"]))
+                if len(txt_k.split()) >= 4 and len(txt_k) <= 160 and n_num <= 3:
+                    caption = txt_k[:100]
+                    break
+            headers = [("Table: " + caption) if caption else "Line Item"] + [
+                _sub_label(g, s) for g in range(ngroups) for s in range(m)
+            ]
+            first_x = groups_x[0][0]
+            rows: List[List[str]] = []
+            bad_rows = 0
+            pending_label = ""
+            j = i + 1
+            label_only_run = 0
+            while j < len(lines):
+                ws = lines[j]["words"]
+                if self._periodic_subheader(ws) is not None:
+                    break
+                label_words, value_words = [], []
+                for w in ws:
+                    t = w["text"]
+                    is_num = bool(self._GC_NUM_RE.match(t)) or t in ("$", "%")
+                    if not value_words and (not is_num or w["x1"] < first_x - 40):
+                        label_words.append(t)
+                    elif is_num:
+                        value_words.append(w)
+                    else:
+                        # footnote marker such as "(d)" sitting between values
+                        continue
+                nums = [w for w in value_words if w["text"] not in ("$", "%")]
+                if len(nums) < 2 and label_words and re.search(r"[A-Za-z]", " ".join(label_words)):
+                    pending_label = " ".join(label_words).strip()  # a wrapped row label
+                if len(nums) < 2:
+                    label_only_run += 1
+                    if label_only_run >= 2 or (rows and not nums and re.match(r"^\(?[a-z]\)", " ".join(label_words))):
+                        break
+                    j += 1
+                    continue
+                label_only_run = 0
+                if len(nums) > len(sub_centers):
+                    # more values than sub-columns: the sub-header line is
+                    # incomplete (a stacked caption such as "Rigid / Packaging"
+                    # printed on two lines) -- never mislabel, count it as bad
+                    bad_rows += 1
+                    j += 1
+                    continue
+                cells = [""] * (ngroups * m)
+                collided = False
+                for w in nums:
+                    cx = (w["x0"] + w["x1"]) / 2
+                    idx = min(range(len(sub_centers)), key=lambda q: abs(sub_centers[q] - cx))
+                    if cells[idx]:
+                        collided = True
+                    else:
+                        cells[idx] = w["text"]
+                if collided:
+                    bad_rows += 1
+                    j += 1
+                    continue
+                # a "%" printed as its own token right after a value belongs to it
+                for w in value_words:
+                    if w["text"] == "%":
+                        cx = (w["x0"] + w["x1"]) / 2
+                        idx = min(range(len(sub_centers)), key=lambda q: abs(sub_centers[q] - cx))
+                        for back in (idx, idx - 1):
+                            if 0 <= back < len(cells) and cells[back] and not cells[back].endswith("%"):
+                                cells[back] += "%"
+                                break
+                label = " ".join(label_words).strip()
+                if not label and pending_label:
+                    label = pending_label  # numbers printed on the line below their wrapped label
+                pending_label = ""
+                if label and re.search(r"[A-Za-z]", label) and not re.match(r"^\(\d\)", label):
+                    rows.append([label] + cells)
+                j += 1
+            fill = (
+                sum(sum(1 for c in r[1:] if c) / max(1, len(r) - 1) for r in rows) / len(rows)
+                if rows else 0.0
+            )
+            if len(rows) >= 3 and bad_rows <= max(1, len(rows) // 5) and fill >= 0.35:
+                md = self._table_to_markdown([headers] + rows)
+                if md:
+                    tables.append(md)
+            i = max(j, i + 1)
+        return tables
+
     def _linearize_markdown_tables(
         self,
         company_name: str,
@@ -2053,17 +2828,46 @@ class FinancialFileParser:
         )
 
         row_idx = 0
+        header_prose = page_text
+        for _blk in table_blocks:
+            header_prose = header_prose.replace(_blk, "", 1)
         for block in table_blocks:
             headers, data_rows = self._parse_markdown_table_block(block)
             if len(headers) < 2 or not data_rows:
                 continue
-            value_headers = headers[1:]
+            headers, data_rows = self._merge_tail_artifact_column(headers, data_rows)
+            data_rows = self._drop_garbled_caption_rows(data_rows)
+            value_headers = self._refine_value_headers(headers[1:], header_prose)
 
-            for row in data_rows:
+            for row_no, row in enumerate(data_rows):
                 if not row or not row[0].strip():
+                    continue
+                if self._is_text_header_row(row):
+                    # a wrapped column-header line printed as a data row
+                    # ("Total Stores at Beginning of Second Quarter | Stores Opened |
+                    # ..."): use it as the header of the numeric rows that follow
+                    # when its name count equals their value count
+                    names = [c.strip() for c in row if c and c.strip()]
+                    nxt = next((r for r in data_rows[row_no + 1:] if r and r[0].strip()), None)
+                    if nxt is not None:
+                        nvals = len([c for c in nxt[1:] if c and c.strip()])
+                        if nvals == len(names) and nvals >= 4:
+                            groups = list(dict.fromkeys(
+                                re.findall(r"(?:fiscal|fy)\s*((?:19|20)\d{2})", header_prose, re.IGNORECASE)
+                            ))
+                            if len(groups) >= 2 and nvals % len(groups) == 0:
+                                per = nvals // len(groups)
+                                names = [f"Fiscal {groups[i // per]} {nm}" for i, nm in enumerate(names)]
+                            value_headers = names
+                    continue
+                if self._is_date_header_row(row):
+                    # the table's real column header, printed as a row: label
+                    # the rows that follow with these dates instead
+                    value_headers = [c.strip() for c in row if c and c.strip()]
                     continue
                 line_item = row[0].strip()
                 values = row[1:]
+                table_caption = headers[0].strip() if headers and headers[0].startswith("Table:") else ""
                 kv_parts = [
                     f"{value_headers[i] if i < len(value_headers) else f'Col{i + 1}'}: {values[i]}"
                     for i in range(len(values))
@@ -2082,7 +2886,9 @@ class FinancialFileParser:
                     "page_number": page_num,
                     "content": (
                         f"Company: {company_name} | Report: {table_name} | "
-                        f"Line Item: {line_item} | " + " | ".join(kv_parts)
+                        f"Line Item: {line_item} | "
+                        + (f"{table_caption} | " if table_caption else "")
+                        + " | ".join(kv_parts)
                     ),
                     "type": "table_row",
                     "raw_data": raw_data,
@@ -2484,18 +3290,61 @@ class FinancialFileParser:
         # clean Markdown table (fitz has no bounding-box awareness of
         # pdfplumber's detected table regions).
         ruled_prose_by_page: Dict[int, str] = {}
+        strip_prose_by_page: Dict[int, str] = {}
         layout_text_by_page: Dict[int, str] = {}
         try:
             import pdfplumber as _pdfplumber_prepass
             with _pdfplumber_prepass.open(io.BytesIO(content_bytes)) as _pdf:
                 for page_idx, page in enumerate(_pdf.pages):
+                    page = self._without_overlapping_spaces(page)
                     try:
                         md_tables, prose = self._ruled_line_tables_and_prose(page)
                     except Exception:
                         md_tables, prose = [], ""
                     if md_tables:
+                        md_tables = self._realign_sparse_rows(page, md_tables)
+                    grouped_tables: List[str] = []
+                    try:
+                        grouped_tables = self._grouped_column_tables(page)
+                    except Exception:
+                        grouped_tables = []
+                    if grouped_tables and md_tables:
+                        # A ruled-line detection that only caught a caption/header
+                        # strip (JPM's VaR page: "Three months ended | 2023: | 2022:")
+                        # must not hide the real grouped table; keep the ruled
+                        # tables only when they carry more data rows.
+                        def _md_rows(tabs):
+                            return sum(max(0, len([l for l in t.splitlines() if l.startswith("|")]) - 2) for t in tabs)
+                        if _md_rows(grouped_tables) > _md_rows(md_tables):
+                            md_tables = []
+                        else:
+                            grouped_tables = []
+                    if md_tables and not grouped_tables and self._multi_number_cell_fraction(md_tables) >= 0.2:
+                        # ruled cells that each hold several numbers (JPM p3: "66.56 66.11
+                        # 63.93") mean the column split failed -- read the page another way
+                        md_tables = []
+                    if md_tables and not grouped_tables:
+                        # Ruled-line detection can catch only a fragment of a page's
+                        # table (JnJ p10: 4 of ~17 statement rows). When the plain
+                        # layout-text reading recovers clearly more data rows, drop
+                        # the fragment and let Tier 2/3 handle the page.
+                        try:
+                            _lt = page.extract_text(layout=True) or ""
+                            _l_tabs, _ = self._layout_text_to_markdown_and_prose(_lt) if _lt else ([], "")
+                            _l_rows = self._md_data_rows(_l_tabs)
+                            _r_rows = self._md_data_rows(md_tables)
+                            if _l_rows >= _r_rows + 3 and _l_rows >= 1.5 * _r_rows:
+                                md_tables = []
+                        except Exception:
+                            pass
+                    if md_tables:
                         ruled_tables_by_page[page_idx] = md_tables
                         ruled_prose_by_page[page_idx] = prose
+                    elif grouped_tables:
+                        ruled_tables_by_page[page_idx] = grouped_tables
+                        ruled_prose_by_page[page_idx] = page.extract_text() or ""
+                    elif getattr(self, "_last_strip_prose", None):
+                        strip_prose_by_page[page_idx] = self._last_strip_prose
                     try:
                         layout_text_by_page[page_idx] = page.extract_text(layout=True) or ""
                     except Exception:
@@ -2565,6 +3414,23 @@ class FinancialFileParser:
                         # (no header re-injection happens here) — plain
                         # markdown strings only.
                         word_tables = [md for md, _top in word_tables_with_pos]
+                        if word_tables and self._multi_number_cell_fraction(word_tables) >= 0.2:
+                            # column clustering failed (several values packed into one
+                            # cell, e.g. "Col1: 66.56 66.11 63.93"); let Tier 3 read the page
+                            word_tables = []
+                        if word_tables:
+                            # Tier 2 sometimes recovers only a few rows of a page
+                            # whose layout-text (Tier 3) reading is complete: JnJ's
+                            # Q2 statement of earnings (p10) kept 4 of ~17 rows via
+                            # Tier 2 and lost "Sales to customers" / "Net earnings".
+                            # Prefer Tier 3 when it recovers clearly more data rows.
+                            _lt = layout_text_by_page.get(page_idx, "")
+                            if _lt:
+                                _l_tabs, _ = self._layout_text_to_markdown_and_prose(_lt)
+                                _l_rows = self._md_data_rows(_l_tabs)
+                                _w_rows = self._md_data_rows(word_tables)
+                                if _l_rows >= _w_rows + 3 and _l_rows >= 1.5 * _w_rows:
+                                    word_tables = []
                         if word_tables:
                             prose_for_page = self._clean_text_content(word_prose)
                             if not self._is_readable(prose_for_page, min_alnum=1):
@@ -2582,6 +3448,13 @@ class FinancialFileParser:
                                 if not self._is_readable(prose_for_page, min_alnum=1):
                                     prose_for_page = best_text
                                 best_text = self._compose_page_text(prose_for_page, layout_tables)
+                            elif page_idx in strip_prose_by_page and self._is_readable(
+                                self._clean_text_content(strip_prose_by_page[page_idx]), min_alnum=1
+                            ):
+                                # Wide multi-segment table whose ruled part was only a
+                                # header strip: pdfplumber's one-row-per-line text (header
+                                # lines included) beats fitz's one-cell-per-line text.
+                                best_text = self._clean_text_content(strip_prose_by_page[page_idx])
                     # Step 3: update section state if this page has a new header
                     detected = self._detect_section(best_text)
                     if detected:
@@ -2604,6 +3477,7 @@ class FinancialFileParser:
             current_section = "cover_page"   # Step 3: section state machine
             with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
                 for page_idx, page in enumerate(pdf.pages):
+                    page = self._without_overlapping_spaces(page)
                     page_num = page_idx + 1
                     best_text = ""
 

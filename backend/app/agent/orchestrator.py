@@ -20,6 +20,7 @@ from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import LLMAnswerGenerator, EVIDENCE_PROMPT_CAP
+from app.agent.evidence_selection import select_with_quota
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
 from app.tools.hybrid_retriever import is_attribution_query, is_geography_query, is_legal_query
 
@@ -42,7 +43,7 @@ class FinAgentRAGOrchestrator:
     # ("who are Boeing's primary customers", "what drove JnJ's gross
     # margin change", "is 3M capital-intensive") only ever issues 1-2
     # search queries total (a topic query plus the bare question text),
-    # nowhere near RETRIEVAL_MAX_TOTAL/CONTEXT_CHUNK_LIMIT's headroom, so
+    # nowhere near CONTEXT_CHUNK_LIMIT's headroom, so
     # there's no accumulation-cap risk in widening just this path the way
     # there would be for a composite NUMERIC formula's 8-placeholder fan-
     # out. Confirmed real, repeated pattern across three separate
@@ -62,26 +63,13 @@ class FinAgentRAGOrchestrator:
     # at all (rank ~2-24 depending on phrasing) that always lost to
     # shorter, more topically-generic prose.
     RETRIEVAL_TOP_K_NARRATIVE = 15
-    # Hard ceiling on total evidence buffer size. Must comfortably fit every
-    # sub-query a single formula's own required_vars can generate (top_k=5
-    # each) — a composite formula like cash_conversion_cycle needs 8
-    # placeholders (cogs, revenue, inv_old/new, ar_old/new, ap_old/new), so
-    # 8*5=40 sub-results. The old value of 15 silently cut off mid-formula,
-    # dropping ap_old/ap_new before they were ever retrieved (confirmed
-    # real case: General Mills FY2019 CCC — accounts payable never entered
-    # the evidence buffer at all, and the whole computation fell back to a
-    # generic, ungrounded LLM guess). Sized with headroom above today's
-    # largest formula rather than pinned to exactly 40, so the next
-    # formula with one or two more placeholders doesn't repeat this.
-    RETRIEVAL_MAX_TOTAL = 45
-    # A SECOND, separate cap applied right before evidence reaches PoT/the
+    # Cap applied right before evidence reaches PoT/the
     # LLM (sorted by relevance_score, top N kept) — raising
-    # RETRIEVAL_MAX_TOTAL alone isn't enough if this one stays tight,
-    # since it can still truncate a lower-but-still-correct-scoring row
-    # out of the final window even though it survived the earlier cap.
+    # A tight window here can truncate a lower-but-still-correct-scoring row
+    # out of the final window even though it was retrieved.
     # Confirmed real case: General Mills' own real "Net earnings
     # attributable to General Mills" row (score ~43) ranked #3 for its
-    # own retrieval query — comfortably inside RETRIEVAL_MAX_TOTAL=30 —
+    # own retrieval query — comfortably inside the retrieved set —
     # but still got squeezed out of the final CONTEXT_CHUNK_LIMIT=8 window
     # by higher-scoring prose chunks from OTHER sub-queries in the same
     # evidence_buffer, leaving retention_ratio's net_income_attributable
@@ -118,9 +106,10 @@ class FinAgentRAGOrchestrator:
         -- the model then denied the note was ever supplied, when it had
         simply never been shown it despite retrieval finding it perfectly.
         """
-        return sorted(
-            evidence_buffer, key=lambda item: item.get("relevance_score") or 0, reverse=True
-        )[:self.CONTEXT_CHUNK_LIMIT]
+        # Each sub-query keeps its own top passages (scores of different
+        # queries are not comparable); the rest is filled by raw score --
+        # see evidence_selection.select_with_quota.
+        return select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT)
 
     def _build_evidence_info(self, hit: Dict[str, Any], sub_question: str = None) -> Dict[str, Any]:
         """
@@ -151,7 +140,58 @@ class FinAgentRAGOrchestrator:
             info["sub_question"] = sub_question
         return info
 
+    #: Opening words of an answer that says the chosen file lacks the fact.
+    _REFUSAL_HEAD_RE = re.compile(
+        r"(?:cannot|can't|can not|unable to|not able to)\s+(?:conclusively\s+)?"
+        r"(?:determine|confirm|calculate|compute|identify|say|answer|tell|find)"
+        r"|(?:do(?:es)?\s+not|don't|doesn't)\s+(?:include|disclose|contain|provide|state|show|say)"
+        r"|(?:not|isn't|aren't)\s+(?:disclosed|included|provided|available|stated)"
+        r"|insufficient (?:evidence|data|information)|no (?:such )?(?:data|information) (?:in|is)",
+        re.IGNORECASE,
+    )
+
+    def _looks_like_refusal(self, answer: str) -> bool:
+        return bool(answer) and bool(self._REFUSAL_HEAD_RE.search(answer[:220]))
+
+    def _alternate_company_docs(self, resolved: str, query: str, limit: int = 2) -> List[str]:
+        """Other files of the SAME company as `resolved`, best guess first
+        (a year the question names, then plain annual filings, then more
+        recent). Each is tried on its own -- one file per attempt."""
+        import re as _re
+        def _base(name: str) -> str:
+            return _re.split(r"_(?:19|20)\d{2}", name or "", maxsplit=1)[0].lower()
+        def _year(name: str) -> str:
+            m = _re.search(r"(?<!\d)((?:19|20)\d{2})(?!\d)", name or "")
+            return m.group(1) if m else ""
+        q_years = set(_re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", query))
+        base = _base(resolved)
+        cands = []
+        for uf in self.vector_store.uploaded_files:
+            name = uf.get("company", "")
+            if not name or name == resolved or _base(name) != base:
+                continue
+            has_q = bool(_re.search(r"(?<!\d)(?:19|20)\d{2}q[1-4]", name, _re.IGNORECASE)) or "earnings" in name.lower()
+            cands.append((1 if _year(name) in q_years else 0, 0 if has_q else 1, _year(name), name))
+        cands.sort(reverse=True)
+        return [c[3] for c in cands[:limit]]
+
     def process_query(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
+        """Answer from the best-guess file; if that answer says the file lacks
+        the fact, try the same company's other files one at a time (each
+        attempt uses a single file) and keep the first non-refusing answer."""
+        result = self._process_query_once(query, max_iterations)
+        if not self._looks_like_refusal(result.get("final_answer", "")):
+            return result
+        for alt in self._alternate_company_docs(result.get("resolved_entity", ""), query):
+            alt_result = self._process_query_once(query, max_iterations, _entity_override=alt)
+            if not self._looks_like_refusal(alt_result.get("final_answer", "")):
+                alt_result["retried_from"] = result.get("resolved_entity", "")
+                return alt_result
+        return result
+
+    def _process_query_once(
+        self, query: str, max_iterations: int = 3, _entity_override: Optional[str] = None
+    ) -> Dict[str, Any]:
         trace_steps = []
         evidence_buffer: List[Dict[str, Any]] = []  # full evidence objects
         evidence_meta: List[Dict[str, Any]] = []    # per-item sub_question metadata
@@ -184,7 +224,7 @@ class FinAgentRAGOrchestrator:
         # unrelated row into the retrieval results the formula extraction
         # then had to guess from.
         clean_entity = classification["entity"]
-        classification["entity"] = self._match_entity_to_corpus(
+        classification["entity"] = _entity_override or self._match_entity_to_corpus(
             classification["entity"], query
         )
 
@@ -325,15 +365,10 @@ class FinAgentRAGOrchestrator:
                     decompose_src = sub_questions[-1].get("source", "rule") if sub_questions else "rule"
 
                     for sub_q in retrieval_steps:
-                        # ── Early-stop: skip if total evidence is already large enough ──
-                        if len(evidence_buffer) >= self.RETRIEVAL_MAX_TOTAL:
-                            trace_steps.append({
-                                "step_name": f"Step {sub_q['step']}: Early-Stop",
-                                "type": "step_retrieval",
-                                "detail": f"Evidence buffer full ({len(evidence_buffer)} chunks). Skipping remaining sub-queries.",
-                            })
-                            break
-
+                        # Every sub-question is ALWAYS retrieved (no early-stop gate):
+                        # what finally reaches PoT / the LLM is decided afterwards by
+                        # ranking all collected evidence together (CONTEXT_CHUNK_LIMIT,
+                        # then EVIDENCE_PROMPT_CAP).
                         step_query = sub_q["query"]
                         target_metric = sub_q.get("target_metric")
                         target_year   = sub_q.get("target_year")
@@ -446,7 +481,10 @@ class FinAgentRAGOrchestrator:
                             statement_type_hint=effective_hint,
                             query_years=classification.get("years"),
                         )
-                        hits = self._deduplicate_hits(hits)
+                        hits = self._tag_subquery(
+                            sub_q.get("step", 0),
+                            self._deduplicate_hits(hits, entity=classification.get("entity")),
+                        )
 
                         step_hit_infos = []
                         for hit in hits:
@@ -476,7 +514,7 @@ class FinAgentRAGOrchestrator:
 
                     # ── Fallback: if zero evidence collected, use classifier retrieval_queries ──
                     if not evidence_buffer:
-                        for sq in classification["retrieval_queries"]:
+                        for fb_idx, sq in enumerate(classification["retrieval_queries"]):
                             hits = self.vector_store.search(
                                 sq, top_k=self.RETRIEVAL_TOP_K,
                                 exclude_ids=list(retrieved_ids),
@@ -484,7 +522,10 @@ class FinAgentRAGOrchestrator:
                                 statement_type_hint=statement_type_hint,  # Step 4
                                 query_years=classification.get("years"),
                             )
-                            for hit in self._deduplicate_hits(hits):
+                            for hit in self._tag_subquery(
+                                100 + fb_idx,
+                                self._deduplicate_hits(hits, entity=classification.get("entity")),
+                            ):
                                 retrieved_ids.add(hit["id"])
                                 evidence_buffer.append(hit)
                                 info = self._build_evidence_info(hit)
@@ -500,9 +541,10 @@ class FinAgentRAGOrchestrator:
                             entity=classification.get("entity"),
                             statement_type_hint=statement_type_hint,  # Step 4
                             query_years=classification.get("years"),
-                        )
+                        ),
+                        entity=classification.get("entity"),
                     )
-                    for hit in new_hits:
+                    for hit in self._tag_subquery(200 + iteration_count, new_hits):
                         retrieved_ids.add(hit["id"])
                         evidence_buffer.append(hit)
                         info = self._build_evidence_info(hit)
@@ -512,11 +554,7 @@ class FinAgentRAGOrchestrator:
                 # ── PoT Execution ──
                 # Sort by relevance score so the BEST chunks reach PoT,
                 # not just the most recently retrieved ones (RC5 fix)
-                raw_window = sorted(
-                    evidence_buffer,
-                    key=lambda x: x.get("relevance_score", 0.0),
-                    reverse=True
-                )[:self.CONTEXT_CHUNK_LIMIT]
+                raw_window = select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT)
                 context_window = []
                 for ev in raw_window:
                     ev_enriched = dict(ev)
@@ -623,12 +661,21 @@ class FinAgentRAGOrchestrator:
             # under prefer_narrative=True, so without this the bare query
             # just appended would compete on equal footing with dense
             # table rows and rarely win anyway.
-            prefer_narrative = non_numeric_formula is None or is_attribution
+            # "What was the LARGEST liability in the Balance Sheet?" is answered by
+            # comparing the statement's own rows, so the narrative-prose boost must
+            # not demote those rows (AmEx: the balance-sheet rows ranked 4th/6th
+            # per query at ~90 but fell below the top-16 cut behind prose chunks
+            # scoring 100-200; the right answer came from a table on another page).
+            is_statement_item_question = bool(
+                re.search(r"\b(largest|biggest|highest|smallest|lowest)\b[^?]{0,60}\b(liabilit\w*|asset\w*|expense\w*|equity)\b", query, re.IGNORECASE)
+                and re.search(r"balance sheet|income statement|cash flow statement", query, re.IGNORECASE)
+            )
+            prefer_narrative = (non_numeric_formula is None or is_attribution) and not is_statement_item_question
             is_geography = is_geography_query(query)
             is_legal = is_legal_query(query)
             new_hits = []
-            for sq in search_queries:
-                new_hits.extend(self.vector_store.search(
+            for sq_idx, sq in enumerate(search_queries):
+                new_hits.extend(self._tag_subquery(sq_idx, self.vector_store.search(
                     # This whole retrieval block only ever runs for the
                     # non-numeric answer_mode branch (ASSESSMENT/
                     # EXPLANATION/EXCLUSION) -- always uses the wider
@@ -654,8 +701,8 @@ class FinAgentRAGOrchestrator:
                     is_geography=is_geography,
                     is_legal=is_legal,
                     query_years=classification.get("years"),
-                ))
-            new_hits = self._deduplicate_hits(new_hits)
+                )))
+            new_hits = self._deduplicate_hits(new_hits, entity=classification.get("entity"))
             for hit in new_hits:
                 retrieved_ids.add(hit["id"])
                 evidence_buffer.append(hit)
@@ -678,7 +725,7 @@ class FinAgentRAGOrchestrator:
             # luck, with no Python trace to show for it or to have caught
             # it if the LLM had been wrong.
             context_window = []
-            for ev in sorted(evidence_buffer, key=lambda x: x.get("relevance_score", 0.0), reverse=True)[:self.CONTEXT_CHUNK_LIMIT]:
+            for ev in select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT):
                 ev_enriched = dict(ev)
                 parent_id = ev.get("parent_id")
                 if parent_id and not ev_enriched.get("parent_content"):
@@ -724,7 +771,20 @@ class FinAgentRAGOrchestrator:
             "retrieval_strategy": retrieval_strategy,
             "total_iterations": iteration_count,
             "final_answer": final_answer,
-            "result_value": pot_res.get("result_value") if pot_res else None,
+            "resolved_entity": classification["entity"],
+            # The sandbox's "result is not reliable" placeholder (result = 0.0
+            # printed with that warning when no retrieved data matched the
+            # question) is not a computed answer; sending its bare 0.0 made
+            # the frontend headline "0" as the final calculation result
+            # (11+ real cases: 3M dividend trend, Amcor adjusted EBITDA, Best
+            # Buy cash drop / store count, Boeing production rates and tax
+            # rate, MGM EBITDAR region, ...). sandbox_log below still carries
+            # the warning text.
+            "result_value": (
+                None
+                if pot_res and "result is not reliable" in (pot_res.get("output_log") or "")
+                else (pot_res.get("result_value") if pot_res else None)
+            ),
             "verification": verification_res,
             "pot_code": pot_res.get("code") if pot_res else "",
             "sandbox_log": pot_res.get("output_log") if pot_res else "",
@@ -741,7 +801,7 @@ class FinAgentRAGOrchestrator:
             # EVIDENCE_PROMPT_CAP slice, applied here identically to
             # final_context -- the SAME list generate_answer received),
             # not every candidate retrieval ever pulled in. evidence_meta/
-            # evidence_buffer can hold up to RETRIEVAL_MAX_TOTAL=45 items
+            # evidence_buffer can hold every retrieved item
             # across every sub-query; only EVIDENCE_PROMPT_CAP of the
             # highest-scoring ones ever got FORMATTED into the prompt text
             # the model actually read. Returning the full unfiltered list
@@ -769,6 +829,25 @@ class FinAgentRAGOrchestrator:
     # ═══════════════════════════════════════════════════════════════
     # Private Helpers
     # ═══════════════════════════════════════════════════════════════
+
+    #: Wording that points at a company's EARNINGS RELEASE rather than its
+    #: 10-K: regional/segment breakdown questions ("region(s)", "segment(s)",
+    #: "topline", "US ... international"), non-GAAP "adjusted" measures and
+    #: forward guidance -- none of which a 10-K reports in that form.
+    _REGIONAL_BREAKDOWN_CUE_RE = re.compile(
+        r"\b(?:regions?|segments?|topline)\b|\b(?:us|u\.s\.)\b.*\binternational\b"
+        r"|non[- ]?gaap|\badjusted\s+(?:eps|ebitda|ebit|operating|net income|earnings|non)"
+        r"|\bguidance\b|\boutlook\b"
+        # "excluding the impact of FX, passthrough costs and one-off items" is the
+        # earnings release's "comparable constant currency" bridge (Amcor QA 29
+        # routed to the 10-K, which has no such table)
+        r"|constant[- ]currency|pass-?through|one-?off"
+    )
+    #: A question asking what is EXPECTED for year Y is answered by a filing
+    #: dated before Y (it is a forecast), so year Y-1 filings are the match.
+    _FORWARD_LOOKING_CUE_RE = re.compile(
+        r"\bexpected?\s+to\b|\bexpects?\b|\bguidance\b|\boutlook\b|\bforecast\w*|\banticipat\w+"
+    )
 
     def _match_entity_to_corpus(self, classifier_entity: str, query: str) -> str:
         """
@@ -813,7 +892,6 @@ class FinAgentRAGOrchestrator:
         norm_classifier = _normalise(classifier_entity)
         best_company = None
         best_score = 0
-        best_year: Optional[str] = None
 
         # Years the query itself mentions — used only to break ties between
         # multiple filings of the SAME company (see below), since
@@ -830,13 +908,81 @@ class FinAgentRAGOrchestrator:
         _YEAR_RE = r'(?<!\d)(?:20|19)\d{2}(?!\d)'
         query_years = set(_re.findall(_YEAR_RE, query))
 
+        # Quarter the QUERY itself names (e.g. "In 2022 Q2, which of JPM's
+        # segments...", "...net revenue in 2021 Q1?") -- a bare word-
+        # boundary "q1"-"q4" token, independent of adjacency to a year.
+        # Used only for the tie-break below; unrelated to query_years.
+        _query_quarter_m = _re.search(r'\bq([1-4])\b', q_lower)
+        query_quarter = f"q{_query_quarter_m.group(1)}" if _query_quarter_m else None
+        # Forward-looking question about year Y ("is X expected to ... in FY2023?"):
+        # the source is a filing from year Y-1, so that year outranks Y itself.
+        forward_year_prior = None
+        if query_years and self._FORWARD_LOOKING_CUE_RE.search(q_lower) and query_quarter is None:
+            forward_year_prior = str(int(max(query_years)) - 1)
+
+        # Quarter-aware period extraction for the SAME purpose the bare
+        # _YEAR_RE above already served (tie-breaking between multiple
+        # filings of the same company) — now also captures an adjacent
+        # "Q1"-"Q4" suffix (e.g. "MGMRESORTS_2022Q4_EARNINGS" -> year
+        # "2022", quarter "q4"), which the bare year-only regex collapsed
+        # to plain "2022", indistinguishable from "MGMRESORTS_2022_10K".
+        # Confirmed real case: "What was MGM's interest coverage ratio
+        # using FY2022 Adjusted EBIT...?" — no quarter word anywhere in
+        # the question itself, so the old tie-break's ONLY signal (bare
+        # year, identical for both filings) couldn't distinguish them and
+        # silently fell back to whichever was inserted first into
+        # DOC_TO_FILE, resolving to the wrong document (MGMRESORTS_2022_
+        # 10K instead of the intended MGMRESORTS_2022Q4_EARNINGS) and
+        # extracting nonsense values from unrelated line items.
+        _PERIOD_RE = _re.compile(r'(?<!\d)((?:20|19)\d{2})(q[1-4])?(?!\d)', _re.IGNORECASE)
+
+        def _extract_period(s: str):
+            m = _PERIOD_RE.search(s)
+            if not m:
+                return None, None
+            return m.group(1), (m.group(2).lower() if m.group(2) else None)
+
+        # A full calendar date in the question ("...on May 26, 2023") points at the
+        # 8-K filed just AFTER that event (files are named "..._dated-YYYY-MM-DD").
+        # Used only when a filing's date is within 45 days of the question's date;
+        # a filing dated before the event ranks below one dated after it.
+        import datetime as _dt
+        _MONTHS = {m: i + 1 for i, m in enumerate(
+            ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+        _qdm = _re.search(
+            r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+((?:20|19)\d{2})\b",
+            q_lower,
+        )
+        query_date = None
+        if _qdm:
+            try:
+                query_date = _dt.date(int(_qdm.group(3)), _MONTHS[_qdm.group(1)], int(_qdm.group(2)))
+            except ValueError:
+                query_date = None
+
+        def _date_key(corpus_name: str) -> int:
+            if query_date is None:
+                return 0
+            m = _re.search(r"dated[-_](\d{4})-(\d{2})-(\d{2})", corpus_name)
+            if not m:
+                return 0
+            try:
+                delta = (_dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))) - query_date).days
+            except ValueError:
+                return 0
+            if abs(delta) > 45:
+                return 0
+            return 1000 - delta if delta >= 0 else 1000 - (abs(delta) + 100)
+
+        best_tie_key = None
+        scored = []
+
         for uf in self.vector_store.uploaded_files:
             corpus_company = uf.get("company", "")
             if not corpus_company:
                 continue
             norm_corpus = _normalise(corpus_company)
-            corpus_year_match = _re.search(_YEAR_RE, corpus_company)
-            corpus_year = corpus_year_match.group(0) if corpus_year_match else None
+            corpus_year, corpus_quarter = _extract_period(corpus_company)
 
             score = 0
             # Score 1: corpus company words appear in query
@@ -854,30 +1000,119 @@ class FinAgentRAGOrchestrator:
                 if norm_classifier in norm_corpus or norm_corpus in norm_classifier:
                     score += 5
 
-            if score > best_score or (
-                # Tie-break between multiple filings of the SAME company
-                # (identical score, since the company-name portion is
-                # identical once years are stripped): prefer whichever
-                # filing's OWN year is the one the query actually asks
-                # about, falling back to the most recent filing — never an
-                # arbitrary "whichever was uploaded first". Confirmed real
-                # case: a "how did Corning's tax rate change between
-                # FY2021 and FY2022" question, with both CORNING_2021_10K
-                # and CORNING_2022_10K loaded, tied at the same score and
-                # picked CORNING_2021_10K purely by upload order — a
-                # filing that structurally CANNOT contain FY2022 figures
-                # at all, since it predates that fiscal year.
-                score > 0 and score == best_score and corpus_year and (
-                    (corpus_year in query_years and best_year not in query_years)
-                    or (corpus_year in query_years and best_year in query_years and corpus_year > best_year)
-                    or (not query_years and (best_year is None or corpus_year > best_year))
-                )
-            ):
+            # Tie-break key between multiple filings of the SAME company
+            # (identical score, since the company-name portion is identical
+            # once years are stripped) -- compared as a tuple, higher wins:
+            #   1) does this filing's quarter match one the query itself
+            #      names (e.g. "Q2 2023")? Highest-confidence signal when
+            #      present -- this is the ONLY tier that uses corpus_quarter
+            #      at all. Fixes "What was MGM's interest coverage ratio
+            #      using FY2022 Adjusted EBIT...?" IF the question had named
+            #      a quarter, and robustly (not by accident) fixes JPM's own
+            #      "In 2022 Q2, which of JPM's segments..." shape.
+            #   2) is this filing's bare year one the query mentions at all?
+            #   3) does this filing have NO quarter suffix at all (i.e. is
+            #      it a plain annual 10-K rather than a 10-Q/earnings-
+            #      release/8-K)? Preferred as the safer default source when
+            #      nothing else disambiguates, since it's far more likely to
+            #      be a complete, self-contained annual filing than a
+            #      quarterly document is.
+            #   4) the bare year itself, as the final "prefer more recent"
+            #      fallback among same-specificity candidates.
+            #
+            # Tier 3 exists because bare-year recency ALONE (the entire
+            # fallback prior to today) is no longer a safe proxy for "most
+            # complete/appropriate filing" now that the corpus can contain
+            # quarterly documents dated LATER in calendar terms than an
+            # older but more complete annual 10-K. Confirmed real
+            # regression this fixes: "Are Best Buy's gross margins
+            # historically consistent...?" (no year or quarter named at
+            # all) resolved to BESTBUY_2024Q2_10Q -- purely because "2024"
+            # sorts after "2023" -- instead of BESTBUY_2023_10K, which is
+            # what actually carries the multi-year income-statement trend
+            # this question needs; a 10-Q fragment doesn't.
+            #
+            # Tier 1 remains the ONLY tier that uses corpus_quarter to
+            # PREFER a quarter-suffixed filing (when the query itself names
+            # that exact quarter, e.g. JPM's "In 2022 Q2, which of JPM's
+            # segments..."). An earlier version of this fix used
+            # corpus_quarter more broadly, as a blanket "prefer the more
+            # specific filing" default tiebreaker -- that caused a separate
+            # real regression (JnJ's "Roughly how many times has JnJ sold
+            # its inventory in FY2022?", resolved to JOHNSON_JOHNSON_2022Q4_
+            # EARNINGS, a press release with no balance sheet at all,
+            # instead of the 10-K that actually has inventory data) and was
+            # removed for the same reason tier 3 now exists: whether the
+            # MORE or LESS specific filing is correct depends on what kind
+            # of data the question needs, which isn't something this
+            # function can infer -- so the safe default is the plain annual
+            # filing, not the quarterly one, absent an explicit signal.
+            tie_key = (
+                _date_key(corpus_company),
+                1 if (query_quarter is not None and corpus_quarter == query_quarter) else 0,
+                (2 if (forward_year_prior and corpus_year == forward_year_prior)
+                 else 1 if corpus_year in query_years else 0),
+                0 if corpus_quarter else 1,
+                corpus_year or "",
+            )
+            scored.append((score, tie_key, corpus_company))
+            if score > best_score or (score > 0 and score == best_score and tie_key > best_tie_key):
                 best_score = score
                 best_company = corpus_company
-                best_year = corpus_year
+                best_tie_key = tie_key
 
         if best_company and best_score > 0:
+            # Several filings of the same company that tie on EVERY signal above
+            # (e.g. two 8-Ks of one year) are told apart by which one actually
+            # talks about what the question asks: count, per tied filing, the
+            # passages containing at least two of the question's distinctive
+            # words. Confirmed real case: "Does Foot Locker's new CEO have
+            # previous CEO experience...?" chose the May 8-K (shareholder vote
+            # results) instead of the August 8-K that announces the CEO change.
+            tied_docs = [c for (sc, tk, c) in scored if sc == best_score and tk == best_tie_key]
+            if len(tied_docs) >= 2:
+                _stop = {
+                    "the", "and", "for", "has", "had", "have", "does", "did", "was", "were", "are",
+                    "what", "which", "who", "whom", "how", "when", "where", "why", "that", "this",
+                    "with", "from", "their", "there", "any", "new", "company", "much", "many",
+                    "between", "during", "than", "into", "about", "been", "its", "his", "her",
+                }
+                _name_words = set()
+                for _d in tied_docs:
+                    _name_words.update(_normalise(_d).split())
+                _terms = [
+                    w for w in _re.findall(r"[a-z][a-z&-]{2,}", q_lower)
+                    if w not in _stop and w not in _name_words
+                ]
+                if len(_terms) >= 2:
+                    _counts = {d: 0 for d in tied_docs}
+                    for _p in self.vector_store.corpus:
+                        _pc = _p.get("company")
+                        if _pc in _counts:
+                            _low = (_p.get("content") or "").lower()
+                            if sum(1 for _t in _terms if _t in _low) >= 2:
+                                _counts[_pc] += 1
+                    _ranked = sorted(_counts.items(), key=lambda kv: kv[1], reverse=True)
+                    if _ranked[0][1] > _ranked[1][1]:
+                        best_company = _ranked[0][0]
+            # Regional/segment BREAKDOWN questions ("which region had the
+            # worst topline...", "how did US sales growth compare to
+            # international...") are answered from the simplified regional
+            # supplemental tables a company's own EARNINGS RELEASE carries;
+            # the formal 10-K reports a different (reportable-segment)
+            # cut. Each question needs exactly ONE file, so among
+            # same-company, same-named-year candidates that TIE, an
+            # earnings-release file wins for this question shape only.
+            # BM25 content mass could not make this call (the larger 10-K
+            # always scores higher), so it is keyed on the question shape.
+            if self._REGIONAL_BREAKDOWN_CUE_RE.search(q_lower):
+                tied_earnings = [
+                    (tk, c) for (sc, tk, c) in scored
+                    if sc == best_score and tk[:3] == best_tie_key[:3]
+                    and "earnings" in c.lower()
+                ]
+                if tied_earnings:
+                    return max(tied_earnings)[1]
             return best_company
 
         # Fallback: if classifier returned a real entity name, keep it
@@ -891,7 +1126,41 @@ class FinAgentRAGOrchestrator:
         """Legacy method — kept for backward compatibility. Delegates to _match_entity_to_corpus."""
         return self._match_entity_to_corpus("company", query)
 
-    def _deduplicate_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _tag_subquery(idx: int, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Remember which sub-query retrieved each passage (for the per-
+        sub-query quota in evidence_selection.select_with_quota)."""
+        for hit in hits:
+            hit["subquery_idx"] = idx
+        return hits
+
+    @staticmethod
+    def _company_key(name: str) -> str:
+        """Company part of a corpus doc name: "JOHNSON_JOHNSON_2022Q4_EARNINGS"
+        -> "JOHNSONJOHNSON"; "" when the name has no year segment (e.g. the
+        unresolved placeholder "company")."""
+        m = re.match(r"^(.*?)_(?:19|20)\d\d", name or "")
+        return re.sub(r"[^A-Za-z0-9]", "", m.group(1)).upper() if m else ""
+
+    def _restrict_to_company(self, hits: List[Dict[str, Any]], entity: Optional[str]) -> List[Dict[str, Any]]:
+        """Drop retrieved passages that belong to a DIFFERENT company than the
+        resolved entity's document. Every question in the benchmark is about
+        one named company, but the retriever only down-weights (0.4x) other
+        companies' passages, so they still surface when the resolved
+        company has few strong matches -- and the PoT sandbox then extracts
+        numbers from them. Confirmed real case: "How did JnJ's US sales
+        growth compare to international sales growth" had MGM Resorts table
+        rows in its evidence and the sandbox computed 77.29% from MGM's
+        "Las Vegas Strip Resorts net revenues". Only applied when the entity
+        resolved to a real corpus document, and never when it would leave
+        nothing."""
+        key = self._company_key(entity or "")
+        if not key:
+            return hits
+        kept = [h for h in hits if self._company_key(h.get("company") or "") in ("", key)]
+        return kept or hits
+
+    def _deduplicate_hits(self, hits: List[Dict[str, Any]], entity: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Keeps the HIGHEST-scoring occurrence of a passage id, not just the
         first one encountered. `hits` here is the concatenation of every
@@ -914,6 +1183,7 @@ class FinAgentRAGOrchestrator:
         evidence cap the LLM actually sees -- even though its own
         genuinely-best score would have ranked it comfortably inside.
         """
+        hits = self._restrict_to_company(hits, entity)
         best_by_id: Dict[str, Dict[str, Any]] = {}
         order: List[str] = []
         for hit in hits:

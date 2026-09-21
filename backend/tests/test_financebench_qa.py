@@ -194,6 +194,68 @@ def _strip_3m_company_name(text: str) -> str:
     return _3M_COMPANY_NAME_RE.sub("", text or "")
 
 
+#: Gold and model answers routinely state the exact same dollar figure at
+#: DIFFERENT magnitudes -- one side spells out the full raw number, the
+#: other uses a "<number> <magnitude word>" shorthand -- and which side
+#: does which is not consistent across questions. Confirmed real cases:
+#: PepsiCo's "$400,000,000 increase" (gold, full digits) vs "$400 million"
+#: (model, shorthand); Best Buy's "$1.8 bn" (gold, shorthand) vs
+#: "$1,824.0 million" (model, full-digit-with-shorthand-suffix). A plain
+#: digit-for-digit comparison treats these as unrelated numbers 1,000,000x
+#: apart even though they're the identical fact.
+#: Returns ADDITIONAL scaled candidate values for every "<number>
+#: <magnitude word>" occurrence found in text -- e.g. "$400 million" also
+#: yields 400000000.0 -- to be checked ALONGSIDE (never instead of) the
+#: plain unscaled values _numbers_in already extracts. Only ever adds
+#: candidates, on BOTH the gold and model side, and only for numbers that
+#: actually have a magnitude word attached in their own source text --
+#: never invents a scale for a bare, unit-less number like AWW's gold
+#: answer "$0.40" (which relies on the QUESTION's own "in USD billions"
+#: framing, with no magnitude word in the answer text itself to scale
+#: from), so a case like that is left completely unaffected: neither side
+#: gains a new candidate, and the existing (near-miss) comparison is
+#: unchanged either way.
+_MAGNITUDE_SCALE = {
+    "thousand": 1e3, "million": 1e6, "mm": 1e6,
+    "billion": 1e9, "bn": 1e9, "trillion": 1e12,
+}
+_MAGNITUDE_WORD_RE = re.compile(
+    r"(-?\$?\d[\d,]*\.?\d*)\s*(thousand|million|mm|billion|bn|trillion)\b",
+    re.IGNORECASE,
+)
+
+
+def _magnitude_scaled_numbers(text: str) -> list:
+    out = []
+    for m in _MAGNITUDE_WORD_RE.finditer(text or ""):
+        try:
+            raw = float(m.group(1).replace(",", "").replace("$", ""))
+        except ValueError:
+            continue
+        out.append(raw * _MAGNITUDE_SCALE[m.group(2).lower()])
+    return out
+
+
+def _scaled_variants_for(value: float, source_text: str) -> list:
+    """For one specific plain-extracted `value`, return its magnitude-
+    scaled counterpart(s) if `value` itself is the number immediately
+    preceding a magnitude word somewhere in `source_text` -- e.g. for
+    value=1.8 and source_text containing "$1.8 bn", returns
+    [1800000000.0]. Ties a specific fact to its own scaled form (rather
+    than the flat, unordered list _magnitude_scaled_numbers returns) so a
+    multi-number gold answer expands each number by ITS OWN magnitude
+    word, not any other number's."""
+    variants = []
+    for m in _MAGNITUDE_WORD_RE.finditer(source_text or ""):
+        try:
+            raw = float(m.group(1).replace(",", "").replace("$", ""))
+        except ValueError:
+            continue
+        if raw == value or (value != 0 and abs(raw - value) / abs(value) < 1e-6):
+            variants.append(raw * _MAGNITUDE_SCALE[m.group(2).lower()])
+    return variants
+
+
 #: A gold answer that enumerates a short list inline ("...during FY 2022:
 #: (1) Current Health Ltd and (2) Two Peaks, LLC...") uses "(1)"/"(2)" as
 #: pure list-item numbering, not a financial fact -- but _NUM_RE has no
@@ -211,7 +273,14 @@ def _strip_3m_company_name(text: str) -> str:
 #: after year-stripping, so a fully correct, evidence-grounded model
 #: answer (both companies + correct $389M/$79M amounts) still failed
 #: because it had no reason to ever produce a bare standalone "1" or "2".
-_LIST_MARKER_RE = re.compile(r"\(\d{1,2}\)(?=\s+[A-Z])")
+_LIST_MARKER_RE = re.compile(
+    r"\(\d{1,2}\)(?=\s+[A-Z])"
+    # a lowercase item introduced by ":" ";" "," or "and" ("... are: (1) usual and
+    # customary pricing ...; (2) PBM litigation ...; and (3) controlled ...") is a
+    # list marker too; the lookbehind keeps accounting negatives like "(6) million"
+    # (which are not preceded by these) untouched
+    r"|(?:(?<=[:;,]\s)|(?<=\sand\s))\(\d{1,2}\)(?=\s+[a-z])"
+)
 
 
 def _strip_list_markers(text: str) -> str:
@@ -275,6 +344,32 @@ def _numbers_in(text: str):
                 s = s.replace("-", "", 1)
         try:
             out.append(float(s.replace(",", "").replace("$", "")))
+        except ValueError:
+            continue
+    return out
+
+
+#: Accounting negatives written in parentheses -- "($473) million",
+#: "(1,349)" -- which _NUM_RE reads as a POSITIVE 473 / 1,349. Only
+#: unambiguous shapes: a "$" inside the parentheses, or a comma-grouped
+#: amount (so footnote markers like "(1)" or "(6)" are never touched).
+_ACCOUNTING_NEG_RE = re.compile(
+    r"\(\s*\$\s*(\d[\d,]*\.?\d*)\s*\)"                      # ($473)
+    r"|\$\s*\(\s*(\d[\d,]*\.?\d*)\s*\)"                     # $(473)
+    r"|\(\s*(\d{1,3}(?:,\d{3})+(?:\.\d+)?)\s*\)"             # (1,349)
+)
+
+
+def _accounting_negatives(text: str):
+    """Negative values for every parenthesized accounting amount in `text`.
+    Used ADDITIVELY on the model side only (an extra candidate, never a
+    replacement), so a model answer that says "($473) million" also
+    matches a gold answer of "-$473 million"."""
+    out = []
+    for m in _ACCOUNTING_NEG_RE.finditer(text or ""):
+        raw = (m.group(1) or m.group(2) or m.group(3)).replace(",", "")
+        try:
+            out.append(-float(raw))
         except ValueError:
             continue
     return out
@@ -380,6 +475,59 @@ def _leading_yn_stance(text: str) -> Optional[bool]:
     return None
 
 
+#: Gold text sometimes conveys a decrease/decline through a WORD
+#: ("shrunk by 0.9%", "declined by 3%") rather than a minus sign on the
+#: number itself -- the extracted number is genuinely positive (0.9, not
+#: -0.9). A model answer describing the identical fact with an explicit
+#: signed figure ("a decline of -0.9 percentage points") is numerically
+#: the negation of gold's own bare digit, even though both texts agree on
+#: the fact and its direction -- a plain positive-vs-negative comparison
+#: rejects a fully correct answer. Only fires when gold's own number has
+#: no minus sign already (a genuinely negative gold number is compared
+#: as-is, unchanged); only ADDS an alternative target to check the model
+#: against, so this can only turn a previously-missed hit into a match,
+#: never suppress an already-correct check. Confirmed real case: 3M's
+#: "which segment dragged down 3M's overall growth" question -- gold
+#: "The consumer segment shrunk by 0.9% organically" (bare 0.9), model
+#: "organic sales decline of -0.9%" (signed -0.9) -- both state the exact
+#: same fact, but the raw digits are numeric opposites.
+_DECREASE_WORD_RE = re.compile(
+    r"\b(?:shrunk|shrank|shrink\w*|declin\w*|decreas\w*|drop\w*|fell|fall\w*|reduc\w*|lower)\b",
+    re.IGNORECASE,
+)
+
+
+def _implies_decrease(text: str) -> bool:
+    return bool(_DECREASE_WORD_RE.search(text or ""))
+
+
+def _decimals_of(value: float, text: str) -> int:
+    """Number of decimal digits the gold text itself printed for `value`
+    ("66.56" -> 2, "1.7%" -> 1, "$0.40" -> 2, "3,017" -> 0)."""
+    for m in _NUM_RE.finditer(text or ""):
+        tok = m.group(0).replace(",", "").replace("$", "")
+        try:
+            if abs(abs(float(tok)) - abs(value)) < 1e-9:
+                return len(tok.split(".")[1]) if "." in tok else 0
+        except ValueError:
+            continue
+    return 0
+
+
+def _close_enough(t: float, m: float, decimals: int) -> bool:
+    """A model figure matches a gold figure when it is within 2% (1% when the
+    gold itself is stated to 2+ decimals, so "$65.44" no longer passes for a
+    gold "$66.56" -- a real false PASS at 1.68%) OR within half a unit of the
+    gold's own last printed digit (a gold "1.7%" accepts the model's more
+    precise 1.7392%, which the plain 2% band rejected)."""
+    if t == 0:
+        return abs(m) < 1e-9
+    rel = 0.01 if decimals >= 2 else 0.02
+    if abs(t - m) / abs(t) <= rel:
+        return True
+    return decimals >= 1 and abs(t - m) <= 0.5 * 10 ** (-decimals) + 1e-9
+
+
 def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
     """
     Qualitative gold answers (e.g. 'The consumer segment shrunk by 0.9%
@@ -416,9 +564,28 @@ def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
         return False
     non_year_nums = [n for n in gold_nums if not _is_bare_year(n)]
     check_nums = non_year_nums or gold_nums
+    gold_implies_decrease = _implies_decrease(gold_answer)
+    # See _magnitude_scaled_numbers's docstring: adds "<number> <magnitude
+    # word>" scaled alternatives from the MODEL side once, up front (every
+    # gold fact gets checked against the same expanded model pool), and
+    # each gold fact's OWN magnitude-scaled variant (if it has one) is
+    # added per-fact below via _scaled_variants_for.
+    all_model_candidates = (
+        list(model_nums) + _magnitude_scaled_numbers(model_answer) + _accounting_negatives(model_answer)
+    )
     hits = 0
     for g in check_nums:
-        if any((abs(g - m) / abs(g) <= 0.02 if g != 0 else abs(m) < 1e-9) for m in model_nums):
+        g_variants = [g] + _scaled_variants_for(g, gold_answer)
+        targets = []
+        for gv in g_variants:
+            targets.append(gv)
+            if gold_implies_decrease and gv > 0:
+                targets.append(-gv)
+        g_dec = _decimals_of(g, gold_answer)
+        if any(
+            _close_enough(t, m, g_dec if abs(abs(t) - abs(g)) < 1e-9 else 0)
+            for t in targets for m in all_model_candidates
+        ):
             hits += 1
     return hits >= max(1, len(check_nums) // 2)  # at least half the checked numbers must surface
 
