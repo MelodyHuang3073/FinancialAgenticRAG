@@ -848,6 +848,19 @@ class FinAgentRAGOrchestrator:
     _FORWARD_LOOKING_CUE_RE = re.compile(
         r"\bexpected?\s+to\b|\bexpects?\b|\bguidance\b|\boutlook\b|\bforecast\w*|\banticipat\w+"
     )
+    #: A question about an ongoing separation/spin-off/divestiture cost, with
+    #: no year at all named (so the plain-annual-10-K default tier below has
+    #: nothing to override it), needs the MOST RECENT filing -- the running
+    #: cumulative "percent incurred so far" figure is stale in an older
+    #: annual 10-K. Confirmed real case: "How much does Pfizer expect to pay
+    #: to spin off Upjohn in the future?" resolved to PFIZER_2021_10K (its
+    #: own "~75% incurred through December 31, 2021" sentence) instead of
+    #: Pfizer_2023Q2_10Q (the more complete "~90% incurred through Q2 2023"),
+    #: purely because the tier-3 "prefer the plain annual 10-K" default below
+    #: has no year-based signal to lose to when the query names none at all.
+    _SEPARATION_TOPIC_RE = re.compile(
+        r"\bseparat\w+|\bspin[- ]?off\w*|\bdivest\w*", re.IGNORECASE
+    )
 
     def _match_entity_to_corpus(self, classifier_entity: str, query: str) -> str:
         """
@@ -1052,6 +1065,17 @@ class FinAgentRAGOrchestrator:
                 1 if (query_quarter is not None and corpus_quarter == query_quarter) else 0,
                 (2 if (forward_year_prior and corpus_year == forward_year_prior)
                  else 1 if corpus_year in query_years else 0),
+                # See _SEPARATION_TOPIC_RE's docstring: overrides tier 3's
+                # "prefer the plain annual 10-K" default, but ONLY for this
+                # narrow forward-looking-separation-cost shape, so it cannot
+                # fire on an unrelated no-year question (e.g. Best Buy's
+                # gross-margin-consistency question, which tier 3 exists
+                # for) and never collides with it.
+                1 if (
+                    not query_years and corpus_quarter
+                    and self._FORWARD_LOOKING_CUE_RE.search(q_lower)
+                    and self._SEPARATION_TOPIC_RE.search(q_lower)
+                ) else 0,
                 0 if corpus_quarter else 1,
                 corpus_year or "",
             )

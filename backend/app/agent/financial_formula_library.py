@@ -618,7 +618,12 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["interest coverage", "times interest earned", "interest coverage ratio"],
         # abs(): interest expense is shown as a negative in some statements ("(594,954)")
         # and positive in others; a coverage ratio is EBIT over the MAGNITUDE.
-        "formula_expr": "ebit / abs(interest_expense)",
+        # max(0, ebit): a company with negative EBIT (or Adjusted EBIT) cannot
+        # "cover" its interest at all -- coverage is conventionally reported as
+        # 0, not a negative ratio. Confirmed real case: MGM Resorts FY2022 --
+        # gold answer for "...using FY2022 Adjusted EBIT as the numerator..."
+        # is "As adjusted EBIT is negative, coverage ratio is zero."
+        "formula_expr": "max(0, ebit) / abs(interest_expense)",
         "required_vars": {
             "ebit":             ["營業利益", "ebit", "operating income", "operating profit"],
             "interest_expense": ["利息費用", "interest expense", "finance costs"],
