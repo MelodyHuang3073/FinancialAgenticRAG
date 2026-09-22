@@ -3007,6 +3007,221 @@ _PREPAID_CURRENT_ASSET_RE = re.compile(r'\bprepaid', re.IGNORECASE)
 _OTHER_CURRENT_ASSET_RE = re.compile(r'^\s*other\s+current\s+assets?\b', re.IGNORECASE)
 _NONOPERATING_EXCLUDE_RE = re.compile(r'non[\s-]?current|long[\s-]?term|liabilit', re.IGNORECASE)
 
+#: "How many/number of/change in the number of <plural noun>" -- no formula
+#: canonical exists for a bare count of physical units (stores, locations...),
+#: so this fires only for that specific question shape.
+_COUNT_CHANGE_QUERY_RE = re.compile(
+    r'\bhow\s+many\b|\bnumber\s+of\b|\bchange\s+in\s+the\s+number\b', re.IGNORECASE
+)
+
+
+def _derive_total_row_period_end_change(
+    evidence_list: List[Dict[str, Any]], q_lower: str,
+) -> Optional[Tuple[float, float, str, str, str]]:
+    """
+    A "how many/number of <plural noun> ... did X have, and did it change?"
+    question answered from a roll-forward table (Beginning count + Opened -
+    Closed = End count, one such block per period/fiscal year, e.g. a store
+    count) needs the row literally labelled "Total" (not one of the sub-
+    categories/brands/segments it sums) and its period-END values
+    specifically -- not the period-START value, which the generic year-only
+    extractor used elsewhere can't tell apart from the end value at all
+    (both get tagged with the same bare "year"). This reads the row's OWN
+    raw "Line Item: Total | <full column name>: <value> | ..." content
+    directly, so the FULL column names (which DO distinguish "Beginning"/
+    "End of <period>") survive, instead of going through the generic
+    extractor that discards everything but the bare year.
+
+    General, not company-specific: fires only for a "how many/number of..."
+    question, on any row exactly labelled "Total" whose OWN column names
+    contain "end of" (case-insensitive) for two different fiscal years, AND
+    whose column names name the SAME plural noun the question asks about
+    (e.g. "store") -- this is what keeps it from firing on an unrelated
+    "Total" roll-forward row (a share-count table, say) for a question
+    about something else. A deterministic, code-computed answer removes the
+    LLM's own row choice from the loop entirely for this narrow shape,
+    rather than relying on it to consistently follow the prompt's own
+    "use the Total row" instruction.
+
+    Confirmed real case: Best Buy's domestic-segment store roll-forward
+    (BESTBUY_2024Q2_10Q page 17) -- "Total | Fiscal 2024 Total Stores at
+    Beginning of Second Quarter: 966 | ... | Fiscal 2024 Total Stores at End
+    of Second Quarter: 969 | Fiscal 2023 Total Stores at Beginning of Second
+    Quarter: 977 | ... | Fiscal 2023 Total Stores at End of Second Quarter:
+    982" -- the LLM alone was inconsistent about using this Total row instead
+    of a single brand's own row ("Best Buy" 907/930) for an unqualified
+    "number of stores" question.
+
+    Returns (new_val, old_val, new_period_label, old_period_label, noun) or
+    None when no matching roll-forward "Total" row is found.
+    """
+    if not _COUNT_CHANGE_QUERY_RE.search(q_lower):
+        return None
+    noun_m = re.search(
+        r'\b(stores?|locations?|branches?|restaurants?|units?|facilit(?:y|ies)|plants?|offices?)\b',
+        q_lower,
+    )
+    if not noun_m:
+        return None
+    noun_stem = re.sub(r'(?:y|ies|es|s)$', '', noun_m.group(1).lower())
+    for ev in evidence_list:
+        content = ev.get("content") or ""
+        m = re.search(r'\|\s*Line Item:\s*Total\s*\|(.*)$', content)
+        if not m:
+            continue
+        pairs = []
+        for f in m.group(1).split("|"):
+            f = f.strip()
+            fm = re.match(r'(.+?):\s*(\(?-?[\d,]+\.?\d*\)?)\s*$', f)
+            if fm:
+                pairs.append((fm.group(1).strip(), fm.group(2)))
+        end_of = [
+            (k, v) for k, v in pairs
+            if re.search(r'(?i)\bend\s+of\b', k) and noun_stem in k.lower()
+        ]
+        if len(end_of) < 2:
+            continue
+
+        def _num(v: str) -> float:
+            v = v.strip()
+            neg = v.startswith("(") and v.endswith(")")
+            v = v.strip("()").replace(",", "")
+            val = float(v)
+            return -val if neg else val
+
+        def _fy(k: str) -> int:
+            ym = re.search(r'(?:19|20)\d{2}', k)
+            return int(ym.group(0)) if ym else -1
+
+        end_of.sort(key=lambda kv: _fy(kv[0]), reverse=True)
+        if _fy(end_of[0][0]) == _fy(end_of[1][0]):
+            continue  # can't tell which is "new" vs "old" without distinct years
+        (new_k, new_v), (old_k, old_v) = end_of[0], end_of[1]
+        return _num(new_v), _num(old_v), new_k, old_k, noun_m.group(1)
+    return None
+
+
+#: A question naming "Adjusted EBIT" specifically (not plain EBIT/operating
+#: income) needs that exact non-GAAP figure, not the GAAP "Operating
+#: income (loss)" row interest_coverage's plain "ebit" alias list resolves
+#: to by default.
+_ADJUSTED_EBIT_QUERY_RE = re.compile(r'\badjusted\s+ebit\b', re.IGNORECASE)
+_ADJUSTED_EBITDA_R_LABEL_RE = re.compile(r'(?i)^adjusted\s+ebitda(r)?$')
+_DEPRECIATION_LABEL_RE = re.compile(r'(?i)depreciation\s+and\s+amortization')
+_RENT_ADDBACK_LABEL_RE = re.compile(r'(?i)triple-?net.*rent|ground\s+lease.*rent|\brent\s+expense\b')
+
+
+def _derive_adjusted_ebit_from_ebitda_reconciliation(
+    evidence_list: List[Dict[str, Any]], target_year: str, q_lower: str,
+) -> Optional[Tuple[float, str]]:
+    """
+    Some non-GAAP-heavy filers (common in gaming/hospitality/REIT-adjacent
+    industries) never print an "Adjusted EBIT" line at all -- their own
+    reconciliation stops at "Adjusted EBITDA" or "Adjusted EBITDAR"
+    (EBITDA plus triple-net/ground-lease rent, standard where a company
+    leases rather than owns its real estate). When the question asks for
+    "Adjusted EBIT" specifically, derive it from the textbook identities
+    EBIT = EBITDA - D&A and EBITDAR = EBITDA + Rent (so EBIT = EBITDAR -
+    D&A - Rent), using the filer's OWN "Adjusted EBITDA"/"Adjusted
+    EBITDAR" total and its OWN "Depreciation and amortization" (and, for
+    EBITDAR, rent-expense) rows FROM THE SAME reconciliation table -- this
+    holds regardless of what OTHER non-GAAP add-backs went into building
+    that EBITDA/EBITDAR figure, since the same add-backs apply equally on
+    both sides of the identity and cancel out. Requiring all rows to come
+    from the same evidence item's own markdown table (not just matching
+    aliases anywhere in evidence_list) avoids mixing this reconciliation's
+    D&A with an unrelated PP&E note's own depreciation figure.
+
+    Confirmed real case: MGM Resorts FY2022 (MGMRESORTS_2022Q4_EARNINGS,
+    page 14) -- "Adjusted EBITDAR" $3,497,254 (thousand) minus
+    "Depreciation and amortization" $3,482,050 minus "Triple-net operating
+    lease and ground lease rent expense" $1,950,566 = -$1,935,362
+    (negative), matching the gold answer's own premise ("as adjusted EBIT
+    is negative, coverage ratio is zero").
+
+    Returns (value, source_description) or None when no such reconciliation
+    table (with all the rows this needs, for the target year) is found in
+    the retrieved evidence.
+    """
+    if not _ADJUSTED_EBIT_QUERY_RE.search(q_lower):
+        return None
+
+    def _cell_to_float(cell: str) -> Optional[float]:
+        # search (not fullmatch/replace-chain): a "$ 1,473,093"-style cell can
+        # have a space right after the "$" that a plain .replace("$", "")
+        # leaves behind as a stray leading space, breaking a fullmatch. A
+        # digit search on the raw cell sidesteps that (and any other stray
+        # whitespace) entirely.
+        cell = cell.strip()
+        if not cell or cell in ("—", "-", "--"):
+            return None
+        neg = "(" in cell and ")" in cell
+        m = re.search(r'\d[\d,]*\.?\d*', cell)
+        if not m:
+            return None
+        val = float(m.group(0).replace(",", ""))
+        return -val if neg else val
+
+    seen_blocks = set()
+    for ev in evidence_list:
+        content = ev.get("parent_content") or ev.get("content", "")
+        if not content or "ebitda" not in content.lower():
+            continue
+        for block in content.split("\n\n"):
+            lines = [l for l in block.splitlines() if l.strip().startswith("|")]
+            if len(lines) < 4 or block in seen_blocks:
+                continue
+            seen_blocks.add(block)
+            header = [c.strip() for c in lines[0].strip().strip("|").split("|")]
+            if len(header) < 2:
+                continue
+            # Prefer a column naming the target year that ALSO looks annual
+            # (its header does not also say a quarter/short-period code);
+            # fall back to any column naming the target year at all.
+            col_idx, annual_idx = None, None
+            for i, h in enumerate(header[1:], start=1):
+                if target_year not in h:
+                    continue
+                if col_idx is None:
+                    col_idx = i
+                if not re.search(r'\bQ[1-4]\b|\b[3699]M\b|three\s+months|six\s+months|nine\s+months', h, re.IGNORECASE):
+                    annual_idx = i
+            col_idx = annual_idx or col_idx
+            if col_idx is None:
+                continue
+            rows: Dict[str, float] = {}
+            for l in lines[2:]:
+                cells = [c.strip() for c in l.strip().strip("|").split("|")]
+                if len(cells) <= col_idx or not cells[0]:
+                    continue
+                val = _cell_to_float(cells[col_idx])
+                if val is not None:
+                    rows[cells[0]] = val
+            ebitda_val, is_ebitdar, ebitda_label = None, False, None
+            for label, val in rows.items():
+                m = _ADJUSTED_EBITDA_R_LABEL_RE.match(label.strip())
+                if m:
+                    ebitda_val, is_ebitdar, ebitda_label = val, bool(m.group(1)), label
+                    if is_ebitdar:
+                        break  # EBITDAR is more specific; prefer it over a same-block EBITDA row
+            if ebitda_val is None:
+                continue
+            dep_val = next((v for k, v in rows.items() if _DEPRECIATION_LABEL_RE.search(k)), None)
+            if dep_val is None:
+                continue
+            rent_val = 0.0
+            if is_ebitdar:
+                rent_val = next((v for k, v in rows.items() if _RENT_ADDBACK_LABEL_RE.search(k)), None)
+                if rent_val is None:
+                    continue  # an EBITDAR total without its own rent add-back row can't be bridged safely
+            adjusted_ebit = ebitda_val - abs(dep_val) - abs(rent_val)
+            source = (
+                f"{ebitda_label} {ebitda_val:g} - Depreciation and amortization {dep_val:g}"
+                + (f" - Rent expense {rent_val:g}" if is_ebitdar else "")
+            )
+            return adjusted_ebit, source
+    return None
+
 # Materiality threshold for _adjust_quick_ratio_for_prepaid_and_other below.
 # Textbook rationale (Ittelson; Penman): the common "(current assets -
 # inventory) / current liabilities" shortcut for the quick ratio is only a
@@ -4866,6 +5081,28 @@ class ProgramOfThoughtReasoner:
             duplicate_warnings = _detect_and_strip_duplicate_values(
                 resolved_formula, resolved_formula_series, resolved_formula_meta
             )
+            # "... using FY2022 Adjusted EBIT as the numerator ..." needs that
+            # exact non-GAAP figure, not the plain GAAP "Operating income
+            # (loss)" row the "ebit" alias list above resolves to by default.
+            # See _derive_adjusted_ebit_from_ebitda_reconciliation's docstring.
+            # A no-op whenever the query doesn't ask for "Adjusted EBIT"
+            # specifically, or no matching EBITDA/EBITDAR reconciliation table
+            # (with all the rows it needs) is found in the retrieved evidence
+            # -- falls back to the plain "ebit" resolution already computed
+            # above, so this can never make an unrelated question worse.
+            if "ebit" in resolved_formula and preferred_year:
+                _derived = _derive_adjusted_ebit_from_ebitda_reconciliation(
+                    evidence_list, preferred_year, q_lower
+                )
+                if _derived is not None:
+                    _adj_val, _adj_source = _derived
+                    resolved_formula["ebit"] = _adj_val
+                    resolved_formula_series["ebit"] = [(_adj_val, preferred_year)]
+                    resolved_formula_meta["ebit"] = {
+                        "source": "derived-from-ebitda-reconciliation",
+                        "is_approximate": True,
+                        "detail": _adj_source,
+                    }
 
         # ── Step 4: Build code ────────────────────────────────────────────────
         code_lines = [
@@ -4915,7 +5152,31 @@ class ProgramOfThoughtReasoner:
                 "# Extracted from retrieved financial evidence",
             ]
 
-            if extracted_table:
+            # A "how many/number of <noun>" question with a roll-forward "Total"
+            # row (stores opened/closed) skips the generic extractor entirely --
+            # see _derive_total_row_period_end_change's docstring for why the
+            # generic path can't tell a period's START count from its END count.
+            _count_change = (
+                None if formula_entry else
+                _derive_total_row_period_end_change(evidence_list, q_lower)
+            )
+            if _count_change is not None:
+                used_extraction = "total-row-rollforward"
+                new_v, old_v, new_k, old_k, noun = _count_change
+                code_lines.append(f"# Total {noun} count: {new_k} vs {old_k}")
+                code_lines.append(f"new_total = {new_v}")
+                code_lines.append(f"old_total = {old_v}")
+                code_lines.append("result = round(new_total - old_total, 4)")
+                code_lines.append(
+                    f"print(f'Total {noun} count change ({{old_total:g}} -> "
+                    f"{{new_total:g}}): {{result}}')"
+                )
+                if old_v:
+                    code_lines.append(
+                        "result_pct = round((new_total - old_total) / old_total * 100, 4)"
+                    )
+                    code_lines.append("print(f'Percent change: {result_pct}%')")
+            elif extracted_table:
                 # Emit variable assignments
                 for v in extracted_table.values():
                     yr_label = v['year']

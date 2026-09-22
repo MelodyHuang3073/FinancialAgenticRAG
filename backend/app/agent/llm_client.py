@@ -817,6 +817,41 @@ Available Evidence:
     of intangibles from the Xilinx acquisition"), never just "acquisition-
     related". Confirmed real case: AMD FY2022 operating margin -- one run said
     "one-off acquisition-related amortization" and never named Xilinx.
+33. If the question asks whether a company IS spinning off, divesting or
+    separating a business segment, and the evidence states that separation-
+    related costs are STILL being incurred as of (or through) the reporting
+    period -- for example "we expect to incur costs of approximately $X
+    million in connection with separating <segment>, of which Y% has been
+    incurred ... through <the current quarter>" -- answer YES: the ongoing,
+    unfinished cost of completing the separation means it is still in
+    progress, even when another sentence elsewhere says the legal
+    transaction (the spin-off itself, or its combination with another
+    company) closed at an earlier date. Only answer NO when the evidence
+    shows no such ongoing separation costs at all. Confirmed real case:
+    Pfizer's Q2 2023 10-Q says the Upjohn/Viatris transaction "completed" in
+    November 2020, but ALSO says it still expects to incur ~$700 million in
+    separation costs, ~90% incurred through Q2 2023 -- the correct answer is
+    Yes, it is still (finishing) spinning off Upjohn, not "no, it already
+    finished."
+34. When evidence gives a separation/spin-off/divestiture cost sentence
+    shaped "we expect to incur costs of approximately $X million ... in
+    connection with separating <segment>, of which approximately Y% has
+    been incurred ... through <period>", read $X as the amount ALREADY
+    incurred (recognized) as of that period -- the Y% portion -- not as
+    the total projected cost: in accounting, "incurred" means a cost has
+    already been recognized, so a dollar figure tied to that word next to
+    a stated percent-incurred is the cumulative amount recognized so far,
+    not a total yet to be split. If the question asks for the REMAINING
+    (future) amount, compute the implied total as $X / (Y/100), then
+    remaining = implied total - $X (equivalently $X * (100-Y)/Y). State the
+    implied total, the amount already incurred, and the remaining amount.
+    Confirmed real case: Pfizer's Q2 2023 10-Q -- "we expect to incur costs
+    of approximately $700 million in connection with separating Upjohn, of
+    which approximately 90% has been incurred ... through the second
+    quarter of 2023" -- means $700 million is the amount ALREADY incurred
+    (90%); the implied total is about $777.8 million and the remaining
+    (future) amount is about $77.8 million (700 / 9), not $70 million
+    (700 x 10%).
 """
 
         try:
