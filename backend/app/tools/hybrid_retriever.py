@@ -262,6 +262,34 @@ def is_segment_comparison_query(text: str) -> bool:
     return bool(_SEGMENT_COMPARISON_QUERY_RE.search(text))
 
 
+#: orchestrator._RETRIEVAL_SYNONYM_TERMS widens the inventory_turnover
+#: formula's own "inventory" retrieval query with these exact composition-
+#: category terms (see that dict's docstring) -- "Finished Goods" is a
+#: reliable marker that THIS query is one of those widened formula
+#: queries (a real user question is very unlikely to type this exact
+#: phrase), used below to decide whether the composition-label boost
+#: applies at all. Plain query-text widening alone was NOT enough:
+#: confirmed real case (JnJ FY2022 inventory turnover) -- even with
+#: "Finished Goods" added to the query text, the "Total inventories" row
+#: still ranked #1 (a short, exact "inventories" match that ALSO gets the
+#: unrelated total-row boost below), while the real "Finished goods"
+#: breakdown row (needed to pick the average-inventory convention, see
+#: pot_reasoner._has_finished_goods_inventory) didn't even reach the
+#: top-10.
+_INVENTORY_COMPOSITION_QUERY_RE = re.compile(r'\bfinished\s+goods\b', re.IGNORECASE)
+
+#: A filing's own inventory-note breakdown category labels -- the row
+#: pot_reasoner._has_finished_goods_inventory needs to actually see, not
+#: just the TOTAL inventory line already well-retrieved by the plain
+#: "inventory"/"inventories" alias.
+_INVENTORY_COMPOSITION_LABEL_RE = re.compile(
+    r'\bfinished\s+goods\b|\bmerchandise\s+inventor(?:y|ies)\b|\bfuel\s+inventory\b|'
+    r'\braw\s+materials\s+and\s+supplies\b|\bgoods\s+in\s+process\b|'
+    r'\bspare\s+parts\s+and\s+supplies\b',
+    re.IGNORECASE,
+)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Alias-group pattern loading (financial_formula_library.py's variable
 # aliases -> combined regex patterns, used by the line-item match boost)
@@ -910,6 +938,10 @@ class HybridFinancialRetriever:
         geography_active = is_geography or is_geography_query(query)
         legal_active = is_legal or is_legal_query(query)
         segment_comparison_active = is_segment_comparison or is_segment_comparison_query(query)
+        # No caller flag for this one -- "Finished Goods" appearing in the
+        # query text IS the signal (see _INVENTORY_COMPOSITION_QUERY_RE's
+        # docstring), always auto-detected.
+        inventory_composition_active = bool(_INVENTORY_COMPOSITION_QUERY_RE.search(query))
         # The LATEST year mentioned, not just any of them -- matches this
         # project's established convention of sourcing a multi-year
         # question from that single filing's own comparative columns
@@ -1043,6 +1075,17 @@ class HybridFinancialRetriever:
             # single-segment MD&A pages that each individually outscore it.
             if segment_comparison_active and _SEGMENT_RESULTS_SECTION_RE.search(content):
                 multiplier *= 2.0
+
+            # ── Inventory-composition-label boost (inventory_turnover formula
+            #    retrieval only) ─────────────────────────────────────────────
+            # Applies regardless of prefer_narrative -- stays NUMERIC. See
+            # _INVENTORY_COMPOSITION_QUERY_RE's docstring for the confirmed
+            # JnJ real case: plain query widening alone left the composition
+            # row outside the top-10, losing to the short, generic "Total
+            # inventories" row (itself already boosted by the total-row rule
+            # above) even with the composition terms added to the query text.
+            if inventory_composition_active and _INVENTORY_COMPOSITION_LABEL_RE.search(content):
+                multiplier *= 3.0
 
             # ── Preferred-year boost (bare, year-less entity only) ──────────────
             # Applies regardless of prefer_narrative. entity is frequently a
