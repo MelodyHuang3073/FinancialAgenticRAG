@@ -202,11 +202,22 @@ function splitAnswerText(text) {
     return { summaryText: text.trim(), detailText: '' };
   }
 
-  const summaryLines = [];
-  for (const line of nonEmptyLines) {
-    if (summaryLines.length >= 3) break;
-    summaryLines.push(line.trim());
+  // A flat "first 3 lines" cut doesn't know about Markdown structure, so it
+  // can land INSIDE a bullet list -- the list's remaining items then render
+  // in the detailText block below, separated from the ones above by that
+  // block's own borderTop divider, visually slicing one list in half with a
+  // horizontal rule instead of a paragraph break. Confirmed real case: a
+  // 5-bullet "Drivers" list where items 1-3 became the summary and items
+  // 4-5 became detailText, so a single line appeared mid-list. Once the cut
+  // point falls on a bullet line ('- '), extend it forward to the end of
+  // that contiguous run of bullet lines so the whole list stays together.
+  let cutIndex = Math.min(3, nonEmptyLines.length);
+  if (nonEmptyLines[cutIndex - 1]?.trim().startsWith('- ')) {
+    while (cutIndex < nonEmptyLines.length && nonEmptyLines[cutIndex].trim().startsWith('- ')) {
+      cutIndex += 1;
+    }
   }
+  const summaryLines = nonEmptyLines.slice(0, cutIndex).map((line) => line.trim());
 
   return {
     summaryText: summaryLines.join('\n').trim(),

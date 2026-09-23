@@ -3066,8 +3066,50 @@ _REGULATED_UTILITY_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: When the QUESTION ITSELF spells out the plain formula ("Define net
+#: working capital as total current assets less total current
+#: liabilities"), that explicit instruction overrides any inferred
+#: convention (industry-based or otherwise) -- the question is telling
+#: the system exactly which number it wants, not asking it to infer one.
+#: Confirmed real case: Lockheed Martin FY2021 (gold $5,818M = the plain
+#: 19,815 - 13,997, no adjustment) -- LMT is not a regulated utility, so
+#: the operating-WC adjustment fired anyway and gave -1,390 instead.
+_EXPLICIT_PLAIN_WORKING_CAPITAL_RE = re.compile(
+    r'define\w*\s+(?:net\s+)?working\s+capital\s+as\s+total\s+current\s+assets\s+'
+    r'(?:less|minus)\s+total\s+current\s+liabilities',
+    re.IGNORECASE,
+)
+
 _FINANCING_CURRENT_LIAB_RE = re.compile(
     r'short[\s-]?term\s+(?:debt|borrowings)|current\s+portion\s+of\s+long[\s-]?term\s+debt',
+    re.IGNORECASE,
+)
+
+#: A canonical=="cash" row can be the balance-sheet's own single "Cash and
+#: cash equivalents" line, OR one of the cash-flow statement's several
+#: reconciliation variants of the SAME wording ("...at beginning of
+#: year", "...at end of year", "Net (decrease) increase in cash and cash
+#: equivalents") -- all tagged the same canonical since they share the
+#: phrase, but only the balance-sheet figure belongs in a current-assets
+#: deduction. Confirmed real case: Corning FY2022 -- summing every
+#: "cash"-canonical row for 2022 (1,671 + (-477) + 2,148 + 1,671 = 5,013)
+#: instead of the single real balance (1,671) turned current_assets from
+#: 7,453 into 2,440, and the final working-capital answer from the
+#: correct 831 into -2,735.
+_CASH_FLOW_STATEMENT_CASH_LABEL_RE = re.compile(
+    r'beginning\s+of\s+(?:year|period)|end\s+of\s+(?:year|period)|'
+    r'net\s+(?:\(?(?:increase|decrease)\)?\s*)+in\s+cash',
+    re.IGNORECASE,
+)
+
+#: The cash-flow statement's financing-activities section reuses "short-
+#: term debt"/"short-term borrowings" wording for period ACTIVITY
+#: (repayments, proceeds/issuance during the year), not the period-END
+#: balance a working-capital deduction needs -- see
+#: _adjust_working_capital_for_financing_items's own docstring/comment
+#: for the confirmed Corning real case this excludes.
+_CASH_FLOW_STATEMENT_DEBT_ACTION_RE = re.compile(
+    r'repayments?\s+of|proceeds\s+from|borrowings?\s+under|issuance\s+of',
     re.IGNORECASE,
 )
 
@@ -3104,25 +3146,71 @@ def _adjust_working_capital_for_financing_items(
         return None
 
     ca_year = _year_of("current_assets", resolved["current_assets"])
-    cl_year = _year_of("current_liabilities", resolved["current_liabilities"])
+    # The canonical taxonomy abbreviates this one to "current_liab", not
+    # "current_liabilities" -- confirmed real case: Corning, where this
+    # mismatch silently made cl_year always None, so the debt side of the
+    # deduction never fired at all (current_liabilities stayed at the raw
+    # 5,175 instead of 4,951), landing on 607 instead of the correct 831.
+    cl_year = _year_of("current_liab", resolved["current_liabilities"])
 
-    ca_deduction = 0.0
+    # Only ONE balance-sheet cash figure and ONE short-term-investments
+    # figure ever belong in this deduction -- take the first genuine match
+    # of each (same pattern as _adjust_working_capital_for_custodial_funds
+    # above), never sum every "cash"-canonical row, which double/triple/
+    # quadruple-counts the cash-flow statement's own reconciliation lines
+    # for the same balance (see _CASH_FLOW_STATEMENT_CASH_LABEL_RE).
+    cash_val = None
+    sti_val = None
     if ca_year is not None:
         for v in extracted_table.values():
             if v.get("year") != ca_year:
                 continue
-            if v.get("canonical") == "cash":
-                ca_deduction += v.get("val", 0.0) or 0.0
-            elif _SHORT_TERM_INVESTMENTS_RE.search(v.get("item", "") or ""):
-                ca_deduction += v.get("val", 0.0) or 0.0
+            item = v.get("item", "") or ""
+            if (
+                cash_val is None
+                and v.get("canonical") == "cash"
+                and not _CASH_FLOW_STATEMENT_CASH_LABEL_RE.search(item)
+            ):
+                cash_val = v.get("val", 0.0) or 0.0
+            elif sti_val is None and _SHORT_TERM_INVESTMENTS_RE.search(item):
+                sti_val = v.get("val", 0.0) or 0.0
+    ca_deduction = (cash_val or 0.0) + (sti_val or 0.0)
 
+    # Unlike cash above, this side legitimately CAN have two distinct real
+    # rows to sum (confirmed real case: American Water Works -- "Short-
+    # term debt" 1,175 + "Current portion of long-term debt" 281 are two
+    # genuinely different balance-sheet lines, both correctly counted).
+    # But the same underlying figure is also routinely repeated verbatim
+    # in a second disclosure (a long-term-debt footnote's own "Less
+    # current portion of long-term debt" reconciliation line) AND the
+    # cash-flow statement's financing-activities section uses this same
+    # wording for period ACTIVITY, not a period-END balance (confirmed
+    # real case: Corning FY2022 -- "Current portion of long-term debt and
+    # short-term borrowings (Note 11)" 224 [balance sheet, correct] +
+    # "Repayments of short-term borrowings" -87 + "Proceeds from issuance
+    # of short-term debt" 70 + "Less current portion of long-term debt"
+    # 224 [footnote, a duplicate of the SAME 224] summed to 431 instead of
+    # the correct 224, turning the final answer from 831 into 1,038).
+    # Excluding cash-flow-statement action-verb wording removes the
+    # activity lines; deduping by VALUE (not by label wording, which
+    # differs between the two disclosures of the same figure) removes the
+    # footnote repeat while still letting AWK's two genuinely DIFFERENT
+    # values both count.
     cl_deduction = 0.0
+    seen_cl_vals = set()
     if cl_year is not None:
         for v in extracted_table.values():
             if v.get("year") != cl_year:
                 continue
-            if _FINANCING_CURRENT_LIAB_RE.search(v.get("item", "") or ""):
-                cl_deduction += v.get("val", 0.0) or 0.0
+            item = v.get("item", "") or ""
+            if _CASH_FLOW_STATEMENT_DEBT_ACTION_RE.search(item):
+                continue
+            if _FINANCING_CURRENT_LIAB_RE.search(item):
+                val = v.get("val", 0.0) or 0.0
+                if val in seen_cl_vals:
+                    continue
+                seen_cl_vals.add(val)
+                cl_deduction += val
 
     if not ca_deduction and not cl_deduction:
         return
@@ -3668,7 +3756,8 @@ def _gen_formula_code(
         custodial_applied = _adjust_working_capital_for_custodial_funds(
             resolved, resolved_series, extracted_table
         )
-        if not custodial_applied and not is_regulated_utility:
+        explicit_plain_definition = bool(_EXPLICIT_PLAIN_WORKING_CAPITAL_RE.search(q_lower))
+        if not custodial_applied and not is_regulated_utility and not explicit_plain_definition:
             _adjust_working_capital_for_financing_items(resolved, resolved_series, extracted_table)
 
     if fk == "quick_ratio":

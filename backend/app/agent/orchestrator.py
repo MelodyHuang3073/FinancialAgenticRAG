@@ -1273,6 +1273,25 @@ class FinAgentRAGOrchestrator:
     # words "gross"/"margin"/"profit" nowhere in it.
     _RETRIEVAL_SYNONYM_TERMS: Dict[str, List[str]] = {
         "gross_profit": ["Cost of Products Sold", "Cost of Goods Sold", "Cost of Sales", "COGS"],
+        # pot_reasoner._has_finished_goods_inventory() decides the
+        # inventory_turnover convention (average vs. ending) from whatever
+        # evidence happens to reach PoT -- but a plain "inventory"/
+        # "inventories" alias query alone retrieves only the TOTAL
+        # inventory line (top ~5), never the breakdown sub-rows the
+        # convention check actually looks for. Confirmed real case: JnJ's
+        # own "Finished goods" row (page 58, needed to trigger the average
+        # convention) never made the top-5 for the plain "inventory"
+        # query -- only "Total inventories"/"Inventories (Notes 1 and 3)"
+        # did, both generic totals with neither "finished goods" nor
+        # "fuel"/"spare parts" wording, so the convention check silently
+        # saw no signal and fell back to the wrong (ending) default. These
+        # terms widen the SAME retrieval query (not the extraction alias
+        # list _extract_formula_guided() scores against, so the inventory
+        # VALUE used in the calculation is unaffected) to give the
+        # breakdown row a real chance at the top-5, for either convention.
+        "inventory": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
+        "inventory_old": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
+        "inventory_new": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
     }
 
     def _build_formula_subquestions(
