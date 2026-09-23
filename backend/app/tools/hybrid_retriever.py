@@ -3,6 +3,10 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Query/text matching utilities (word-boundary term presence, year extraction)
+# ─────────────────────────────────────────────────────────────────────────────
+
 _TERM_PATTERN_CACHE: Dict[str, "re.Pattern"] = {}
 
 
@@ -82,6 +86,12 @@ def _extract_years(text: str) -> "set[str]":
 #: win that sub-query's own top-5 and dilute the combined evidence pool
 #: even though the SAME question's other sub-query (the full original
 #: text) correctly boosted the real MD&A driver sentence.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Query-topic detectors (attribution / geography / legal) -- decide whether
+# to apply that topic's dedicated evidence-scoring boost below
+# ─────────────────────────────────────────────────────────────────────────────
+
 _ATTRIBUTION_QUERY_RE = re.compile(
     r'\bwhat\s+(?:drove|caused|led\s+to)\b|\bwhy\s+(?:did|has|have)\b|\bdrivers?\s+of\b',
     re.IGNORECASE,
@@ -208,6 +218,55 @@ def is_legal_query(text: str) -> bool:
     return bool(_LEGAL_QUERY_RE.search(text))
 
 
+#: "Which segment/division/business unit had the highest/lowest ..." is a
+#: NUMERIC-mode question (the classifier still routes it as such --
+#: pot_reasoner.py's own _SELECTION_QUERY_RE recognizes the identical
+#: phrasing to skip PoT computation entirely), so it never gets the
+#: prefer_narrative-gated boosts above; this is threaded independently
+#: into the NUMERIC retrieval path instead. Deliberately scoped to
+#: segment/division/business-unit wording only (not the more general
+#: "region/category/type" a plain ranking question might also use) since
+#: the boost below targets a specific 10-Q/10-K structural feature -- a
+#: consolidated segment-results table, not any ranking table.
+_SEGMENT_COMPARISON_QUERY_RE = re.compile(
+    r'\bwhich\b[^.?]{0,120}\b(?:segment|division|business\s+unit)s?\b[^.?]{0,80}'
+    r'\b(?:highest|lowest|largest|biggest|smallest|greatest|fewest|most|least|best|worst)\b'
+    r'|\b(?:highest|lowest|largest|biggest|smallest)\b[^.?]{0,80}\b(?:segment|division|business\s+unit)s?\b',
+    re.IGNORECASE,
+)
+
+#: The section heading a filer prints directly above its OWN consolidated,
+#: multi-segment results table -- confirmed real case: JPMorgan's 10-Q
+#: page 21 prints "Segment results – managed basis" then "The following
+#: tables summarize the Firm's results by segment for the periods
+#: indicated." immediately above a table listing EVERY segment side by
+#: side (Consumer & Community Banking / Corporate & Investment Bank /
+#: Commercial Banking / Asset & Wealth Management / Corporate), which is
+#: the one page that can actually answer a cross-segment comparison
+#: question -- but for a "which segment had the highest net income"
+#: query it ranked only 19th/47th by plain BM25 (score ~99/65), losing to
+#: FOUR separate single-segment MD&A pages that each individually discuss
+#: just one segment's own results in dense prose and score higher on raw
+#: term overlap, well outside any realistic evidence window. Confirmed
+#: this is NOT the "table structure never recognized" bug an earlier
+#: investigation diagnosed (see the jpm-wide-segment-table-parsing-gap
+#: project memory) -- the table itself is now correctly parsed with real
+#: segment-name column labels; this is purely a retrieval-ranking gap,
+#: the same shape as the geography/legal-section boosts above.
+_SEGMENT_RESULTS_SECTION_RE = re.compile(
+    r'segment\s+results\b|results?\s+by\s+segment\b', re.IGNORECASE
+)
+
+
+def is_segment_comparison_query(text: str) -> bool:
+    return bool(_SEGMENT_COMPARISON_QUERY_RE.search(text))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alias-group pattern loading (financial_formula_library.py's variable
+# aliases -> combined regex patterns, used by the line-item match boost)
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _combined_pattern(terms: List[str]) -> "re.Pattern":
     """
     One alternation regex matching ANY of `terms` at a word boundary
@@ -261,6 +320,11 @@ def _get_alias_groups() -> List[List[str]]:
         _ALIAS_GROUPS = _load_alias_groups()
     return _ALIAS_GROUPS
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main retriever: BM25 scoring + financial-domain relevance boosts (line-item
+# match, company match, the topic detectors above)
+# ─────────────────────────────────────────────────────────────────────────────
 
 class HybridFinancialRetriever:
     # Used for a 1.5x _line_item_match_score boost when a query and a
@@ -764,6 +828,7 @@ class HybridFinancialRetriever:
         is_attribution: bool = False,
         is_geography: bool = False,
         is_legal: bool = False,
+        is_segment_comparison: bool = False,
         query_years: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -844,6 +909,7 @@ class HybridFinancialRetriever:
         attribution_active = is_attribution or is_attribution_query(query)
         geography_active = is_geography or is_geography_query(query)
         legal_active = is_legal or is_legal_query(query)
+        segment_comparison_active = is_segment_comparison or is_segment_comparison_query(query)
         # The LATEST year mentioned, not just any of them -- matches this
         # project's established convention of sourcing a multi-year
         # question from that single filing's own comparative columns
@@ -967,6 +1033,16 @@ class HybridFinancialRetriever:
             # bag-of-words topic query alone.
             if prefer_narrative and legal_active and _LEGAL_PROCEEDINGS_SECTION_RE.search(content):
                 multiplier *= 1.5
+
+            # ── Segment-results-section boost (segment-comparison questions only) ──
+            # Applies regardless of prefer_narrative -- this question shape
+            # stays NUMERIC (see _SEGMENT_COMPARISON_QUERY_RE's docstring).
+            # See _SEGMENT_RESULTS_SECTION_RE's docstring for the confirmed
+            # JPMorgan real case: the one page holding every segment side
+            # by side needs a strong boost to overcome four separate
+            # single-segment MD&A pages that each individually outscore it.
+            if segment_comparison_active and _SEGMENT_RESULTS_SECTION_RE.search(content):
+                multiplier *= 2.0
 
             # ── Preferred-year boost (bare, year-less entity only) ──────────────
             # Applies regardless of prefer_narrative. entity is frequently a
