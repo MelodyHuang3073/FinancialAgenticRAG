@@ -42,6 +42,41 @@ from app.agent.usage_tracker import record_usage, DAILY_FREE_TOKEN_CAP  # noqa: 
 # were both retrieved but never reached the prompt.
 EVIDENCE_PROMPT_CAP = 16
 
+# Every one of the real cases that justified raising EVIDENCE_PROMPT_CAP
+# above (12->16, and originally 4->6->12, see the trail of comments below
+# where it's sliced) was a NARRATIVE/EXPLANATION question -- legal
+# proceedings, customer concentration, gross-margin drivers -- never a
+# NUMERIC question where the PoT sandbox already produced a verified,
+# non-degraded result_value. For THAT narrow case the LLM's job is mostly
+# to phrase pot_summary's own number in prose, not to search a wide
+# evidence pool for a fact PoT never found -- so a much smaller window is
+# a reasonable token-saving trim there specifically, without touching any
+# of the documented narrative cases above. Off by default (0 = disabled,
+# same as leaving EVIDENCE_PROMPT_CAP alone) until verified on real
+# metrics-style questions; set RELIABLE_POT_EVIDENCE_CAP in the
+# environment (e.g. "6") to enable.
+RELIABLE_POT_EVIDENCE_CAP = int(os.getenv("RELIABLE_POT_EVIDENCE_CAP", "0") or "0")
+
+
+def is_reliable_pot_result(pot_res: Optional[Dict[str, Any]]) -> bool:
+    """True only for a NUMERIC question whose PoT sandbox produced a real,
+    trustworthy result_value -- excludes the "result is not reliable"
+    placeholder (pot_res.get("result_value") is the sandbox's literal 0.0
+    at this point, NOT yet converted to None -- that conversion happens
+    later, only in orchestrator.py's frontend-facing return dict, not in
+    what's passed to generate_answer), a degraded/approximated formula,
+    and the no-calculation-path skip (result_value is already None
+    there)."""
+    if not pot_res:
+        return False
+    if pot_res.get("result_value") is None:
+        return False
+    if pot_res.get("is_degraded_formula"):
+        return False
+    if "result is not reliable" in (pot_res.get("output_log") or ""):
+        return False
+    return True
+
 
 def _is_reasoning_model(model_name: str) -> bool:
     """
@@ -263,10 +298,22 @@ class LLMAnswerGenerator:
         # (see max_chars above), so 12 items is a still-reasonable ~48K-
         # char evidence budget for a single LLM call on a modern context
         # window.
+        #
+        # See RELIABLE_POT_EVIDENCE_CAP's own docstring above: a NUMERIC
+        # question whose PoT sandbox already produced a verified result
+        # doesn't need the full narrative-sized window -- none of the
+        # documented cases above are this shape. Off (0) by default.
+        effective_cap = EVIDENCE_PROMPT_CAP
+        if (
+            RELIABLE_POT_EVIDENCE_CAP > 0
+            and answer_mode == "NUMERIC"
+            and is_reliable_pot_result(pot_res)
+        ):
+            effective_cap = RELIABLE_POT_EVIDENCE_CAP
         evidence_text = "\n".join(
             f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] "
             f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=4000, max_table_rows=30)}"
-            for item in sorted_evidence[:EVIDENCE_PROMPT_CAP]
+            for item in sorted_evidence[:effective_cap]
         )
 
         pot_summary = ""
@@ -422,436 +469,203 @@ Available Evidence:
 3. Keep total response under 150 words.
 4. Do NOT repeat raw evidence verbatim or list variable names.
 5. If evidence is insufficient, state clearly what data is missing.
-6. If the question asks which SECURITIES (stock, bonds, notes) are
-   REGISTERED to trade on a national exchange, the authoritative source
-   is a "Securities registered pursuant to Section 12(b)/12(g) of the
-   Act" disclosure (usually on the filing's own cover page) -- trust
-   that table's own contents even if it says only common stock is
-   listed and no debt securities appear there at all. A separate
-   "Long-Term Debt" or similar footnote describing outstanding notes/
-   borrowings answers a DIFFERENT question (how much debt financing the
-   company has) and must never be substituted as if it were the
-   exchange-registration answer.
-7. If the question asks what DROVE or CAUSED a change, and the evidence
-   describes MULTIPLE distinct contributing factors (e.g. several
-   business segments, products, or line items each with their own
-   stated reason), name ALL of them that the evidence supports -- do
-   not stop after the first one or two that seem sufficient.
-8. If the question asks you to LIST items (acquisitions, legal matters,
-   products, geographies, etc.), enumerate EVERY item the evidence below
-   names -- do not stop after finding a plausible-looking subset. NEVER
-   name a specific company, transaction, dollar amount, or event unless
-   the evidence below EXPLICITLY connects it to the exact period/year the
-   question asks about. A name or word matching something you recognize
-   from general knowledge appearing ANYWHERE in the evidence text is NOT
-   enough by itself -- check what the SURROUNDING sentence actually says
-   about it before citing it. Confirmed real failure mode: a company name
-   appears in evidence only as part of an unrelated executive's past
-   employer ("President, [Company] North America, 2017 to 2019") or a
-   stray mention with a different year attached -- seeing that name is
-   not evidence that IT was acquired in, or is otherwise relevant to, the
-   fiscal year actually being asked about. When in doubt about whether a
-   specific fact you're about to cite is truly supported for the exact
-   period asked, leave it out rather than include it. When listing
-   ACQUISITIONS specifically, also state the OWNERSHIP STAKE acquired
-   (e.g. "100% equity interest", "all of the outstanding shares") if the
-   evidence explicitly states it for that deal -- filings routinely
-   phrase this detail right alongside the target's name and purchase
-   price, and it is often the specific fact a question about acquisitions
-   is checking for, not just the dollar amount.
-9. If the question asks whether the company paid/declared DIVIDENDS, and
-   the evidence contains a PER-SHARE dividend rate (e.g. "$0.01 per
-   share", "$0.55 per share dividend") in addition to an aggregate dollar
-   total (e.g. a cash-flow-statement "Dividends paid" line), state BOTH
-   numbers -- the per-share rate is usually the more specific fact a
-   dividend question is really asking for, and citing only the aggregate
-   total is an incomplete answer even when that total is itself correct.
-   If the question is about whether the dividend is STABLE/growing/consistent
-   over time and the evidence states an explicit streak ("the 65th
-   consecutive year of dividend increases"), you MUST state that streak in
-   your answer -- it is the decisive fact for a trend question.
-10. For a ratio/multiple result (turnover ratio, current ratio, quick
-    ratio, etc.), state the number by itself (e.g. "17.98") -- do NOT
-    append a trailing "x" ("17.98x"). Percentages still get a trailing
-    "%" as usual; this rule is only about the "x" multiple suffix.
-11. If the question asks what GEOGRAPHIES/regions a company operates in,
-    and the evidence uses a combined internal segment label whose own
-    definition spans multiple actual places (e.g. "AMESA" defined as
-    "Africa, the Middle East and South Asia"; "APAC" defined as "Asia
-    Pacific, Australia and New Zealand, and China"), list the individual
-    places the evidence itself names, not just the abbreviation -- a
-    "geographies" question is asking for actual regions, and an internal
-    reporting-segment code is not itself a geography.
-    When the filing reports revenue/operations broken out by its OWN
-    named geographic segments (e.g. "United States", "EMEA", "APAC",
-    "LACC"), use those segment names -- optionally with the revenue
-    figures/percentages the filing gives for each -- as the answer's main
-    structure, not a flat list of every individual country mentioned
-    anywhere in the evidence pulled together in no particular order. Do
-    NOT lead the answer with employee/headcount statistics ("X employees
-    are located in the U.S., Y outside the U.S.") -- a "where does the
-    business operate" question is about where revenue/operations are, not
-    where staff are located, even when a headcount breakdown by geography
-    is present in the same evidence. Confirmed real case: American
-    Express's own "What are the geographies...primarily operates in as of
-    2022?" question -- one answer opened with a U.S.-vs-international
-    employee headcount split, then closed with a fragmented list of
-    individual place names (United States; Europe; the Middle East;
-    Africa; United Kingdom; European Union; Asia Pacific including Japan;
-    Australia; New Zealand; Latin America; Canada; Mexico; the Caribbean)
-    instead of American Express's own three reporting segments (EMEA,
-    APAC, LACC) with their revenue figures, even though the filing itself
-    reports geographic revenue exactly that way.
-12. If the question asks about ongoing LEGAL BATTLES/litigation and the
-    verdict is that the company DOES have materially important ones, and
-    the evidence names multiple DISTINCT categories of legal matters
-    (e.g. a filing's own named sub-headings like "Usual and Customary
-    Pricing Litigation", "PBM Litigation and Investigations", "Controlled
-    Substances Litigation"), give a one-sentence summary of what is
-    actually ALLEGED or at issue in EACH named category, not just its
-    name -- do not describe only the category with the largest dollar
-    figure in detail while merely name-dropping the others. Evidence
-    for a smaller/less-quantified category (e.g. no settlement figure
-    disclosed yet) still states what the claim itself is about (e.g.
-    "alleges retail pharmacies overcharged for prescription drugs by
-    not submitting the correct usual and customary price"); state that,
-    even without a dollar figure to cite alongside it.
-    This enumerate-every-category instruction applies ONLY when the
-    verdict is "Yes, materially important". When the filing discloses
-    ordinary-course legal proceedings but management/the filing itself
-    concludes none are expected to have a material adverse effect (a
-    "No" verdict), do NOT enumerate the individual immaterial matters or
-    their categories in detail -- state the "No" verdict plainly in the
-    opening sentence, optionally with a single brief clause noting that
-    ordinary-course matters exist but were assessed as immaterial, and
-    stop there. Spending a paragraph walking through each disclosed-but-
-    immaterial matter (even when every individual fact stated is
-    accurate) makes a correct "No" answer read as hedgy or self-
-    contradictory -- the level of enumeration itself implies materiality
-    the verdict is denying. Confirmed real case: PepsiCo's own "Has
-    PepsiCo reported any materially important ongoing legal battles..."
-    question (gold: a plain "No, PepsiCo is not involved in material
-    legal battles") got a technically-correct "No" that nonetheless
-    opened with "PepsiCo's FY2022 and FY2021 10-K filings disclose
-    various legal proceedings..." followed by a category-by-category
-    breakdown, before finally restating "No" -- accurate in substance,
-    but reads as uncertain given how much space was spent describing
-    matters the verdict itself says aren't material.
-    Decide the Yes/No verdict itself from the NATURE and SEVERITY of what
-    the evidence actually describes (e.g. lawsuits/investigations tied to
-    fatal accidents, large stated settlement/remediation figures, an
-    active bankruptcy-court proceeding, multiple concurrent suits) -- NOT
-    from whether the filing happens to contain an explicit sentence
-    literally labeling something "material" or "not material". A filing
-    that explicitly states its own materiality conclusion (as PepsiCo's
-    and CVS's do) is one valid signal when present, but its ABSENCE does
-    not make the question unanswerable -- evidence naming specific,
-    serious ongoing lawsuits (e.g. litigation arising from fatal aircraft
-    accidents) is by itself sufficient basis for a confident "Yes", even
-    without the filing using the word "material" anywhere in the excerpt
-    you were given. Do not respond "I cannot confirm" / "not enough
-    information to determine materiality" when the evidence already
-    names specific, serious ongoing legal matters -- use professional
-    judgment on severity the same way a human analyst reading the same
-    excerpt would, rather than treating the ABSENCE of an explicit
-    materiality label as itself inconclusive. Confirmed real case:
-    Boeing's own "Has Boeing reported any materially important ongoing
-    legal battles...FY2022?" question (gold: "Yes. Multiple lawsuits...
-    resulting from a 2018 Lion Air crash and a 2019 Ethiopian Airlines
-    crash") had evidence correctly naming both accidents and the
-    resulting litigation, but got "I cannot confirm... management's
-    materiality conclusions are not included here" instead of "Yes" --
-    the underlying facts were sufficient to answer confidently; two fatal
-    aircraft-accident lawsuits against a company this size are self-
-    evidently material without needing the filing to say so explicitly.
-13. Before concluding that the evidence does NOT contain something the
-    question asks for (an acquisition, a litigation category, a specific
-    figure, a named note like "Acquisitions and Divestitures"), you MUST
-    actually scan every evidence item listed above first -- there are up
-    to 16 of them, and the one that answers the question is not always
-    the first or the most prominent-looking one. Do not conclude
-    "not disclosed in the provided excerpts" / "the relevant note is not
-    included" while an evidence item literally contains that note's own
-    heading and content -- this has been a confirmed real failure mode,
-    denying evidence that was directly present in the prompt. Confirmed
-    real case: Amcor's own "Note 5 - Acquisitions and Divestitures" note
-    (naming a Czech Republic plant, a Shanghai facility, and a New
-    Zealand manufacturer by name, with dollar amounts) was evidence
-    item #1 of 12, yet the answer claimed no such note was supplied at
-    all.
-14. If the question asks whether a company is CAPITAL-INTENSIVE and the
-    PoT sandbox output shows the assets/revenue ratio ALONGSIDE
-    CapEx/Revenue, Fixed Assets/Total Assets, and/or Return on Assets,
-    treat RETURN ON ASSETS AS THE PRIMARY signal, not the bare
-    assets/revenue ratio -- a company that generates a healthy, efficient
-    return on its asset base (roughly double-digit ROA, ~10%+) is
-    evidence AGAINST calling it capital-intensive, even when assets
-    exceed revenue (a large asset base that still earns a strong return
-    is being used efficiently, which is the opposite of the "money tied
-    up unproductively" concern "capital-intensive" is meant to flag).
-    Conversely a LOW ROA (roughly single-digit, well under ~10%)
-    alongside a meaningful fixed-asset base IS a strong sign of capital
-    intensity, even when the bare assets/revenue ratio looks modest --
-    the company ties up a lot of capital relative to the profit that
-    capital actually generates. Do not default to "assets/revenue > 1.0
-    -> capital-intensive" as your primary rule; that ratio alone is a
-    weaker signal than ROA for this specific judgment. A LOW Fixed-
-    Assets/Total-Assets percentage does NOT by itself override a LOW ROA
-    verdict -- a low fixed-asset share only argues against capital
-    intensity when it means the company's total assets are genuinely
-    modest (a lean, low-capital operation). If the evidence shows a
-    large TOTAL asset base that is mostly goodwill/intangibles rather
-    than physical plant (common after a company has made large
-    acquisitions), a low fixed-asset PERCENTAGE is really just a
-    reflection of that mix, not evidence the company needs little
-    capital overall -- the low ROA on that large total asset base is
-    still the more telling signal, and still supports a capital-
-    intensive verdict even though physical PP&E itself is a small slice
-    of it. ROA efficiency should anchor the verdict whenever it's
-    available; use Fixed-Assets/Total-Assets to explain WHAT KIND of
-    capital intensity it is (physical plant vs. a large acquired/
-    goodwill-heavy balance sheet), not to overrule what ROA already
-    indicates.
-    Whenever the PoT sandbox output includes an ROA figure, your final
-    answer text MUST explicitly state that ROA percentage as a number
-    (e.g. "...evident from its ROA of only 1.82%...") -- do not merely
-    reason from it internally while leaving it out of the written answer.
-    Confirmed real case: 3M's and CVS Health's own "Is [company] a
-    capital-intensive business...?" questions have each, on different
-    occasions, produced an answer with the right Yes/No verdict and
-    correct reasoning but with the ROA number itself silently omitted
-    from the text, even though this instruction already asked for ROA to
-    be the primary signal -- restating it here as an explicit output
-    requirement (a number that must appear), not just a reasoning
-    priority, is meant to close that gap.
-15. If the question asks what DROVE a margin change (gross margin,
-    operating margin, etc.) and the evidence contains BOTH (a) routine/
-    recurring operational factors (raw-material or logistics cost
-    inflation, ordinary pricing/volume/mix shifts, FX translation,
-    routine productivity gains) AND (b) one-off/non-recurring special
-    items (litigation charges, impairments, restructuring/divestiture
-    costs, a specific named exit from a product line or manufacturing
-    process), lead the explanation with the one-off/special items, not
-    the routine operational factors -- even when a routine factor has a
-    numerically larger stated percentage-point impact. This mirrors
-    standard financial-statement-analysis practice (distinguishing
-    "core"/recurring performance from non-recurring items when
-    explaining a period-over-period change): a margin move is usually
-    considered NEWSWORTHY and explanation-worthy specifically because of
-    what's unusual about it, not because of the routine cost/pricing
-    noise that's present in every period regardless. Routine factors can
-    still be mentioned, but as secondary context after the special
-    items, not as the headline explanation. Confirmed real case: 3M's
-    own "What drove operating margin change...FY2022" question (gold:
-    "...primarily due to...mostly one-off charges including Combat Arms
-    Earplugs litigation, impairment related to exiting PFAS
-    manufacturing, costs related to exiting Russia and divestiture-
-    related restructuring charges") had evidence containing both a raw-
-    material/logistics inflation drag AND these named one-off items, but
-    the routine inflation factor was cited first as the primary driver
-    while the litigation/PFAS/Russia/divestiture items were relegated to
-    an "other contributors" list -- gold's own framing treats the one-off
-    items as the primary story.
-16. If the question names a fiscal year (e.g. "FY2023") that no evidence
-    item is labeled with, but the evidence DOES contain data for the
-    company's fiscal year that ENDS in January or February of that
-    named calendar year (a common retail convention: the year ended
-    Jan 28, 2023 is the company's own "fiscal 2022" yet is widely
-    called FY2023), do NOT refuse for lack of "FY2023" data. Use that
-    period's figures, state the assumption in ONE short clause (e.g.
-    "treating the year ended Jan 28, 2023, which the company calls
-    fiscal 2022, as FY2023"), and give the answer. Only decline when
-    the evidence has no such adjacent period at all -- and never apply
-    this to a company whose fiscal year ends in December, where the
-    labels are unambiguous. Confirmed real case: Ulta Beauty's "What
-    percent of total stock-repurchase spend for FY2023 occurred in Q4"
-    question -- the evidence stated Q4 fiscal 2022 repurchases of
-    $328.1 million and full fiscal 2022 repurchases of $900.0 million
-    (year ended Jan 28, 2023), enough to answer 36%, but the model
-    refused twice because neither figure was literally labeled
-    "FY2023".
-17. If the question asks WHICH region/segment/geography had the biggest
-    drop, highest growth, lowest value, etc., and the evidence lists BOTH
-    an aggregate row (e.g. "International") AND finer rows that make it up
-    (e.g. "Developed Europe", "Developed Rest of World", "Emerging
-    Markets"), rank the FINEST rows the evidence gives, not the aggregate --
-    an aggregate averages away the extreme sub-region. Compare every
-    non-overlapping finest-level row for the same period and name the
-    winner among those. Confirmed real case: Pfizer's Q2 2023 "biggest
-    percentage drop by region" -- the answer named "International (-60%)"
-    while the same evidence lists Developed Rest of World at -74%.
-18. If the question asks how MANY of something a company has (stores,
-    locations, employees, branches) without naming a brand/banner/
-    format, and the evidence shows per-brand rows plus a "Total" row,
-    answer with the Total row, not one brand's row. Confirmed real case:
-    Best Buy's store count question was answered with the "Best Buy"
-    banner alone (930 -> 907) instead of the Total row (982 -> 969) that
-    also includes Outlet Centers, Pacific Sales and Yardbird. The company's
-    OWN name in the question ("the number of Best Buy stores") is NOT a
-    banner filter: even when one row happens to be labeled with the same
-    name as the company, that row is only one banner -- the question
-    means every store, so use the row labeled Total.
-19. If the question asks for the MAIN/MAJOR companies (or businesses)
-    the filer ACQUIRED, use the acquisitions/business-combination
-    disclosures -- the ones stating a purchase price, closing date and
-    accounting -- and name the ones the filing itself features for the
-    periods it covers. Do NOT pick a company that is merely mentioned in
-    passing elsewhere (litigation history, a decades-old deal, an
-    executive's biography). Confirmed real case: Pfizer FY2021 -- the
-    answer listed King (a 2010 acquisition mentioned in litigation text)
-    and omitted Trillium (a 2021 acquisition in the business section).
-20. If the question asks what SHARE/percent/contribution of "company
-    level" or total EBITDA/EBITDAR/operating income/revenue a segment or
-    region made, divide by the company-level consolidated figure the
-    filing reports for that measure (the total after corporate/other
-    and eliminations), not by the sum of the segment figures shown.
-    Confirmed real case: MGM FY2022 -- Las Vegas Strip Resorts Adjusted
-    Property EBITDAR of 3,142,308 over the company-level Adjusted
-    EBITDAR of 3,497,254 is about 90%, but dividing by the segment sum
-    gave 78.6%.
-21. A business-segment table's figures belong to the segment named in the
-    section heading of the SAME page (e.g. a page headed "Defense, Space &
-    Security" -- its revenue share and operating margin are that
-    segment's). Never attribute them to a different segment (such as
-    Commercial Airplanes) just because the answer is about that one. If
-    the page does not clearly say which segment a table is for, omit the
-    figure. Confirmed real case: Boeing's cyclicality answer cited a 35%
-    revenue share and a 5.8% -> (15.3)% margin swing as Commercial
-    Airplanes' when they are Defense, Space & Security's.
-22. If the question asks whether a company's dividend is STABLE, growing or
-    consistent over time, and the evidence states an explicit streak (for
-    example "the 65th consecutive year of dividend increases"), state that
-    streak in the answer alongside the per-share figures -- it is the
-    strongest evidence of a stable trend. Confirmed real case: 3M's
-    dividend-trend answer gave 2020-2022 per-share amounts but left out
-    the "65th consecutive year of dividend increases" sentence that sat
-    in the evidence.
-23. If the question asks whether a growth rate is expected to accelerate,
-    slow, improve or decline, and the evidence gives forward guidance on
-    MORE THAN ONE basis (for example "Adjusted EPS" AND "Adjusted
-    Operational EPS", or reported vs constant-currency), state the
-    guidance growth midpoint for EACH basis together with the prior-year
-    growth figure(s) the evidence gives, then give the verdict and say
-    which basis it rests on; if the bases point in different directions,
-    say so and LEAD the verdict with the operational / constant-currency
-    basis (it removes currency noise), then mention the other basis as a
-    caveat -- do not open with a plain "Yes" that only holds for the other
-    line. Do not silently pick one line. Confirmed real case: J&J's
-    FY2023 guidance table lists Adjusted EPS (midpoint +4.0%) and
-    Adjusted Operational EPS (midpoint +3.5%) against FY2022's +3.6% --
-    the answer cited only the first and called it acceleration.
-24. Earnings-release wording "leverage" / "deleverage": "leverage of X" (or
-    "X leveraged") means expense X FELL as a percent of net sales;
-    "deleverage of X" means X ROSE as a percent of net sales. When the
-    question asks whether a cost's percent of net sales increased or
-    decreased and the text uses this wording for that cost (store payroll
-    and benefits, wages, marketing, corporate overhead, incentive
-    compensation), answer from it -- do not say the information is
-    missing just because no explicit percentage is printed. Confirmed real
-    case: Ulta's release says SG&A improved "primarily due to leverage of
-    marketing expenses and incentive compensation ... partially offset by
-    deleverage of store payroll and benefits due to wage investments" --
-    so wages rose as a percent of sales, yet the answer said it was not
-    disclosed.
-25. If the question asks WHICH segment/business had the highest or lowest
-    value of some measure, first list the value for EVERY segment shown
-    on the page before choosing. A segment table is often printed as
-    several blocks, each with its own header line naming DIFFERENT
-    segments (for example one block for three segments and a second
-    block below it for the remaining segments and the firm total); the
-    answer may sit in a later block. A negative value is LOWER than any
-    positive value. Do not treat the firm-total column as a segment.
-    Confirmed real case: JPMorgan Q1 2021 -- the answer named Commercial
-    Banking ($2,393 million) as lowest net revenue by looking only at the
-    first block, while the second block shows Corporate at $(473) million.
-26. If the question asks which item "performed the best" / "worst" (or was
-    the "top" / "best performer") WITHOUT saying whether it means the
-    largest amount or the fastest growth, give BOTH readings in one short
-    answer: the item with the largest figure (with its value and share) AND
-    the item with the highest percentage growth or comparable-sales change
-    (with that percentage), each named with its period. Confirmed real case:
-    Best Buy Q2 FY2024 domestic categories -- the answer named only the
-    largest category (Computing and Mobile Phones, $3,674 million) on one run
-    and only the fastest-growing one (Entertainment, +9.0%) on another.
-27. If the question says "if <metric> is not a useful metric ... state that
-    and explain why" and the company is a bank, card issuer, insurer or other
-    financial institution (no cost of goods sold, gross profit or ordinary
-    operating income line), START the answer by saying that this metric is not
-    how such a company's performance is measured and why. Only then may you
-    mention a proxy figure. Do not open with "Yes" or "No" about the metric
-    itself.
-28. When you list legal matters, acquisitions or similar events, also state
+6. If the question asks which SECURITIES are registered to trade on a national
+   exchange, the authoritative source is the filing's own "Securities
+   registered pursuant to Section 12(b)/12(g)" cover-page table -- trust it
+   even if it lists only common stock and no debt securities. A separate
+   "Long-Term Debt" footnote answers a different question (financing amount)
+   and must never stand in for the exchange-registration answer.
+7. A company whose fiscal year ends in January/February is still often
+   labeled by the LATER calendar year (e.g. year ended Jan 28, 2023 = the
+   company's own "fiscal 2022" but commonly called "FY2023"). If the
+   question names a year no evidence item is literally labeled with, but
+   the evidence has data for that company's adjacent fiscal year, use it,
+   state the assumption in one clause, and answer -- do not refuse. Never
+   apply this to a December fiscal year-end, where labels are unambiguous.
+8. A 10-K states its own fiscal year on its cover. If the evidence comes
+   from the filing for the year asked about, answer from it -- never say
+   that year's disclosure is missing just because of the filename; a 10-K
+   also carries the prior year's comparatives.
+9. Before concluding the evidence does NOT contain something asked for (an
+   acquisition, a litigation category, a note by name), scan every evidence
+   item first -- there are up to 16, and the right one is not always the
+   first or most prominent. Never say "not disclosed in the excerpts" while
+   an item literally contains that fact.
+10. If asked WHICH region/segment had the biggest drop/highest growth/etc.,
+    and the evidence lists both an aggregate row (e.g. "International") and
+    the finer rows making it up (e.g. "Developed Europe", "Emerging
+    Markets"), rank the FINEST rows -- an aggregate averages away the
+    extreme sub-item. Compare every non-overlapping finest-level row for
+    the same period.
+11. If asked how MANY of something a company has (stores, locations,
+    employees) with no brand/banner named, and the evidence shows per-brand
+    rows plus a "Total" row, answer with the Total row -- even when one
+    brand row happens to share the company's own name, that row is still
+    only one banner, not the whole count.
+12. If asked what SHARE/percent/contribution of the company-level total a
+    segment made, divide by the company-level CONSOLIDATED figure the
+    filing reports (after corporate/other and eliminations), not by the sum
+    of the segment figures shown.
+13. A business-segment table's figures belong to the segment named in the
+    section heading of the SAME page -- never attribute them to a different
+    segment just because the question is about that one. If the page
+    doesn't clearly say which segment a table is for, omit the figure.
+14. If asked WHICH segment/business had the highest or lowest value of some
+    measure, first list the value for EVERY segment shown on the page
+    before choosing -- a segment table is often split into several blocks,
+    each naming different segments, and the answer may sit in a later
+    block. A negative value is lower than any positive one. Never treat the
+    firm-total column as a segment.
+15. If asked what GEOGRAPHIES/regions a company operates in: expand an
+    internal segment code that is itself defined as multiple places (e.g.
+    "AMESA" = "Africa, the Middle East and South Asia") into those actual
+    places -- an abbreviation is not itself a geography. When the filing
+    reports revenue by its OWN named geographic segments (e.g. "United
+    States", "EMEA", "APAC", "LACC"), use those names -- optionally with
+    the figures given -- as the answer's structure, not a flat unordered
+    list of every place mentioned anywhere. Do NOT lead with employee/
+    headcount geography -- the question is about where revenue/operations
+    are, not where staff are located.
+
+【ENUMERATION -- LIST EVERY ITEM THE EVIDENCE SUPPORTS, NOT JUST THE FIRST ONE OR TWO】:
+16. If asked what DROVE or CAUSED a change, and the evidence describes
+    MULTIPLE distinct contributing factors (several segments, products, or
+    line items each with their own stated reason), name ALL of them the
+    evidence supports -- do not stop after the first one or two that seem
+    sufficient.
+17. If asked to LIST items (acquisitions, legal matters, products,
+    geographies), enumerate EVERY item the evidence names -- do not stop at
+    a plausible-looking subset. NEVER name a specific company, transaction,
+    amount or event unless the evidence EXPLICITLY connects it to the exact
+    period/year asked -- a name matching something you recognize appearing
+    ANYWHERE in the evidence is not enough; check what the surrounding
+    sentence actually says (a stray mention, e.g. an executive's past
+    employer, is not evidence of relevance to the asked period). When
+    listing ACQUISITIONS specifically, also state the OWNERSHIP STAKE
+    acquired if the evidence gives it.
+18. If the verdict on LEGAL MATTERS is "Yes, materially important" and the
+    evidence names multiple DISTINCT categories (e.g. a filing's own named
+    sub-headings), give a one-sentence summary of what is actually ALLEGED
+    in EACH category, not just its name -- including a category with no
+    dollar figure disclosed yet. This enumerate-every-category instruction
+    applies ONLY to a "Yes" verdict. If the verdict is "No" (ordinary-course
+    matters, assessed immaterial), state "No" plainly with at most one
+    brief clause noting ordinary-course matters exist -- do not enumerate
+    the individual immaterial matters; heavy enumeration on a "No" reads as
+    hedging. Decide the Yes/No verdict from the NATURE and SEVERITY actually
+    described (fatal accidents, large settlement/remediation figures, an
+    active bankruptcy proceeding, multiple concurrent suits) -- not from
+    whether the filing happens to use the literal word "material"; that
+    word's absence does not make the question unanswerable, and evidence
+    naming specific serious matters is sufficient basis for a confident
+    verdict without it.
+19. If asked for the MAIN/MAJOR companies a filer ACQUIRED, use the
+    acquisition/business-combination disclosures (purchase price, closing
+    date, accounting) for the periods the question covers -- never a
+    company only mentioned in passing elsewhere (old litigation history, an
+    executive's biography).
+20. When you list legal matters, acquisitions or similar events, also state
     the dollar amount the filing discloses for each one (settlement cap,
-    attorneys' fees, purchase price, total consideration) whenever the
-    evidence gives it, next to that item -- not a different, only loosely
-    related total. Confirmed real case: CVS opioid litigation answered with
-    "$5.8 billion of charges" but without the filing's own "up to about $4.3
-    billion in remediation plus $625 million in attorneys' fees".
-29. A 10-K states its own fiscal year on its cover. If the evidence comes from
-    the filing for the fiscal year the question asks about, answer from it and
-    never say that year's disclosure is missing because of the file's name; a
-    10-K also carries the prior-year comparatives. Confirmed real case:
-    PepsiCo's FY2022 Item 3 (management believes the outcome of legal matters
-    will not have a material adverse effect) was in the evidence, yet the
-    answer said FY2022 could not be confirmed.
-30. If the question asks what each shareholder could receive if the company
-    went bankrupt / was liquidated, the headline figure is the TANGIBLE book
-    value per share (goodwill and other intangibles are not distributable);
-    state that figure first and mention plain book value per share only as
-    context. Confirmed real case: JPMorgan Q1 2021 -- the answer led with
-    $82.31 (book value per share) and only mentioned $66.56 (tangible book
-    value per share) in passing.
-31. If the question asks about the nature, composition or purpose of a
-    liability or other total that the evidence breaks into components, give
-    each component's amount AND its percentage of the total (for example
-    "employee-related $81 million, about 87% of the $93 million liability").
-32. When the question asks whether an unusual / non-recurring / one-time event
-    affected a result, NAME each event using the wording of the statement line
-    or the filing's own description, not only its amount -- for example "the
-    gain on completion of the Consumer Healthcare JV transaction ($8,107
-    million)", not just "a one-time gain of $8,107 million". Confirmed real
-    case: Pfizer 2019 -- one run gave the $8,107 million figure without ever
-    saying what event it came from. The same goes for a margin / income /
-    expense driver that comes from an acquisition, merger or divestiture:
-    name the other company or deal the evidence names (for example "amortization
-    of intangibles from the Xilinx acquisition"), never just "acquisition-
-    related". Confirmed real case: AMD FY2022 operating margin -- one run said
-    "one-off acquisition-related amortization" and never named Xilinx.
-33. If the question asks whether a company IS spinning off, divesting or
-    separating a business segment, and the evidence states that separation-
-    related costs are STILL being incurred as of (or through) the reporting
-    period -- for example "we expect to incur costs of approximately $X
-    million in connection with separating <segment>, of which Y% has been
-    incurred ... through <the current quarter>" -- answer YES: the ongoing,
-    unfinished cost of completing the separation means it is still in
-    progress, even when another sentence elsewhere says the legal
-    transaction (the spin-off itself, or its combination with another
-    company) closed at an earlier date. Only answer NO when the evidence
-    shows no such ongoing separation costs at all. Confirmed real case:
-    Pfizer's Q2 2023 10-Q says the Upjohn/Viatris transaction "completed" in
-    November 2020, but ALSO says it still expects to incur ~$700 million in
-    separation costs, ~90% incurred through Q2 2023 -- the correct answer is
-    Yes, it is still (finishing) spinning off Upjohn, not "no, it already
-    finished."
-34. When evidence gives a separation/spin-off/divestiture cost sentence
-    shaped "we expect to incur costs of approximately $X million ... in
-    connection with separating <segment>, of which approximately Y% has
-    been incurred ... through <period>", read $X as the amount ALREADY
-    incurred (recognized) as of that period -- the Y% portion -- not as
-    the total projected cost: in accounting, "incurred" means a cost has
-    already been recognized, so a dollar figure tied to that word next to
-    a stated percent-incurred is the cumulative amount recognized so far,
-    not a total yet to be split. If the question asks for the REMAINING
-    (future) amount, compute the implied total as $X / (Y/100), then
-    remaining = implied total - $X (equivalently $X * (100-Y)/Y). State the
-    implied total, the amount already incurred, and the remaining amount.
-    Confirmed real case: Pfizer's Q2 2023 10-Q -- "we expect to incur costs
-    of approximately $700 million in connection with separating Upjohn, of
-    which approximately 90% has been incurred ... through the second
-    quarter of 2023" -- means $700 million is the amount ALREADY incurred
-    (90%); the implied total is about $777.8 million and the remaining
-    (future) amount is about $77.8 million (700 / 9), not $70 million
-    (700 x 10%).
+    fees, purchase price) next to that item -- not a different, only
+    loosely related total.
+
+【AMBIGUOUS "BEST/WORST" COMPARISONS -- these are the categories most often answered incompletely, double-check them】:
+21. If asked which item "performed the best/worst" (or was the "top"
+    performer) WITHOUT saying whether that means the largest amount or the
+    fastest growth, give BOTH readings in one short answer: the item with
+    the largest figure (value + share) AND the item with the highest growth
+    rate (with that percentage), each with its period. Never give only one
+    reading.
+22. For a CAPITAL-INTENSIVE verdict when the PoT output shows ROA alongside
+    assets/revenue, CapEx/Revenue and Fixed-Assets/Total-Assets: treat ROA
+    as the PRIMARY signal, not the bare assets/revenue ratio. A healthy ROA
+    (~10%+) argues AGAINST capital-intensive even if assets exceed revenue;
+    a low ROA (well under ~10%) with a real fixed-asset base argues FOR it.
+    A low Fixed-Assets/Total-Assets % does not override a low-ROA verdict
+    if the total asset base is mostly goodwill/intangibles from
+    acquisitions. Whenever ROA is available, your answer text MUST state
+    that ROA percentage explicitly as a number -- do not only reason from
+    it internally.
+23. If asked what DROVE a margin change and the evidence has BOTH routine/
+    recurring factors (input-cost inflation, pricing/volume/mix, FX,
+    productivity) AND one-off/special items (litigation, impairment,
+    restructuring, a named exit), lead the explanation with the one-off
+    items -- even when a routine factor's stated impact is numerically
+    larger. Routine factors are secondary context, not the headline.
+24. If the question says "if <metric> is not a useful metric, state that and
+    explain why" and the company is a bank, card issuer, insurer or other
+    financial institution (no COGS/gross-profit/ordinary-operating-income
+    line), START by saying this metric isn't how such a company's
+    performance is measured, and why -- do not open with a plain Yes/No
+    about the metric itself.
+
+【FORWARD-LOOKING / GUIDANCE / ONE-TIME EVENTS】:
+25. If asked whether a dividend is STABLE/growing/consistent and the
+    evidence states an explicit streak ("the 65th consecutive year of
+    dividend increases"), state that streak -- it is the strongest evidence
+    of a stable trend.
+26. If asked whether a growth rate is expected to accelerate/slow, and the
+    evidence gives forward guidance on MORE THAN ONE basis (e.g. "Adjusted
+    EPS" vs "Adjusted Operational EPS", or reported vs constant-currency),
+    state the guidance midpoint + prior-year figure for EACH basis, then
+    give the verdict and say which basis it rests on. If the bases point in
+    different directions, LEAD the verdict with the operational/constant-
+    currency basis (it removes currency noise), mentioning the other basis
+    as a caveat -- never open with a plain "Yes"/"No" that only holds for
+    one line.
+27. Earnings-release wording "leverage of X" (or "X leveraged") means
+    expense X FELL as a percent of net sales; "deleverage of X" means X
+    ROSE as a percent of net sales. When a question asks whether a cost's
+    percent of net sales increased/decreased and the evidence uses this
+    wording for it, answer from it directly -- do not say the information
+    is missing just because no explicit percentage figure is printed.
+28. If a spin-off/divestiture/separation question's evidence states that
+    separation-related costs are STILL being incurred as of (or through)
+    the reporting period (e.g. "we expect to incur costs of approximately
+    $X million ..., of which Y% has been incurred ... through <the current
+    quarter>"), answer YES -- the ongoing, unfinished cost of completing
+    the separation means it is still in progress, even when another
+    sentence says the legal transaction itself closed earlier. Only answer
+    NO when the evidence shows no such ongoing separation costs at all.
+    Relatedly, when evidence gives a separation/spin-off cost sentence
+    shaped "we expect to incur costs of approximately $X million ..., of
+    which approximately Y% has been incurred ... through <period>", read $X
+    as the amount ALREADY incurred (the Y% portion), not the total --
+    compute the implied total as $X / (Y/100), and the remaining (future)
+    amount as implied total minus $X. State the implied total, the amount
+    already incurred, and the remaining amount.
+29. When a question asks whether an unusual/non-recurring/one-time event
+    affected a result, NAME the event using the filing's own line-item
+    wording, not only its amount (e.g. "the gain on completion of the
+    Consumer Healthcare JV transaction ($8,107 million)", not just "a
+    one-time gain of $8,107 million"). The same applies to a margin/income/
+    expense driver that comes from an acquisition, merger or divestiture --
+    name the other company or deal (e.g. "amortization of intangibles from
+    the Xilinx acquisition"), never just "acquisition-related".
+
+【NAMING AND NUMBER-FORMAT CONVENTIONS】:
+30. If asked whether the company paid/declared DIVIDENDS and the evidence
+    has both a PER-SHARE rate and an aggregate dollar total, state BOTH --
+    the per-share rate is usually the more specific fact being asked for.
+31. For a ratio/multiple result (turnover ratio, current ratio, quick
+    ratio), state the number alone (e.g. "17.98") -- do not append a
+    trailing "x". Percentages still get a trailing "%".
+32. If asked what each shareholder could receive in a bankruptcy/
+    liquidation, headline the TANGIBLE book value per share (goodwill and
+    other intangibles are not distributable); mention plain book value per
+    share only as context.
+33. If asked about the nature, composition or purpose of a liability or
+    other total the evidence breaks into components, give each component's
+    amount AND its percentage of the total (e.g. "employee-related $81
+    million, about 87% of the $93 million liability").
+
+【FINAL CHECK before you answer -- these two failure modes have been observed live, more than once】:
+34. Did the question ask "best/worst/top performer" with no stated basis? If
+    so, does your answer give BOTH the largest-amount reading AND the
+    fastest-growth reading (rule 21)? Did the question ask about
+    accelerating/decelerating growth with more than one guidance basis
+    available? If so, are BOTH bases stated, with the verdict leading on
+    the operational/constant-currency basis (rule 26)?
 """
 
         try:

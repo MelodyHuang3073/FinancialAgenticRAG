@@ -980,7 +980,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "multi_year": True,
     },
 
-    # ── Multi-Year Average Ratios ────────────────────────────────────────────
+    # ── Cost / Expense Ratios ────────────────────────────────────────────────
     "cogs_ratio": {
         # Was entirely unregistered -- "cost of goods sold as a % of
         # revenue" (FinanceBench's own recurring phrasing) matched NO

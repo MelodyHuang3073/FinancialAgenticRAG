@@ -256,6 +256,33 @@ def _scaled_variants_for(value: float, source_text: str) -> list:
     return variants
 
 
+#: A ratio-style gold answer sometimes states the plain decimal ("0.01"
+#: for ROA, "0.8" for a dividend payout ratio) while the model states the
+#: same fact as a percent ("1.02%", "80%") -- _NUM_RE never captures the
+#: "%" character (see its own definition above), so both numbers are
+#: extracted as bare floats and a plain-decimal gold 0.01 is 100x away
+#: from a percent-formatted model 1.02, well outside _close_enough's
+#: tolerance even though the card/answer is correct. Confirmed real
+#: cases: Coca-Cola FY2017 ROA (gold "0.01") and FY2022 dividend payout
+#: ratio (gold "0.8"). Scoped to only scale numbers the MODEL itself
+#: marked with "%" (never blindly multiplies/divides an arbitrary
+#: number), so this can't manufacture a false match against an unrelated
+#: model figure the way a blind x100/รท100 of every number would.
+_PERCENT_NUM_RE = re.compile(r"(-?\$?-?\d[\d,]*\.?\d*)\s*%")
+
+
+def _percent_numbers_in(text: str) -> list:
+    """Numbers in `text` immediately followed by '%' (the model's own
+    percent-formatted figures), as their bare (unscaled) values."""
+    out = []
+    for m in _PERCENT_NUM_RE.finditer(text or ""):
+        try:
+            out.append(float(m.group(1).replace(",", "").replace("$", "")))
+        except ValueError:
+            continue
+    return out
+
+
 #: A gold answer that enumerates a short list inline ("...during FY 2022:
 #: (1) Current Health Ltd and (2) Two Peaks, LLC...") uses "(1)"/"(2)" as
 #: pure list-item numbering, not a financial fact -- but _NUM_RE has no
@@ -514,6 +541,21 @@ def _decimals_of(value: float, text: str) -> int:
     return 0
 
 
+def _is_percent_marked(value: float, text: str) -> bool:
+    """True if `value`'s own occurrence in `text` is immediately followed
+    by '%' ("1.7%" -> True, "$1.7 million" -> False). Used to tell a gold
+    ratio already stated as a percent apart from one stated as a bare
+    decimal -- see _percent_numbers_in's docstring."""
+    for m in _PERCENT_NUM_RE.finditer(text or ""):
+        tok = m.group(1).replace(",", "").replace("$", "")
+        try:
+            if abs(abs(float(tok)) - abs(value)) < 1e-9:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _close_enough(t: float, m: float, decimals: int) -> bool:
     """A model figure matches a gold figure when it is within 2% (1% when the
     gold itself is stated to 2+ decimals, so "$65.44" no longer passes for a
@@ -621,6 +663,14 @@ def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
     all_model_candidates = (
         list(model_nums) + _magnitude_scaled_numbers(model_answer) + _accounting_negatives(model_answer)
     )
+    #: Only offered as a candidate for a gold FACT that itself looks like a
+    #: bare ratio (no "%" of its own, |value| <= 10 -- an ROA/payout-ratio-
+    #: sized decimal, never a dollar amount or count) -- see
+    #: _percent_numbers_in's docstring. Kept out of the always-on
+    #: all_model_candidates pool above so it can't spuriously match an
+    #: unrelated gold dollar figure that happens to land near some other
+    #: percent/100 value in the model's answer.
+    percent_scaled_candidates = [p / 100 for p in _percent_numbers_in(model_answer)]
     hits = 0
     for g in check_nums:
         g_variants = [g] + _scaled_variants_for(g, gold_answer)
@@ -630,9 +680,12 @@ def _check_contains_facts(gold_answer: str, model_answer: str) -> bool:
             if gold_implies_decrease and gv > 0:
                 targets.append(-gv)
         g_dec = _decimals_of(g, gold_answer)
+        candidates = all_model_candidates
+        if abs(g) <= 10 and not _is_percent_marked(g, gold_answer):
+            candidates = all_model_candidates + percent_scaled_candidates
         if any(
             _close_enough(t, m, g_dec if abs(abs(t) - abs(g)) < 1e-9 else 0)
-            for t in targets for m in all_model_candidates
+            for t in targets for m in candidates
         ):
             hits += 1
     return hits >= max(1, len(check_nums) // 2)  # at least half the checked numbers must surface

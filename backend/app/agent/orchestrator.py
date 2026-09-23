@@ -19,10 +19,14 @@ from app.agent.decomposer import QueryDecomposer
 from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
-from app.agent.llm_client import LLMAnswerGenerator, EVIDENCE_PROMPT_CAP
+from app.agent.llm_client import (
+    LLMAnswerGenerator, EVIDENCE_PROMPT_CAP, RELIABLE_POT_EVIDENCE_CAP, is_reliable_pot_result,
+)
 from app.agent.evidence_selection import select_with_quota
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
-from app.tools.hybrid_retriever import is_attribution_query, is_geography_query, is_legal_query
+from app.tools.hybrid_retriever import (
+    is_attribution_query, is_geography_query, is_legal_query, is_segment_comparison_query,
+)
 
 
 class FinAgentRAGOrchestrator:
@@ -202,6 +206,12 @@ class FinAgentRAGOrchestrator:
         answer_mode = classification["answer_mode"]
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
+        # "Which segment had the highest/lowest X" stays NUMERIC (see
+        # hybrid_retriever.is_segment_comparison_query's docstring) so this
+        # is computed here, not alongside is_attribution/is_geography/
+        # is_legal below (those are only ever used on the non-numeric
+        # branch further down).
+        is_segment_comparison = is_segment_comparison_query(query)
 
         # Entity alignment: match entity against actual corpus company names.
         # The classifier's OWN clean entity ("General Mills") is kept
@@ -479,6 +489,7 @@ class FinAgentRAGOrchestrator:
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=effective_hint,
+                            is_segment_comparison=is_segment_comparison,
                             query_years=classification.get("years"),
                         )
                         hits = self._tag_subquery(
@@ -520,6 +531,7 @@ class FinAgentRAGOrchestrator:
                                 exclude_ids=list(retrieved_ids),
                                 entity=classification.get("entity"),
                                 statement_type_hint=statement_type_hint,  # Step 4
+                                is_segment_comparison=is_segment_comparison,
                                 query_years=classification.get("years"),
                             )
                             for hit in self._tag_subquery(
@@ -540,6 +552,7 @@ class FinAgentRAGOrchestrator:
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=statement_type_hint,  # Step 4
+                            is_segment_comparison=is_segment_comparison,
                             query_years=classification.get("years"),
                         ),
                         entity=classification.get("entity"),
@@ -761,6 +774,18 @@ class FinAgentRAGOrchestrator:
             query, final_context, pot_res or {}, verification_res or {},
             classification, sub_questions
         )
+        # Mirrors llm_client.generate_answer's own effective_cap exactly --
+        # same three conditions (RELIABLE_POT_EVIDENCE_CAP>0, NUMERIC,
+        # is_reliable_pot_result) -- so evidence_sources below reports the
+        # SAME subset generate_answer actually saw, not the full
+        # EVIDENCE_PROMPT_CAP window when a smaller one was really used.
+        evidence_prompt_cap = EVIDENCE_PROMPT_CAP
+        if (
+            RELIABLE_POT_EVIDENCE_CAP > 0
+            and answer_mode == "NUMERIC"
+            and is_reliable_pot_result(pot_res)
+        ):
+            evidence_prompt_cap = RELIABLE_POT_EVIDENCE_CAP
 
         return {
             "query": query,
@@ -820,7 +845,7 @@ class FinAgentRAGOrchestrator:
                     final_context,
                     key=lambda item: item.get("relevance_score") or 0,
                     reverse=True,
-                )[:EVIDENCE_PROMPT_CAP]
+                )[:evidence_prompt_cap]
             ],
             "reasoning_steps": trace_steps,
             "execution_trace": trace_steps,
