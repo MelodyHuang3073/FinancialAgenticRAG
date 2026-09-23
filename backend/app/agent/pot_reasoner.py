@@ -214,6 +214,13 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
 #: even won the length tie-break in _pick_best_in_group over the real,
 #: longer "...net of construction payable" row -- a 3-year average that
 #: silently mixed two different-scope sources per year.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Attribution / negation / query-intent matching (does this evidence item
+# actually answer what THIS question is asking, vs. a superficially similar
+# but wrong-context row?)
+# ─────────────────────────────────────────────────────────────────────────────
+
 _NEGATION_PREFIX_RE = re.compile(
     r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+|change(?:s|d)?\s+in\s+|'
     r'(?:reportable\s+)?segment\s+)$'
@@ -442,6 +449,11 @@ def _no_calculation_path(q_lower: str) -> bool:
 #: it's transparently crossed, while a genuine sentence-ending period
 #: (always followed by a space in PDF-extracted text) still stops the
 #: scan.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dividend narrative extraction (per-share sentences, "respectively" lists)
+# ─────────────────────────────────────────────────────────────────────────────
+
 _NOT_SENTENCE_END = r'(?:(?!\.\s)[\s\S])'
 _DIVIDEND_PER_SHARE_SENTENCE_RE = re.compile(
     rf'({_NOT_SENTENCE_END}*?\$\s*(\d+\.\d+)\s*per\s+share{_NOT_SENTENCE_END}*\.)', re.IGNORECASE
@@ -641,6 +653,10 @@ def _is_negated_match(item_lower: str, match_start: int) -> bool:
     """
     return bool(_NEGATION_PREFIX_RE.search(item_lower[:match_start]))
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical item-label resolution
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _get_canonical(item_name: str, company_name: str = "") -> str:
     """
@@ -2928,6 +2944,12 @@ def _extract_formula_placeholders(expr: str) -> set:
     } - {"years", "math"}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Domain-specific value adjustments & derivations (custodial funds, working
+# capital, total-row rollforward, adjusted-EBIT-from-EBITDA reconciliation,
+# quick-ratio prepaid adjustment, capital-intensity context)
+# ─────────────────────────────────────────────────────────────────────────────
+
 _CUSTODIAL_FUNDS_RE = re.compile(r'funds?\s+receivable.*customer', re.IGNORECASE)
 _SHORT_TERM_INVESTMENTS_RE = re.compile(r'short[\s-]?term\s+investments?', re.IGNORECASE)
 
@@ -2936,7 +2958,7 @@ def _adjust_working_capital_for_custodial_funds(
     resolved: Dict[str, float],
     resolved_series: Optional[Dict[str, List[Tuple[float, str]]]],
     extracted_table: Dict[str, Dict],
-) -> None:
+) -> bool:
     """
     Payment-processor/fintech balance sheets (PayPal, and structurally
     similar companies) carry a large custodial "Funds receivable and
@@ -2962,16 +2984,20 @@ def _adjust_working_capital_for_custodial_funds(
     capital conventions, which stay on the plain current_assets -
     current_liabilities formula untouched.
 
-    Mutates `resolved` (and `resolved_series`, if given) in place.
+    Mutates `resolved` (and `resolved_series`, if given) in place. Returns
+    True if the adjustment actually fired (so the caller can skip the
+    separate, broader _adjust_working_capital_for_financing_items below --
+    both subtract cash from current_assets, and running both would double-
+    count it for a company that happens to match both triggers).
     """
     if "current_assets" not in resolved:
-        return
+        return False
     has_custodial = any(
         _CUSTODIAL_FUNDS_RE.search(v.get("item", "") or "")
         for v in extracted_table.values()
     )
     if not has_custodial:
-        return
+        return False
     # Recover the YEAR the resolved current_assets value actually came
     # from (by matching it back to its own extracted_table row) so cash/
     # short-term-investments are only ever subtracted for that SAME year,
@@ -2982,7 +3008,7 @@ def _adjust_working_capital_for_custodial_funds(
             ca_year = v.get("year")
             break
     if ca_year is None:
-        return
+        return False
     cash_val = None
     sti_val = None
     for v in extracted_table.values():
@@ -2994,13 +3020,126 @@ def _adjust_working_capital_for_custodial_funds(
             sti_val = v.get("val", 0.0)
     deduction = (cash_val or 0.0) + (sti_val or 0.0)
     if not deduction:
-        return
+        return False
     resolved["current_assets"] = resolved["current_assets"] - deduction
     if resolved_series and resolved_series.get("current_assets"):
         resolved_series["current_assets"] = [
             ((val - deduction) if yr == ca_year else val, yr)
             for val, yr in resolved_series["current_assets"]
         ]
+    return True
+
+
+#: Corning FY2022 gold working_capital ($831M) only matches the "operating
+#: working capital" convention (Penman: separate operating vs. financing
+#: components) -- excluding cash from current assets AND short-term/
+#: current-portion debt from current liabilities: (7,453-1,671) -
+#: (5,175-224) = 831. Applying the IDENTICAL adjustment to American Water
+#: Works FY2022 gives -190, nowhere near gold's own -1,561 (the plain,
+#: unadjusted current_assets - current_liabilities). An earlier
+#: investigation (2026-09-15, see [[formula-conflict-questions-todo]])
+#: found no rule from balance-sheet materiality (the excluded-debt %  of
+#: CL runs the WRONG direction as a discriminator) and left this
+#: unresolved.
+#:
+#: 2026-09-23: verified real signal is whether the filing is a RATE-
+#: REGULATED utility. American Water Works' own 10-K uses "regulated
+#: utility operations", "Public Utility Commission" (7 hits), "PUC" (49),
+#: "rate case" (34), "rate base" (16) -- Corning's has ZERO genuine hits
+#: on any of these (its one substring hit on "rate base" is a false
+#: positive from "incremental borrowing rate based on...", an unrelated
+#: lease-accounting sentence). Textbook rationale (see
+#: [[formula-convention-by-industry-hypothesis]] and general utility-
+#: finance practice): a rate-regulated utility's allowed capital
+#: structure (debt/equity mix) and its working-capital allowance are
+#: THEMSELVES set by the regulator as part of the rate base -- the debt
+#: is a cost of providing the regulated service, not a discretionary
+#: financing choice management can be assumed to have made independently
+#: of operations, so it should NOT be stripped out as "financing" the way
+#: Penman's operating/financing reformulation strips it for an ordinary
+#: (non-regulated) company. A non-utility's short-term debt and cash ARE
+#: genuinely separable financing/liquidity-management decisions, so the
+#: operating-WC adjustment applies there.
+_REGULATED_UTILITY_RE = re.compile(
+    r'\bpublic\s+utility\s+commission\b|\bregulated\s+utility\b|\brate\s+case\b|'
+    r'\bstate\s+regulatory\s+commission\b|\brate\s+base\b',
+    re.IGNORECASE,
+)
+
+_FINANCING_CURRENT_LIAB_RE = re.compile(
+    r'short[\s-]?term\s+(?:debt|borrowings)|current\s+portion\s+of\s+long[\s-]?term\s+debt',
+    re.IGNORECASE,
+)
+
+
+def _is_regulated_utility_filing(evidence_list: List[Dict[str, Any]]) -> bool:
+    for item in evidence_list or []:
+        content = str(item.get("content") or item.get("parent_content") or "")
+        if _REGULATED_UTILITY_RE.search(content):
+            return True
+    return False
+
+
+def _adjust_working_capital_for_financing_items(
+    resolved: Dict[str, float],
+    resolved_series: Optional[Dict[str, List[Tuple[float, str]]]],
+    extracted_table: Dict[str, Dict],
+) -> None:
+    """
+    Operating working capital: current_assets minus cash (+ short-term
+    investments), and current_liabilities minus short-term debt / the
+    current portion of long-term debt -- see _REGULATED_UTILITY_RE above
+    for when this applies. No-op if either side's deduction is zero (a
+    plain current_assets - current_liabilities is then already correct),
+    same guard pattern as _adjust_working_capital_for_custodial_funds.
+    Mutates `resolved` (and `resolved_series`, if given) in place.
+    """
+    if "current_assets" not in resolved or "current_liabilities" not in resolved:
+        return
+
+    def _year_of(canonical: str, target_val: float) -> Optional[str]:
+        for v in extracted_table.values():
+            if v.get("canonical") == canonical and v.get("val") == target_val:
+                return v.get("year")
+        return None
+
+    ca_year = _year_of("current_assets", resolved["current_assets"])
+    cl_year = _year_of("current_liabilities", resolved["current_liabilities"])
+
+    ca_deduction = 0.0
+    if ca_year is not None:
+        for v in extracted_table.values():
+            if v.get("year") != ca_year:
+                continue
+            if v.get("canonical") == "cash":
+                ca_deduction += v.get("val", 0.0) or 0.0
+            elif _SHORT_TERM_INVESTMENTS_RE.search(v.get("item", "") or ""):
+                ca_deduction += v.get("val", 0.0) or 0.0
+
+    cl_deduction = 0.0
+    if cl_year is not None:
+        for v in extracted_table.values():
+            if v.get("year") != cl_year:
+                continue
+            if _FINANCING_CURRENT_LIAB_RE.search(v.get("item", "") or ""):
+                cl_deduction += v.get("val", 0.0) or 0.0
+
+    if not ca_deduction and not cl_deduction:
+        return
+
+    resolved["current_assets"] = resolved["current_assets"] - ca_deduction
+    resolved["current_liabilities"] = resolved["current_liabilities"] - cl_deduction
+    if resolved_series:
+        if resolved_series.get("current_assets") and ca_deduction:
+            resolved_series["current_assets"] = [
+                ((val - ca_deduction) if yr == ca_year else val, yr)
+                for val, yr in resolved_series["current_assets"]
+            ]
+        if resolved_series.get("current_liabilities") and cl_deduction:
+            resolved_series["current_liabilities"] = [
+                ((val - cl_deduction) if yr == cl_year else val, yr)
+                for val, yr in resolved_series["current_liabilities"]
+            ]
 
 
 _PREPAID_CURRENT_ASSET_RE = re.compile(r'\bprepaid', re.IGNORECASE)
@@ -3428,6 +3567,10 @@ def _capital_intensity_context_lines(
     return out
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PoT code generation: single formula (_gen_formula_code)
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _gen_formula_code(
     formula_entry: Dict[str, Any],
     resolved: Dict[str, float],
@@ -3436,6 +3579,7 @@ def _gen_formula_code(
     resolved_meta: Optional[Dict[str, Dict[str, Any]]] = None,
     query_years: Optional[List[str]] = None,
     q_lower: str = "",
+    is_regulated_utility: bool = False,
 ) -> List[str]:
     """Generate Python code lines using the formula template.
 
@@ -3521,7 +3665,11 @@ def _gen_formula_code(
         return []
 
     if fk == "working_capital":
-        _adjust_working_capital_for_custodial_funds(resolved, resolved_series, extracted_table)
+        custodial_applied = _adjust_working_capital_for_custodial_funds(
+            resolved, resolved_series, extracted_table
+        )
+        if not custodial_applied and not is_regulated_utility:
+            _adjust_working_capital_for_financing_items(resolved, resolved_series, extracted_table)
 
     if fk == "quick_ratio":
         _adjust_quick_ratio_for_prepaid_and_other(resolved, resolved_series, extracted_table)
@@ -3730,6 +3878,10 @@ def _gen_formula_code(
             lines.append(f"print(f'{{_direction_word}} by {{_magnitude}}')")
     return lines
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical grouping & pair-matching for multi-metric/trend calculations
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _group_by_canonical(extracted: Dict[str, Dict]) -> Dict[str, List[Dict]]:
     """Group extracted variables by their canonical item key."""
@@ -4915,51 +5067,72 @@ def _build_calculation_code(
     return False
 
 
-#: Explicit, supervisor-approved exception to this project's standing
-#: "never hardcode company/question-specific logic" rule (2026-09-18) --
-#: see the [[formula-conflict-questions-todo]] project memory for the
-#: full investigation. JnJ's and AES's own "Roughly how many times has
-#: [company] sold its inventory in FY2022?" questions are IDENTICAL in
-#: phrasing -- neither one's own question text says "average" or
-#: "ending" inventory -- yet their gold answers use OPPOSITE inventory-
-#: turnover conventions: JnJ's gold (2.7x) is COGS / average of
-#: FY2021+FY2022 inventory; AES's gold (9.5x) is COGS / plain FY2022
-#: ending inventory. Real balance-sheet investigation found no
-#: discoverable general rule (the obvious materiality-of-the-YoY-swing
-#: discriminator runs the WRONG direction), and cross-checking both
-#: conventions against Ittelson's and Penman's own textbook treatments
-#: confirmed both are independently legitimate financial-analysis
-#: practice (Penman recommends averaging a stock balance against a full-
-#: year flow like COGS; a plain ending-balance shortcut is also common
-#: and matches AES's gold) -- just not predictable from either company's
-#: own financials without already knowing the answer. Rather than leave
-#: the plain "inventory_turnover" formula's default (ending inventory --
-#: matches AES and is the more common convention across the rest of this
-#: benchmark) silently wrong for JnJ specifically, this narrow allowlist
-#: swaps to the "average inventory" formula ONLY for the company below;
-#: every other company (AES included) keeps the existing default.
-_INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES = {
-    "JOHNSON_JOHNSON_2022_10K",
-}
+#: JnJ's and AES's own "Roughly how many times has [company] sold its
+#: inventory in FY2022?" questions are IDENTICAL in phrasing -- neither
+#: one's own question text says "average" or "ending" inventory -- yet
+#: their gold answers use OPPOSITE inventory-turnover conventions: JnJ's
+#: gold (2.7x) is COGS / average of FY2021+FY2022 inventory; AES's gold
+#: (9.5x) is COGS / plain FY2022 ending inventory. An earlier
+#: investigation (2026-09-15/18, see [[formula-conflict-questions-todo]])
+#: found no rule from balance-sheet MATERIALITY (the obvious YoY-swing
+#: discriminator runs the WRONG direction) and settled for a per-company
+#: allowlist as an authorized, temporary exception to this project's
+#: standing "never hardcode company/question-specific logic" rule.
+#:
+#: 2026-09-23: the real discriminator turned out to be what KIND of
+#: inventory each filing's own inventory note actually describes, not
+#: the company's identity. JnJ's Note 3 (10-K p58) breaks into "Raw
+#: materials and supplies" / "Goods in process" / "Finished goods", with
+#: Finished goods the LARGEST bucket (~70% of the total, 8,713/12,483) --
+#: a manufacturer holding consumer/pharma product for sale to the market,
+#: where the within-year stock level swings meaningfully with seasonal
+#: demand and product mix (the textbook reason Penman/CFA-level practice
+#: prefers averaging a stock balance against a full-year flow like COGS).
+#: AES's own note (10-K p140) instead describes only "fuel inventory"
+#: (impairment-tested against "revenue earned from power generation" --
+#: i.e. consumed internally for the company's own operations, never sold
+#: as a product) and "spare parts and supplies" -- no finished-goods/
+#: merchandise category at all, and a commodity/operational stock whose
+#: level doesn't swing with market demand the way a sellable product's
+#: does, so the simpler ending-inventory shortcut is an acceptable
+#: approximation. This generalizes past "is this company a utility":
+#: ANY company whose own inventory note shows this self-consumed-
+#: commodity shape (an airline's fuel stock, a refiner's crude stock)
+#: should get the same ending-inventory treatment, and any company
+#: reporting a real finished-goods/merchandise inventory should get the
+#: averaging convention -- detected from the filing's own words, not a
+#: company allowlist.
+_FINISHED_GOODS_INVENTORY_RE = re.compile(
+    r'\bfinished\s+goods\b|\bmerchandise\s+inventor(?:y|ies)\b', re.IGNORECASE
+)
+
+
+def _has_finished_goods_inventory(evidence_list: List[Dict[str, Any]]) -> bool:
+    for item in evidence_list or []:
+        content = str(item.get("content") or item.get("parent_content") or "")
+        if _FINISHED_GOODS_INVENTORY_RE.search(content):
+            return True
+    return False
 
 
 def _apply_inventory_turnover_convention_override(
     formula_entry: Optional[Dict[str, Any]],
     entity: str,
+    evidence_list: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    See _INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES above. No-op for
-    every company/question not in that allowlist, including every OTHER
-    formula (only swaps when detect_formula already picked the plain
-    "inventory_turnover" key) -- so this can't touch any other formula's
-    behavior, nor override a question that already explicitly asked for
-    "average inventory" itself (that already routes straight to
-    inventory_turnover_avg via detect_formula's own keyword match, before
-    this override ever runs).
+    No-op for every company/question whose own inventory-note evidence
+    doesn't mention a finished-goods/merchandise inventory category,
+    including every OTHER formula (only swaps when detect_formula already
+    picked the plain "inventory_turnover" key) -- so this can't touch any
+    other formula's behavior, nor override a question that already
+    explicitly asked for "average inventory" itself (that already routes
+    straight to inventory_turnover_avg via detect_formula's own keyword
+    match, before this override ever runs).
     """
     if not formula_entry or formula_entry.get("formula_key") != "inventory_turnover":
         return formula_entry
-    if entity not in _INVENTORY_TURNOVER_AVERAGE_CONVENTION_ENTITIES:
+    if not _has_finished_goods_inventory(evidence_list or []):
         return formula_entry
     avg_entry = FORMULA_LIBRARY.get("inventory_turnover_avg")
     if not avg_entry:
@@ -5048,7 +5221,7 @@ class ProgramOfThoughtReasoner:
 
         # ── Step 1: Detect formula intent ────────────────────────────────────
         formula_entry = detect_formula(query)
-        formula_entry = _apply_inventory_turnover_convention_override(formula_entry, entity)
+        formula_entry = _apply_inventory_turnover_convention_override(formula_entry, entity, evidence_list)
 
         # "Did X as a percent of sales increase or decrease?" for an item with
         # no formula: the generic YoY fallback headlined the growth of an
@@ -5133,10 +5306,11 @@ class ProgramOfThoughtReasoner:
             # PATH 1: Formula library
             fk = formula_entry.get("formula_key", "")
             code_lines.append(f"# Formula: {fk} — {formula_entry.get('result_label', '')}")
+            is_regulated_utility = fk == "working_capital" and _is_regulated_utility_filing(evidence_list)
             formula_code = _gen_formula_code(
                 formula_entry, resolved_formula, extracted_table,
                 resolved_formula_series, resolved_formula_meta,
-                query_years, q_lower,
+                query_years, q_lower, is_regulated_utility,
             )
             if formula_code:
                 code_lines.extend(formula_code)

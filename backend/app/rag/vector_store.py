@@ -95,7 +95,7 @@ class FinancialVectorStoreManager:
                entity: str = None, section: str = None,
                statement_type_hint: str = None, prefer_narrative: bool = False,
                is_attribution: bool = False, is_geography: bool = False,
-               is_legal: bool = False,
+               is_legal: bool = False, is_segment_comparison: bool = False,
                query_years: List[str] = None) -> List[Dict[str, Any]]:
         if not self.retriever:
             return []
@@ -107,6 +107,7 @@ class FinancialVectorStoreManager:
             is_attribution=is_attribution,
             is_geography=is_geography,
             is_legal=is_legal,
+            is_segment_comparison=is_segment_comparison,
             query_years=query_years,
         )
 

@@ -385,6 +385,8 @@ _STATEMENT_TYPE_MAP: Dict[str, str] = {
     "dividend":         "income_statement",
 }
 
+# ─── Answer-mode classification keywords (NUMERIC / EXPLANATION / ASSESSMENT /
+# EXCLUSION triggers, keyword matching, year extraction) ─────────────────────
 _CALC_KEYWORDS = {
     "yoy":   ["yoy", "year over year", "成長率", "年增率", "同比", "growth rate", "growth"],
     "cagr":  ["cagr", "複合成長率", "compound annual growth"],
