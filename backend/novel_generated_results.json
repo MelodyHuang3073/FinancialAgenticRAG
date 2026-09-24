@@ -3,500 +3,500 @@
     "doc_name": "3M_2022_10K",
     "question": "If we exclude the impact of M&A, which segment has dragged down 3M's overall growth in 2022?",
     "gold": "The consumer segment shrunk by 0.9% organically.",
-    "model_answer": "Excluding M&A, the Consumer segment dragged down 3M’s overall growth in 2022 — Consumer organic sales declined **0.9%**, while Health Care, Transportation & Electronics, and Safety & Industrial posted organic growth of **+3.2%**, **+1.2%**, and **+1.0%**, respectively.",
+    "model_answer": "Excluding M&A/divestiture effects, the Consumer segment dragged down 3M’s 2022 growth — Consumer organic sales were **-0.9%** (Consumer total sales **-3.9%**). \n\nBy contrast, Health Care organic sales were **+3.2%**, Transportation & Electronics **+1.2%**, and Safety & Industrial **+1.0%**.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 26.814029455184937
+    "elapsed": 26.985080003738403
   },
   {
     "doc_name": "3M_2023Q2_10Q",
     "question": "Does 3M maintain a stable trend of dividend distribution?",
     "gold": "Yes, not only they distribute the dividends on a routine basis, 3M has also been increasing the per share dividend for consecutive 65 years",
-    "model_answer": "1 — Yes. 3M maintains a stable, slowly growing dividend: annual per‑share dividends were **$5.88 (2020)**, **$5.92 (2021)** and **$5.96 (2022)** — about **+0.7%** year‑over‑year — and the Q1‑2023 dividend of **$1.50** continued the trend (noted as the **65th consecutive** year of increases).",
+    "model_answer": "Yes — 3M maintains a stable, steadily increasing dividend: full‑year dividends per share were **$5.88 (2020)**, **$5.92 (2021)** and **$5.96 (2022)** (quarterly **$1.47**, **$1.48**, **$1.49**), about **+0.68%** year‑over‑year; Q1 2023 dividend rose to **$1.50**, marking the **65th consecutive year** of increases.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 101.05686330795288
+    "elapsed": 114.29187774658203
   },
   {
     "doc_name": "ADOBE_2022_10K",
     "question": "Does Adobe have an improving Free cashflow conversion as of FY2022?",
     "gold": "Yes, the FCF conversion (using net income as the denominator) for Adobe has improved by ~13% from 143% in 2021 to 156% in 2022",
-    "model_answer": "Yes — Adobe’s free cash‑flow conversion improved in FY2022: free cash flow / net income rose to **~156%** in 2022 (from **~143%** in 2021 and **~101%** in 2020). \n\nExplanation: operating cash flow increased to **$7,838m** in 2022 while capex was **$442m**, giving FCF ≈ **$7,396m**; divided by 2022 net income **$4,756m** ⇒ **~155.6%**. By the same logic 2021 FCF ≈ **$6,882m** / net income **$4,822m** ≈ **142.7%**, and 2020 ≈ **$5,308m** / **$5,260m** ≈ **100.9%**. The improvement is driven by higher cash from operations (growth in subscription receipts/deferred revenue) with only modest capex rise.",
+    "model_answer": "Yes — Adobe’s free cash‑flow conversion improved to **~156% in FY2022**, up from **~143% in FY2021** and **~101% in FY2020** (free cash flow ÷ net income).  \n\nExplanation: FCF = operating cash flow − CapEx: FY2022 FCF = **$7,838m − $442m = $7,396m** → **7,396 / $4,756 = ~156%**; FY2021 FCF = **$7,230m − $348m = $6,882m** → **6,882 / $4,822 = ~143%**; FY2020 FCF = **$5,727m − $419m = $5,308m** → **5,308 / $5,260 = ~101%**. The improvement was driven by higher operating cash flow growth relative to net income and only modest CapEx increases.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 40.560938596725464
+    "elapsed": 46.22266507148743
   },
   {
     "doc_name": "AMCOR_2022_8K_dated-2022-07-01",
     "question": "What was the key agenda of the AMCOR's 8k filing dated 1st July 2022?",
     "gold": "Amcor Finance (USA), Inc. and Amcor Flexibles North America, Inc., entered into supplemental indentures relating to Guaranteed Senior Notes due 2026 and 2028. This involved the substitution of the Substitute Issuer (Amcor Flexibles North America) for the Former Issuer (Amcor Finance) and the assumption of covenants under the indentures. (In essence a novation agreement)",
-    "model_answer": "The 8‑K’s key agenda was the substitution of the issuer under Amcor’s indentures — replacing Amcor Finance (USA), Inc. with Amcor Flexibles North America, Inc. for the **3.625%** notes due **2026** and the **4.500%** notes due **2028**.  \n\nThe filing disclosed and attached the **First** and **Second Supplemental Indentures** (effective June 30, 2022) documenting the issuer swap and the Substitute Issuer’s assumption of the Former Issuer’s covenants and related jurisdiction/agent provisions.",
+    "model_answer": "The 8-K’s primary purpose was to report the substitution of the issuer under Amcor’s indentures and the assumption of covenants for the **3.625%** (due **2026**) and **4.500%** (due **2028**) guaranteed senior notes (effective June 30, 2022; filed July 1, 2022). \n\nExplanation — items the filing discloses:\n1. Execution of a Second Supplemental Indenture (2016 Indenture) effecting issuer substitution for the **2026** and **2028** Existing Notes.  \n2. Execution of a First Supplemental Indenture (2019 Indenture) covering the New **2026** and New **2028** Notes (issued June 2019).  \n3. Substitution of Amcor Flexibles North America, Inc. as the Substitute Issuer and its assumption of the Former Issuer’s covenants.  \n4. Effective date noted as June 30, 2022; filing dated July 1, 2022.  \n5. Supplemental indentures included as exhibits (and related jurisdiction/agent and signature pages).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 20.204144954681396
+    "elapsed": 26.3978488445282
   },
   {
     "doc_name": "AMCOR_2023Q2_10Q",
     "question": "What is the nature & purpose of AMCOR's restructuring liability as oF Q2 of FY2023 close?",
     "gold": "87% of the total restructuring liability is related Employee liabilities.",
-    "model_answer": "Amcor’s restructuring liability at the close of Q2 FY2023 was **$93 million**, made up of **$81M (≈87%) employee‑related**, **$2M (≈2%) fixed‑asset‑related**, and **$10M (≈11%) other costs**.  \n\nExplanation: this liability is an accrual to fund restructuring actions (severance and other employee costs, costs to exit/close facilities and related asset items, and other restructuring cash obligations) driven largely by Russia‑Ukraine related measures and other restructuring plans; the company expects the majority of these obligations to be paid within the **next twelve months** and has recorded the accruals in other current and non‑current liabilities.",
+    "model_answer": "As of Q2 FY2023 (December 31, 2022) Amcor’s restructuring liability totaled **$93 million**, made up of **$81 million (≈87%) employee‑related**, **$2 million (≈2%) fixed‑asset related**, and **$10 million (≈11%) other costs**. \n\nExplanation: the liability is an accrual for severance and other employee obligations, costs to exit/close facilities and remediate fixed assets, and other restructuring items arising mainly from Russia‑Ukraine related actions and ongoing Flexibles‑segment restructuring (and earlier integration plans). These accruals are recorded in other current and non‑current liabilities and the company expects the majority to be paid within the next 12 months.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 35.82051396369934
+    "elapsed": 38.28309917449951
   },
   {
     "doc_name": "AMCOR_2023Q4_EARNINGS",
     "question": "What Was AMCOR's Adjusted Non GAAP EBITDA for FY 2023",
     "gold": "AMCOR's Adj. EBITDA was $2,018mn in FY 2023",
-    "model_answer": "AMCOR's adjusted non‑GAAP EBITDA for FY2023 was **$2,018 million**, a **5%** decline versus FY2022.",
+    "model_answer": "AMCOR's adjusted (non‑GAAP) EBITDA for FY2023 was **$2,018 million**, a **5%** decline versus FY2022.  \n\nPer Amcor's FY2023 results (12 months ended June 30, 2023).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 29.854593753814697
+    "elapsed": 29.248761415481567
   },
   {
     "doc_name": "AMCOR_2023Q4_EARNINGS",
     "question": "How much was the Real change in Sales for AMCOR in FY 2023 vs FY 2022, if we exclude the impact of FX movement, passthrough costs and one-off items?",
     "gold": "The Real Growth was flat in FY 2023 vs FY 2022.",
-    "model_answer": "Excluding FX moves, passthrough of raw‑material costs and one‑off/comparability items, Amcor’s FY2023 sales were essentially flat versus FY2022 — **~0% change** (i.e., no material sales growth).  \n\nCalculation (summary): reported +1% less passthrough (~+5%) and adjusted for FX (~‑3%) and one‑offs (~‑1%) nets to ~0% (rounding differences imply at most about **‑0.3% / ≈‑$44m** on the $14.5bn base).",
+    "model_answer": "Excluding FX, passthrough of raw‑material costs and one‑off/items affecting comparability, Amcor’s FY2023 sales were essentially flat versus FY2022 — a **0%** change (implying underlying FY23 sales ≈ **$14,544m**, same as FY22). \n\nCalculation (per the FY2023 release): reported growth +1% adjusted for FX (adverse ~‑3%), passthrough (+5%), and items affecting comparability (adverse ~‑1%) → 1% − 5% − 1% + 3% = **0%**.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 82.00215196609497
+    "elapsed": 62.24315810203552
   },
   {
     "doc_name": "AMD_2022_10K",
     "question": "From FY21 to FY22, excluding Embedded, in which AMD reporting segment did sales proportionally increase the most?",
     "gold": "Data Center",
-    "model_answer": "Excluding Embedded, the Data Center segment increased the most — rising from **$3,694 million** in FY21 to **$6,043 million** in FY22, an increase of **~64%**.  \n\nFor context, Gaming grew to **$6,805M** (~**21%** growth) while Client fell to **$6,201M** (~**-10%**).",
+    "model_answer": "Data Center — net revenue rose from **$3,694 million (FY21)** to **$6,043 million (FY22)**, a **~64%** proportional increase, the largest increase excluding Embedded. \n\nFor comparison: Gaming increased **~21%** (from **$5,607m** to **$6,805m**); Client decreased **~10%** (from **$6,887m** to **$6,201m**).",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 46.41572070121765
+    "elapsed": 47.018473863601685
   },
   {
     "doc_name": "AMD_2022_10K",
     "question": "Did AMD report customer concentration in FY22?",
     "gold": "Yes, one customer accounted for 16% of consolidated net revenue",
-    "model_answer": "Yes — AMD disclosed customer concentration for FY2022: two customers represented **16%** and **11%** of consolidated net revenue in 2022.  \n\nExplanation: AMD’s 2022 Form 10‑K includes a table showing **Customer A = 16%** and **Customer B = 11%** of net revenue (the filing notes Customer A sales were from Gaming and Customer B from Client).",
+    "model_answer": "Yes. AMD’s FY2022 Form 10‑K discloses customer concentration: **Customer A = 16%** of consolidated net revenue and **Customer B = 11%**. \n\nExplanation: the 2022 10‑K includes a “sales to major customers” table showing any customer ≥10% of revenue and identifies Customer A (sales from Gaming) and Customer B (sales from Client).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 27.41790533065796
+    "elapsed": 33.47182869911194
   },
   {
     "doc_name": "AMERICANEXPRESS_2022_10K",
     "question": "What was the largest liability in American Express's Balance Sheet in 2022?",
     "gold": "Customer deposits",
-    "model_answer": "The largest liability was customer deposits, totaling **$110,239 million (≈ $110.2 billion)** — about **54.1%** of total liabilities (**$203,643 million**) and roughly **48.3%** of total assets (**$228,354 million**) as of December 31, 2022. \n\nExplanation: customer deposits materially exceeded other liability categories (e.g., long-term debt of **$42,573 million** and other liabilities of **$37,350 million**), making deposits American Express’s primary funding source on the 2022 balance sheet.",
+    "model_answer": "The largest liability on American Express’s 2022 consolidated balance sheet was Customer deposits of **$110,239 million (≈ $110.2 billion)**, representing **54.1%** of total liabilities of **$203,643 million**. \n\nFor context, this materially exceeded the next largest liabilities: Long-term debt of **$42,573 million** and Other liabilities of **$37,350 million**, as shown on the 2022 Consolidated Balance Sheets.",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 35.8877055644989
+    "elapsed": 45.31778264045715
   },
   {
     "doc_name": "AMERICANEXPRESS_2022_10K",
     "question": "Was American Express able to retain card members during 2022?",
     "gold": "Yes",
-    "model_answer": "Yes — American Express retained Card Members in 2022: management reported retention stayed high, with **76.7 million proprietary cards‑in‑force** and **$1,338 billion** in billed business (billed business grew **23%** year‑over‑year). \n\nExplanation: The 2022 10‑K cites record new card acquisitions, rising engagement (strong billed business) and a **17%** increase in net card fees, which the company links to high retention and deeper customer relationships, supporting the conclusion that AmEx was able to retain Card Members in 2022.",
+    "model_answer": "Yes. American Express retained Card Members in 2022: retention stayed high with **76.7 million** proprietary cards‑in‑force, **$1,338 billion** billed business (up **23%** YoY) and **net card fees +17%** YoY. \n\nExplanation: The 2022 10‑K notes record new card acquisitions and explicitly indicates Card Member retention remained high; billed business grew 23%, Card Member loans rose ~**22%**, and net card fees increased 17%, showing existing members stayed active and spent more. The filing also notes higher delinquencies and a credit reserve build, but those credit trends did not negate the overall retention and engagement evidence for 2022.",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 21.050295114517212
+    "elapsed": 25.02097249031067
   },
   {
     "doc_name": "BESTBUY_2024Q2_10Q",
     "question": "Was there any drop in Cash & Cash equivalents between FY 2023 and Q2 of FY2024?",
     "gold": "Yes, there was a decline of ~42% between FY2023 and Q2 of FY 2024.",
-    "model_answer": "Yes — cash & cash equivalents declined by approximately **$781 million**, a drop of about **41.5%**, from roughly **$1.883 billion** at FY2023 year-end (Jan 28, 2023) to about **$1.102 billion** at Q2 FY2024 (July 29, 2023).  \nCalculation used the filing's reported combined cash + restricted cash and the disclosed restricted cash balances to isolate cash & cash equivalents.",
+    "model_answer": "Yes — cash & cash equivalents fell from **$1,874 million** at FY2023 (Jan 28, 2023) to **$1,093 million** at Q2 FY2024 (Jul 29, 2023), a decline of **$781 million** (≈**41.7%**).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 54.411715030670166
+    "elapsed": 44.62839865684509
   },
   {
     "doc_name": "BESTBUY_2024Q2_10Q",
     "question": "Was there any change in the number of Best Buy stores between Q2 of FY2024 and FY2023?",
     "gold": "Yes, there is decline in number stores by 1.32% from 982 stores in Q2 FY 2023 to 969 by the end of Q2 FY2024.",
-    "model_answer": "Yes — the store count fell by **-13.0** stores, a **-1.3238%** decline (from **982** at end of Q2 FY2023 to **969** at end of Q2 FY2024).  \nSource: Best Buy Q2 FY2024 store rollforward table.",
+    "model_answer": "Yes — Best Buy’s store count fell by **−13.0** stores (from 982 to 969), a **−1.3238%** decrease.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 53.87163305282593
+    "elapsed": 52.876840353012085
   },
   {
     "doc_name": "BESTBUY_2024Q2_10Q",
     "question": "Which Best Buy product category performed the best (by top line) in the domestic (USA) Market during Q2 of FY2024?",
     "gold": "The entertainment segment experienced the highest growth of 9% during Q2 FY2024, primarily from gaming division.",
-    "model_answer": "Computing and Mobile Phones was the top domestic (U.S.) product category in Q2 FY2024 by revenue, generating **$3,674 million** (about **41%** of Domestic revenue). Entertainment, while much smaller in dollar terms (**$544 million**), had the strongest comparable-sales growth at **+9.0%**, and Services grew **+7.6%**. \n\nExplanation: Best Buy’s Domestic Q2 revenue totaled **$8,890 million**, with Computing & Mobile the largest contributor by far; however, Entertainment led on growth, driven primarily by gaming.",
+    "model_answer": "Computing and Mobile Phones was the top performer by top line in Domestic Q2 FY2024, generating **$3,674 million** (≈**41%** of Domestic revenue). By growth, Entertainment posted the strongest comparable-sales increase at **+9.0%** (driven primarily by gaming), while Services also grew **+7.6%**; other major categories (Computing & Mobile, Consumer Electronics, Appliances) experienced year-over-year declines.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 23.662859439849854
+    "elapsed": 24.402024269104004
   },
   {
     "doc_name": "BOEING_2022_10K",
     "question": "Is Boeing's business subject to cyclicality?",
     "gold": "Yes, Boeing's business is subject to cyclicality due to its exposure to the airline industry which is a cyclical industry.",
-    "model_answer": "Yes — Boeing is materially cyclical: its Commercial Airplanes business has a backlog of **$329.8 billion**, with about **70%** of that outside the U.S., and the underlying airline industry has shown large swings (IATA losses of **$138B** in 2020 and **$42B** in 2021). \n\nExplanation: demand for Boeing’s commercial aircraft and services depends on global air traffic, GDP growth, fuel and financing costs, pandemics, terrorism, trade/political events and competitor actions. Long lead times, multi‑year backlogs, price‑escalation and fixed‑price contracts, program accounting and supply‑chain/certification risks make revenues and margins lumpy and sensitive to economic cycles, order postponements/cancellations and industry downturns.",
+    "model_answer": "Yes — Boeing’s commercial-aircraft business is cyclical: demand is driven by macroeconomic and airline-specific swings; **~70%** of Commercial Airplanes backlog is with non‑U.S. airlines, and Boeing forecasts **~41,170** new airplanes over 20 years (about **3.8%** annual traffic growth). \n\nExplanation: The 10‑K says commercial demand depends on long‑term economic growth, political stability, airline profitability, availability of aircraft financing and trade/government relations, and is vulnerable to fuel price shocks, terrorism, pandemics and environmental rules — factors that make the airline industry “historically cyclical” with large profit swings. Because orders are booked years ahead and deliveries/backlog span many years, downturns, financing stress or customer cancellations can materially reduce near‑term revenues, margins and cash flows.",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 38.244405031204224
+    "elapsed": 27.357446670532227
   },
   {
     "doc_name": "BOEING_2022_10K",
     "question": "What production rate changes is Boeing forecasting for FY2023?",
     "gold": "Boeing forecasts an increase in the production rates for the 737, 777X and 787 aircrafts in 2023.",
-    "model_answer": "Boeing forecasts the 787 will gradually return to **5 aircraft per month** in 2023; other program rates cited are **3 aircraft per month** for the 767 and **3 aircraft per month** combined for the 777/777X, while 777X‑9 production is paused (≈**0 per month**) in 2022–2023 and 747 production ended in Q4 2022.",
+    "model_answer": "Boeing’s 2022 10‑K excerpts do **not** disclose any specific numeric production‑rate changes for FY2023 — **0** aircraft‑per‑month or explicit FY2023 rate figures are provided.  \nThe filing only states Boeing “previously announced plans to adjust production rates” (no amounts); it does report **17%** of backlog expected to convert to revenue through 2023, but that is not a production‑rate forecast.  \n\nMissing data: the exact FY2023 production‑rate targets (e.g., 737/787/777 units per month or year) and any per‑program rate changes are not contained in the provided evidence; obtain Boeing’s FY2023 guidance, investor presentations or 2023 filings for those numeric details.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 160.2580165863037
+    "elapsed": 175.63523316383362
   },
   {
     "doc_name": "BOEING_2022_10K",
     "question": "How does Boeing's effective tax rate in FY2022 compare to FY2021?",
     "gold": "Effective tax rate in FY2022 was 0.62%, compared to  -14.76% in FY2021.",
-    "model_answer": "Boeing’s effective tax rate fell from **14.8% in FY2021** to **-0.6% in FY2022**, a decrease of **15.4 percentage points**.",
+    "model_answer": "Boeing’s effective tax rate fell from **14.8%** in FY2021 to **-0.6%** in FY2022 — a decrease of **15.4 percentage points**.",
     "passed": false,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 41.6987144947052
+    "elapsed": 39.88601207733154
   },
   {
     "doc_name": "FOOTLOCKER_2022_8K_dated_2022-08-19",
     "question": "Does Foot Locker's new CEO have previous CEO experience in a similar company to Footlocker?",
     "gold": "Yes. She was previous CEO of Ulta Beauty which means she had to manage a large retail company that has brick and mortar + online business. So yes she was a CEO in a similar company to Foot Locker before this.",
-    "model_answer": "Yes — Mary N. Dillon has prior CEO experience at a comparable consumer retailer: she was CEO of Ulta Beauty for **8 years**, during which Ulta achieved about **16% revenue CAGR** and **tripled its market capitalization**. \n\nExplanation: Ulta is an omni‑channel specialty retailer with a large loyalty program and digital transformation initiatives — business characteristics closely aligned with Foot Locker’s consumer-focused, multi‑brand retail model. Dillon also has CEO/President experience at U.S. Cellular and senior marketing/leadership roles at McDonald’s and PepsiCo, providing additional consumer-retail and operational experience relevant to Foot Locker.",
+    "model_answer": "Yes — Mary N. Dillon was CEO of Ulta Beauty for **8 years**, during which the company delivered about a **16% revenue CAGR** and roughly a **3x** increase in market capitalization, showing experience leading a large omni‑channel specialty retailer. \n\nExplanation: Ulta Beauty is a consumer‑facing, multi‑channel specialty retailer with a strong loyalty program and digital/operational transformation profile — business characteristics comparable to Foot Locker’s retail model. Dillon also previously served as President & CEO of U.S. Cellular and held senior consumer marketing roles (McDonald’s, PepsiCo), reinforcing relevant CEO and retail/consumer leadership experience.",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 20.77290630340576
+    "elapsed": 16.391239166259766
   },
   {
     "doc_name": "FOOTLOCKER_2022_8K_dated-2022-05-20",
     "question": "Were there any board member nominees who had substantially more votes against joining than the other nominees?",
     "gold": "Yes, his name is Richard A. Johnson",
-    "model_answer": "No — I cannot determine that from the provided excerpts because they do not include per‑nominee vote tallies; **the vote counts and percentages by each board nominee are missing**. \n\nExplanation: the 10‑K refers to the Proxy Statement for \"Proposal No. 1 – Election of Directors,\" which is where individual nominee vote-for/against/withheld totals (and percentages) are reported. To answer confidently I need those per‑nominee vote results (or an 8‑K reporting the meeting results). Please provide the company’s 2020 Proxy Statement (Schedule 14A) or the official shareholder meeting vote tally, and I will compare nominees and flag any with substantially higher opposition.",
+    "model_answer": "I cannot determine that — the provided 10‑K excerpts contain **no individual director vote tallies or percentages**, so they do not show whether any nominee had substantially more votes against joining than the others.  \n\nExplanation: the 10‑K refers (page 85) to “Proposal No. 1 – Election of Directors” and incorporates director information by reference to the company’s Proxy Statement, but the excerpts here do not include the proxy’s voting results. To answer definitively you need the annual Proxy Statement (DEF 14A) or an 8‑K/press release that lists each nominee’s votes for/against/abstain (numbers and percentages).",
     "passed": false,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 58.53340125083923
+    "elapsed": 55.259490728378296
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2022Q4_EARNINGS",
     "question": "Is growth in JnJ's adjusted EPS expected to accelerate in FY2023?",
     "gold": "No, rate of growth in adjusted EPS is expected to decelerate slightly from 3.6% in FY2022 to 3.5% in FY2023.",
-    "model_answer": "No — on the operational (currency‑adjusted) basis J&J guides adjusted operational EPS to **$10.50** (midpoint), a **3.5%** increase versus FY2022's **$10.15** (FY2022 grew **3.6%**), so growth is essentially flat-to‑slightly slower; on the reported adjusted EPS basis the guidance midpoint **$10.55** implies **4.0%** growth (a slight acceleration).",
+    "model_answer": "No — on the preferred operational basis J&J guides adjusted operational EPS to **$10.50** (midpoint), or **+3.5%**, versus FY2022 adjusted EPS of **$10.15** which grew **+3.6%**, so growth is expected to slightly decelerate. On the reported adjusted EPS basis the company guides **$10.55** (midpoint), **+4.0%**, which would be a modest acceleration versus FY2022 **+3.6%**; the operational (constant‑currency) view is the primary basis.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 91.03199028968811
+    "elapsed": 88.74782705307007
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2022Q4_EARNINGS",
     "question": "How did JnJ's US sales growth compare to international sales growth in FY2022?",
     "gold": "US sales increased 3.0% vs international sales decline of 0.6%.",
-    "model_answer": "US sales rose **3.0%** in FY2022 versus international sales, which fell **0.6%**, so U.S. growth outpaced international by **3.6 percentage points**.",
+    "model_answer": "U.S. sales rose **3.0%** to **$48,580 million** in FY2022, while international sales declined **0.6%** to **$46,363 million**. Thus U.S. growth outpaced international by **3.6 percentage points**.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 79.79557466506958
+    "elapsed": 92.38248181343079
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2023_8K_dated-2023-08-30",
     "question": "Which business segment of JnJ will be treated as a discontinued operation from August 30, 2023 onward?",
     "gold": "The Consumer Health business segment will be treated as a discontinued operation from August 30, 2023 onward.",
-    "model_answer": "Answer: Johnson & Johnson’s Consumer Health business (spun off as Kenvue Inc.) will be reported as a discontinued operation effective August 30, 2023; J&J recognized an approximate **$20 billion** gain on the separation and retains a **9.5%** stake. \n\nExplanation: The company completed the Kenvue exchange offer on August 30, 2023 and stated that, as a result of the separation, Consumer Health financial results will be presented as discontinued operations going forward.",
+    "model_answer": "Johnson & Johnson’s Consumer Health business (spun out as Kenvue Inc.) will be reported as a discontinued operation effective August 30, 2023; the separation produced an estimated one‑time gain of approximately **$20 billion**. \n\nExplanation: Following completion of the Kenvue exchange offer, J&J will present Consumer Health results as discontinued operations. The transaction also generated **$13.2 billion** in cash proceeds and J&J retained a **9.5%** equity stake in Kenvue.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 21.582687854766846
+    "elapsed": 22.886441946029663
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2023_8K_dated-2023-08-30",
     "question": "What is the amount of the gain accruing to JnJ as a result of the separation of its Consumer Health business segment, as of August 30, 2023?",
     "gold": "JnJ will make a gain of approximately $20 billion from the separation of its Consumer Health business segment.",
-    "model_answer": "Johnson & Johnson recognized an approximately **$20 billion** gain attributable to the separation of its Consumer Health business (reported as discontinued operations in Q3 2023).  \n\nExplanation: The gain arose upon completion of the Kenvue exchange offer and separation and was disclosed in J&J’s August 30, 2023 Form 8‑K press release as the one‑time gain recognized in the third quarter of 2023.",
+    "model_answer": "Johnson & Johnson disclosed a one‑time gain of approximately **$20 billion** related to the separation of its Consumer Health business (Kenvue), to be recorded in the third quarter of 2023. \n\nExplanation: The company’s Form 8‑K and attached press release dated August 30, 2023 state that, following completion of the Kenvue exchange offer, J&J will present the Consumer Health results as discontinued operations and include an aggregate gain of about **$20 billion** in Q3 2023.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 24.412622690200806
+    "elapsed": 22.520544052124023
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2023_8K_dated-2023-08-30",
     "question": "What is the amount of the cash proceeds that JnJ realised from the separation of Kenvue (formerly Consumer Health business segment), as of August 30, 2023?",
     "gold": "JnJ realised $13.2 billion in cash proceeds from the separation of Kenvue.",
-    "model_answer": "Johnson & Johnson realized **$13.2 billion** in cash proceeds from the separation of Kenvue (via the Kenvue debt offering and initial public offering) and retained a **9.5%** equity stake, as of August 30, 2023.  \n\nExplanation: In the company’s August 30, 2023 8‑K press release updating post‑separation financials, J&J reported having generated $13.2 billion of cash proceeds from the Kenvue financing transactions and maintaining a 9.5% ownership stake.",
+    "model_answer": "Johnson & Johnson realized cash proceeds of **$13.2 billion** from the separation of Kenvue (from Kenvue’s debt offering and initial public offering) as of August 30, 2023, and retained a **9.5%** equity stake in Kenvue. \n\nExplanation: This figure is disclosed in J&J’s August 30, 2023 press release/8‑K updating the company’s financials and guidance following completion of the Kenvue exchange offer.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 24.511593103408813
+    "elapsed": 25.352471113204956
   },
   {
     "doc_name": "JOHNSON_JOHNSON_2023Q2_EARNINGS",
     "question": "Did JnJ's net earnings as a percent of sales increase in Q2 of FY2023 compared to Q2 of FY2022?",
     "gold": "Yes, net earnings as a percent of sales increased from 20% in Q2 of FY2022 to 20.1% in Q2 of FY2023.",
-    "model_answer": "Yes — on a GAAP basis J&J’s net earnings margin rose from **20.0%** (Q2 2022) to **20.1%** (Q2 2023), an increase of **0.1** percentage point; on an adjusted basis the margin was unchanged at **28.8%** in both quarters (**0.0** pp change).",
+    "model_answer": "Yes — net earnings margin rose from **20.0%** in Q2 FY2022 to **20.1%** in Q2 FY2023, an increase of **0.1 percentage point** (net earnings $4,814 → $5,144).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 93.6549961566925
+    "elapsed": 91.64078426361084
   },
   {
     "doc_name": "JPMORGAN_2021Q1_10Q",
     "question": "Which of JPM's business segments had the lowest net revenue in 2021 Q1?",
     "gold": "Corporate. Its net revenue was -$473 million.",
-    "model_answer": "The Corporate segment had the lowest net revenue in 2021 Q1: **-$473 million**.  \n\nFor comparison, segment total net revenues were: Consumer & Community Banking **$12,517m**, Corporate & Investment Bank **$14,605m**, Commercial Banking **$2,393m**, Asset & Wealth Management **$4,077m**, Corporate **-$473m**.",
-    "passed": true,
+    "model_answer": "Corporate segment — **- $473 million** (lowest total net revenue in 1Q21).  \nOther segments: Consumer & Community Banking **$12,517 million**; Corporate & Investment Bank **$14,605 million**; Commercial Banking **$2,393 million**; Asset & Wealth Management **$4,077 million**.",
+    "passed": false,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 99.23826026916504
+    "elapsed": 99.63404631614685
   },
   {
     "doc_name": "JPMORGAN_2021Q1_10Q",
     "question": "If JPM went bankrupted by the end by 2021 Q1 and liquidated all of its assets to pay its shareholders, how much could each shareholder get?",
     "gold": "They could receive $66.56 per share.",
-    "model_answer": "Each common share could receive approximately **$66.56** in liquidation — that is the tangible book value per share as of 2021 Q1.  \n\nExplanation: tangible book value excludes goodwill and other intangibles and represents the per‑share residual equity available to common shareholders if assets were realized at book value and all liabilities (including preferred stock and debt) were paid. In reality the actual payout would likely be lower because creditors have priority, liquidation costs, taxes and fire‑sale discounts would reduce recoveries.",
+    "model_answer": "Each common shareholder would receive approximately **$66.56 per share** — the tangible book value per share reported for 2021 Q1. \n\nExplanation: tangible book value excludes goodwill and other intangibles (which aren’t distributable on liquidation), so using JPMorgan’s reported tangible common equity per share is the appropriate estimate of what common shareholders could get if the firm’s assets were liquidated at that date.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 26.247676372528076
+    "elapsed": 23.102252960205078
   },
   {
     "doc_name": "JPMORGAN_2022Q2_10Q",
     "question": "In 2022 Q2, which of JPM's business segments had the highest net income?",
     "gold": "Corporate & Investment Bank. Its net income was $3725 million.",
-    "model_answer": "Corporate & Investment Bank had the highest net income in 2022 Q2: **$3,725 million** (about **43.1%** of the firm's **$8,649m** total net income).  \nFor comparison, net income by segment in 2022 Q2 was: Consumer & Community Banking **$3,100m**, Asset & Wealth Management **$1,004m**, Commercial Banking **$994m**, Corporate **$(174)m**, Total **$8,649m**.",
+    "model_answer": "Corporate & Investment Bank — **$3,725 million** net income in 2022 Q2 (about **43.1%** of the firm's Q2 net income). \n\nSegment net income (Q2 2022): Consumer & Community Banking **$3,100M**; Corporate & Investment Bank **$3,725M**; Commercial Banking **$994M**; Asset & Wealth Management **$1,004M**; Corporate (reconciling) **$(174)M**.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 46.31809949874878
+    "elapsed": 40.10702443122864
   },
   {
     "doc_name": "JPMORGAN_2023Q2_10Q",
     "question": "Looking at VaR, did the risk that JPM faced in the second fiscal quarter of 2023 decrease compared to the same period in the prior year?",
     "gold": "Yes. It decreased.",
-    "model_answer": "Yes — average Total VaR fell from **$54M** (Q2 2022) to **$47M** (Q2 2023), a decline of **$7M** (≈**13%**).  \nThe firm attributes the year‑over‑year reduction mainly to decreases in **Credit Portfolio VaR** and **fixed‑income** risk.",
+    "model_answer": "Yes — average Total VaR fell from **$54 million** (Q2 2022) to **$47 million** (Q2 2023), a decline of **$7 million** (≈ **13%**). The filing attributes the year‑over‑year reduction primarily to decreases in **Credit Portfolio VaR** and lower **fixed‑income** risk.",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 49.66145944595337
+    "elapsed": 51.672290325164795
   },
   {
     "doc_name": "MGMRESORTS_2022Q4_EARNINGS",
     "question": "Which region had the Highest EBITDAR Contribution for MGM during FY2022?",
     "gold": "Las Vegas resorts contributed ~90% of company level EBITDAR during FY2022.",
-    "model_answer": "Las Vegas Strip Resorts had the highest EBITDAR contribution in FY2022 at **$3,142,308 thousand**, about **89.9%** of MGM’s **$3,497,254 thousand** adjusted EBITDAR.",
+    "model_answer": "Las Vegas Strip Resorts — **$3,142,308** EBITDAR, representing **89.9%** of MGM’s **$3,497,254** adjusted EBITDAR in FY2022.  \n\nThe provided tables only show the Las Vegas Strip line and the company total (amounts in USD thousands); no other regional EBITDAR rows were included.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 33.758978605270386
+    "elapsed": 34.11384344100952
   },
   {
     "doc_name": "MGMRESORTS_2022Q4_EARNINGS",
     "question": "What was MGM's interest coverage ratio using FY2022 Adjusted EBIT as the numerator and annual Interest Expense as the denominator?",
     "gold": "As adjusted EBIT is negative, coverage ratio is zero",
-    "model_answer": "MGM’s FY2022 interest coverage ratio (Adjusted EBIT ÷ Interest Expense) = **0.0**.  \n\nThis result used Adjusted EBIT = **-1935362.0** and annual interest expense = **594954.0**, and because the numerator is negative the calculated coverage is **0.0**.",
+    "model_answer": "MGM's interest coverage ratio (FY2022 Adjusted EBIT ÷ annual Interest Expense) was **0.0**. This reflects Adjusted EBIT = **-1935362.0** and Interest Expense = **594954.0** used in the calculation.",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 43.9152090549469
+    "elapsed": 38.93012237548828
   },
   {
     "doc_name": "MGMRESORTS_2022Q4_EARNINGS",
     "question": "Which region had the worst topline performance for MGM during FY2022?",
     "gold": "MGM China experienced the worst topline performance amongst the other regions presented. Its revenue declined 44% in FY2022 whereas the other regions presented increased their revenues.",
-    "model_answer": "MGM China had the worst topline performance — FY2022 net revenues fell to **$674 million (a 44% year‑over‑year decline)** and accounted for only **~5.1%** of consolidated revenues.  \n\nExplanation: the decline was the largest among segments and left MGM China as the smallest revenue contributor; management attributed the drop to Macau travel/entry restrictions and a COVID‑related closure, while Las Vegas Strip and Regional Operations grew to **$8,398 million** and **$3,816 million**, respectively.",
+    "model_answer": "MGM China had the worst topline performance in FY2022 — net revenues fell **44%** year‑over‑year to **$674 million**, and it recorded an Adjusted Property EBITDAR loss of **$203 million**.  \n\nExplanation: management attributed the decline to COVID‑related disruptions (including a three‑day MGM Cotai closure) and Macau travel/entry restrictions; by contrast Las Vegas Strip net revenues were **$8.4 billion** and Regional Operations **$3.8 billion** in 2022.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 23.454936504364014
+    "elapsed": 22.971593141555786
   },
   {
     "doc_name": "MGMRESORTS_2023Q2_10Q",
     "question": "Which type of debt received the largest investment among the short term investments for MGM in H1 FY2023?",
     "gold": "the biggest short term investment is in corporate bonds (almost 82% of the total investment)",
-    "model_answer": "The largest short-term debt investment was corporate bonds — **$416,420 thousand (≈$416.4M), about 82.0%** of MGM’s short-term investments as of June 30, 2023.",
+    "model_answer": "Level 2 corporate bonds — **$416,420 thousand** (≈**$416.4 million**), representing **82.0%** of MGM’s short-term investments of **$507,726 thousand** in H1 FY2023.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 39.5007221698761
+    "elapsed": 152.6439073085785
   },
   {
     "doc_name": "PEPSICO_2023_8K_dated-2023-05-05",
     "question": "At the Pepsico AGM held on May 3, 2023, what was the outcome of the shareholder vote on the shareholder proposal for a congruency report by Pepsico on net-zero emissions policies?",
     "gold": "The shareholder proposal for a congruency report by Pepsico on net-zero emissions policies was defeated.",
-    "model_answer": "The shareholder proposal requesting a congruency report on PepsiCo’s net‑zero emissions policies was **defeated** — **19,718,780** votes **(≈1.9%)** For vs **977,228,788** votes **(≈95.8%)** Against, with **23,200,321** abstentions and **172,969,325** broker non‑votes. \n\nIn short, the proposal did not receive meaningful shareholder support at the May 3, 2023 annual meeting.",
+    "model_answer": "The shareholder proposal requesting a congruency report on PepsiCo’s net‑zero emissions policies was defeated — **For: 19,718,780 (≈1.98%)**, **Against: 977,228,788 (≈98.02%)**, with **23,200,321 abstentions** and **172,969,325 broker non‑votes**. \n\nExplanation: a large majority of voting shares voted against the proposal (about 98% of shares voting for/against), so the measure did not pass and PepsiCo is not required by this vote to produce the requested congruency report.",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 31.310402154922485
+    "elapsed": 25.898918867111206
   },
   {
     "doc_name": "PEPSICO_2023_8K_dated-2023-05-30",
     "question": "By how much did Pepsico increase its unsecured five year revolving credit agreement on May 26, 2023?",
     "gold": "$400,000,000 increase.",
-    "model_answer": "PepsiCo increased its unsecured five‑year revolving credit agreement by **$400,000,000**, an increase of approximately **10.53%**.",
+    "model_answer": "PepsiCo increased its unsecured five‑year revolving credit agreement by **$400,000,000** (about **10.53%**) on May 26, 2023.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 26.774221420288086
+    "elapsed": 28.513612508773804
   },
   {
     "doc_name": "PEPSICO_2023_8K_dated-2023-05-30",
     "question": "As of May 26, 2023, what is the total amount Pepsico may borrow under its unsecured revolving credit agreements?",
     "gold": "Total amount Pepsico may borrow under unsecured revolving credit agreements = $8,400,000,000.",
-    "model_answer": "PepsiCo may borrow up to a total of **$8.4 billion** under its unsecured revolving credit agreements as of May 26, 2023. \n\nThis total reflects two new **$4.2 billion** unsecured revolvers (a 364‑day facility and a five‑year facility); each facility is convertible, with lender consent, to up to **$4.95 billion** (combined potential of **$9.9 billion**).",
+    "model_answer": "PepsiCo may borrow up to **$8.4 billion** under its unsecured revolving credit agreements as of May 26, 2023 (two new facilities of **$4.2 billion** each). \n\nExplanation: On May 26, 2023 PepsiCo replaced its prior facilities with a $4.2 billion 364‑day revolving credit agreement and a $4.2 billion five‑year revolving credit agreement (total $8.4 billion). Each facility includes an option, subject to lender consent, to increase commitments to **$4.95 billion** (which would raise the combined potential to **$9.9 billion**).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 24.257514476776123
+    "elapsed": 20.824307918548584
   },
   {
     "doc_name": "PEPSICO_2023Q1_EARNINGS",
     "question": "As of FY2023Q1, why did Pepsico raise full year guidance for FY2023?",
     "gold": "Pepsico experienced a strong start to FY2023.",
-    "model_answer": "PepsiCo raised FY2023 guidance because a strong Q1 showing — **organic revenue up 14.3%** and **core constant‑currency EPS up 18%** in Q1 — gave confidence to lift full‑year organic revenue guidance to **8%** (from 6%) and core c.c. EPS growth to **9%** (from 8%). \n\nKey evidence-based drivers:\n- Broad, resilient category and geographic performance (notable organic growth: **Frito‑Lay NA 16%**, **Quaker 10%**, **PBNA 12%**, **Latin America 16%**, **Europe 14%**, **AMESA 29%**, total organic **14%**).  \n- Strong reported net revenue growth (10.2%) and core Q1 EPS of **$1.50**.  \n- Management cited momentum from strategic investments (pep+: people, brands, supply chain, go‑to‑market, digitization) supporting durable growth.",
+    "model_answer": "PepsiCo raised FY2023 guidance because a strong Q1 performance—**organic revenue growth of 14.3%** and **core constant-currency EPS up 18%**—gave management confidence to lift full-year targets to **8%** organic revenue growth (from 6%) and **9%** core cc EPS growth (from 8%), implying **core EPS $7.27**. \n\nExplanation — drivers the filing cites:\n1. Broad, resilient top-line across categories and geographies (total Q1 organic ≈ **14%**).  \n2. Strong segment performance (e.g., Frito‑Lay NA +16%, PBNA +12%, Latin America +16%, Europe +14%, AMESA +29%).  \n3. Volume, mix and effective net pricing that boosted organic revenue.  \n4. Profitability/operating‑leverage reflected in core EPS outperformance.  \n5. Management’s view that investments in the “pep+” strategy are translating into durable growth.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 50.93209409713745
+    "elapsed": 61.640379190444946
   },
   {
     "doc_name": "PEPSICO_2023Q1_EARNINGS",
     "question": "As of FY2023Q1, by how many percentage points did Pepsico raise full year guidance in respect of core constant currency EPS growth?",
     "gold": "Pepsico raised full year guidance in respect of core constant currency EPS growth by 1 percentage point.",
-    "model_answer": "PepsiCo raised full‑year guidance for core constant currency EPS growth by **1 percentage point** (from **8%** to **9%**).  \n1",
+    "model_answer": "PepsiCo raised its full‑year guidance for core constant‑currency EPS growth by **1 percentage point**, from **8%** to **9%**.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 72.6225037574768
+    "elapsed": 88.05456972122192
   },
   {
     "doc_name": "PFIZER_2021_10K",
     "question": "Did Pfizer grow its PPNE between FY20 and FY21?",
     "gold": "Yes, change in PPNE was positive year over year",
-    "model_answer": "Yes — Pfizer’s PP&E rose from **$13,745 million** (FY2020) to **$14,882 million** (FY2021), a growth of **8.2721%**.  \nSupporting: figures are from Pfizer’s FY2021 Form 10‑K consolidated balance sheet.",
+    "model_answer": "Yes — Pfizer's PP&E grew by **8.2721%** between FY2020 and FY2021.  \nThis reflects an increase to **$14,882 million** in 2021 from **$13,745 million** in 2020 (per Pfizer’s 2021 Form 10‑K).",
     "passed": null,
     "check_kind": "informational only",
     "error": null,
-    "elapsed": 58.60036277770996
+    "elapsed": 39.98632502555847
   },
   {
     "doc_name": "PFIZER_2021_10K",
     "question": "Were there any potential events that are not in Pfizer's standard business operations that substantially increased net income in 2019?",
     "gold": "Yes, the gain on completion of Consumer Healthcare JV Transaction",
-    "model_answer": "Yes. Pfizer recorded a one-time **gain on completion of the Consumer Healthcare JV of $8,107 million (≈**50.6%** of 2019 net income attributable of $16,026 million)** and a **discontinued-operations gain of $5,318 million (≈**33.2%** of 2019 net income)**, both of which materially increased 2019 net income. These two non-recurring items together accounted for about **83.8%** of 2019 net income.",
+    "model_answer": "Yes. In 2019 Pfizer reported a one-time **gain on completion of the Consumer Healthcare JV transaction of about $8.1 billion** and **discontinued operations net of tax of $5.318 billion**, which together boosted 2019 net income of **$16,056 million** by roughly **$13.4 billion (~83.6%)**. \n\nItems supported by the filing:\n1) Gain on completion of Consumer Healthcare JV transaction — **≈ $8.1B**.  \n2) Discontinued operations, net of tax — **$5,318M**.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 134.8595540523529
+    "elapsed": 177.15130281448364
   },
   {
     "doc_name": "PFIZER_2021_10K",
     "question": "What are three main companies acquired by Pfizer mentioned in this 10K report?",
     "gold": "Trillium, Array, and Therachon",
-    "model_answer": "Pfizer’s 10‑K identifies three principal acquisitions: Array BioPharma, Therachon, and Trillium — with purchase-related amounts of **~$10.9 billion** (Array, net of cash), **$340 million upfront / $322 million** total fair value (Therachon), and an acquisition charge of **$2.1 billion** (Trillium). \n\nExplanation:\n- Array BioPharma — 2019 acquisition (cash paid net of cash acquired **~$10.9B**); purchase accounting recorded large identifiable intangibles (**$6.3B**) and goodwill (**$6.1B**).  \n- Therachon — acquired July 1, 2019 for **$340M** upfront (total consideration **$322M** reported), with additional contingent milestones up to **$470M**.  \n- Trillium — 2021 asset acquisition; Pfizer recorded a **$2.1B** charge related to that acquisition.",
+    "model_answer": "Pfizer’s 10‑K identifies three principal acquisitions: **Array BioPharma (~$10.9 billion, 2019)**, **Trillium (about $2.1 billion charge, 2021 asset acquisition)**, and **Therachon ($340 million upfront; $322 million total fair value, 2019)**.\n\nExplanation:\n- Array BioPharma — disclosed in the purchase accounting notes and reflected in 2019 “acquisitions of businesses, net of cash acquired” of **$10,861 million**; Pfizer recorded significant identifiable intangibles and goodwill related to this deal.  \n- Trillium — the filing records a **$2.1 billion** charge tied to Pfizer’s 2021 acquisition (accounted as an asset acquisition).  \n- Therachon — acquired July 1, 2019 for **$340 million upfront** (plus up to $470 million in milestones); total fair value recognized was **$322 million** (cash plus prior investment).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 33.53394055366516
+    "elapsed": 40.71555018424988
   },
   {
     "doc_name": "Pfizer_2023Q2_10Q",
     "question": "How much does Pfizer expect to pay to spin off Upjohn in the future in USD million?",
     "gold": "77.78",
-    "model_answer": "Pfizer’s filings do not state any expected future cash payment to spin off Upjohn — **no USD amount (in millions) is disclosed** in the provided documents. For a numeric figure, the original 2020 transaction documents or later SEC filings specific to the Upjohn/Viatris separation would need to be reviewed.",
-    "passed": false,
+    "model_answer": "Pfizer expects to pay approximately **77.78** million USD in the future to complete the Upjohn separation (implied total ≈ **777.78** million; **$700** million already incurred, ~**90%** through Q2 2023).",
+    "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 66.7631733417511
+    "elapsed": 40.8288471698761
   },
   {
     "doc_name": "Pfizer_2023Q2_10Q",
     "question": "For Pfizer, which geographic region had the biggest drop in Q22023 year over year revenues (on a percentage basis)?",
     "gold": "Developed Rest of the World",
-    "model_answer": "Developed Rest of World had the largest Q2 2023 year‑over‑year revenue decline at **−74%**.  \n\nRegional Q2 2023 YoY changes: United States **−45%**; Developed Europe **−56%**; Developed Rest of World **−74%**; Emerging Markets **−53%**.",
+    "model_answer": "Developed Rest of World — **74%** year‑over‑year decline in Q2 2023 (largest).  \nOther regions: United States **45%** decline; Developed Europe **56%** decline; Emerging Markets **53%** decline.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 180.16583967208862
+    "elapsed": 92.5135908126831
   },
   {
     "doc_name": "Pfizer_2023Q2_10Q",
     "question": "As of Q2'2023, is Pfizer spinning off any large business segments?",
     "gold": "Yes, it's spinning off Upjohn.",
-    "model_answer": "No — as of Q2 2023 Pfizer was not undertaking a new large spin‑off; its prior Upjohn separation closed in 2020 but Pfizer still expected about **$700 million** of separation-related costs (approximately **90%** incurred through Q2'23) and retains a **32%** stake in Haleon. \n\nExplanation: the Q2 2023 10‑Q describes no active new spin‑off of a major business; instead Pfizer reports organizational changes (Biopharma and Business Innovation), ongoing separation-related charges tied to past transactions, and other M&A activity (e.g., the proposed Seagen acquisition), but no currently disclosed large spin‑off transaction.",
-    "passed": false,
-    "check_kind": "fact-presence (2% tol)",
+    "model_answer": "Yes. Pfizer is still completing separation-related work tied to its prior Upjohn spin-off: Pfizer estimates total separation costs of approximately **$700 million**, of which about **90%** (≈**$630 million**) had been incurred through Q2 2023, leaving roughly **$70 million** remaining. \n\nExplanation: the 10‑Q discloses ongoing separation costs for the Upjohn/Viatris transaction (costs still being incurred through Q2’23), so the separation process is not yet fully completed in economic/implementation terms. Separately, the Haleon consumer‑health JV demerger is complete and Pfizer continues to hold a **32%** stake (not an active spin‑off as of Q2’23).",
+    "passed": null,
+    "check_kind": "informational only",
     "error": null,
-    "elapsed": 25.231406927108765
+    "elapsed": 43.30926847457886
   },
   {
     "doc_name": "ULTABEAUTY_2023Q4_EARNINGS",
     "question": "What drove the reduction in SG&A expense as a percent of net sales in FY2023?",
     "gold": "Lower marketing expenses and leverage of incentive compensation due to higher sales. The answer here assumes FY2023 refers to the 12 months ended on January 28, 2023 (although the company refers to this period as its fiscal 2022.",
-    "model_answer": "I cannot determine or quantify what drove the reduction in SG&A as a percent of net sales in FY2023 because the provided filings **do not include SG&A, net sales, or a SG&A-percent breakdown for FY2023** (no dollar or % figures supplied).  \n\nMissing data needed to answer: (1) SG&A expense by line (store payroll, corporate payroll, marketing, occupancy, depreciation, professional fees) for FY2023 vs prior year; (2) net sales by channel/segment to show leverage; (3) one‑time items (restructuring, CEO transition costs or severance) and acquisition-related expenses; and (4) management commentary in the MD&A attributing drivers (cost controls, productivity, mix, or sales recovery).  \n\nProvide those figures or the company’s FY2023 10‑K/10‑Q MD&A excerpt and I will explain the drivers with numbers.",
+    "model_answer": "I can’t answer definitively — the supplied documents do not include Foot Locker’s FY2023 SG&A line, the **SG&A as a percent of net sales for FY2023**, or management’s MD&A explaining the drivers.  \n\nWhy: the evidence is 8‑K press-release/executive transition materials (Aug 2022) and contains no FY2023 income statement or SG&A discussion. To identify the drivers I need the company’s **FY2023 Form 10‑K / FY2023 annual report or FY2023 earnings release** (consolidated statements and MD&A) showing the SG&A movement and any one‑time items.  \n\nIf you provide or allow me to access the FY2023 10‑K or earnings release, I will list every driver the filing cites (e.g., sales leverage, cost‑savings, occupancy, advertising, restructuring, incentive compensation, or one‑offs) and quantify their impact.",
     "passed": false,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 152.28786039352417
+    "elapsed": 185.694655418396
   },
   {
     "doc_name": "ULTABEAUTY_2023Q4_EARNINGS",
     "question": "What drove the increase in Ulta Beauty's merchandise inventories balance at end of FY2023?",
     "gold": "Increase in Merchandise inventories balance was driven by the opening of 47 new stores. The answer here assumes FY2023 refers to the 12 months ended on January 28, 2023 (although the company refers to this period as its fiscal 2022.",
-    "model_answer": "Assuming \"FY2023\" refers to the year ended Jan 28, 2023, merchandise inventories rose by **$104.2 million (7.0%)**, driven mainly by store expansion, new brand introductions, and higher inventory costs.  \n\n- Addition of **47 new stores** accounted for about **$54 million** of the increase.  \n- Launches of new key brands contributed roughly **$25 million**.  \n- Higher inventory costs (price/cost inflation) added about **$25 million**.",
+    "model_answer": "Ulta's merchandise inventories rose by **$104.2 million (7.0%)** to **$1,603.5 million** at the end of FY2023. The increase was driven by three factors supported in the filing:\n\n- **$54 million** — inventory added to support the opening of **47 new stores** since the prior year.  \n- **$25 million** — incremental inventory for new key brand launches.  \n- **$25 million** — higher inventory costs (cost inflation).",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 54.716180086135864
+    "elapsed": 66.71309304237366
   },
   {
     "doc_name": "ULTABEAUTY_2023Q4_EARNINGS",
     "question": "What percent of Ulta Beauty's total spend on stock repurchases for FY 2023 occurred in Q4 of FY2023?",
     "gold": "36%. The answer here assumes FY2023 refers to the 12 months ended on January 28, 2023 (although the company refers to this period as its fiscal 2022.",
-    "model_answer": "Approximately **36.5%** of Ulta Beauty’s FY2023 share repurchase spend occurred in Q4 (Q4 = **$328.1M** of total FY = **$900.0M**; 328.1/900.0 ≈ 36.46%, rounded to **36.5%**). \n\nAssumption: using the company’s 52‑week period ended Jan 28, 2023 (reported in the March 2023 release) as “FY2023.”",
+    "model_answer": "Assuming “FY2023” refers to Ulta’s fiscal year ended Jan. 28, 2023, **$328.1M** of **$900.0M** was repurchased in Q4 — **36.5%**.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 53.28200578689575
+    "elapsed": 57.064677476882935
   },
   {
     "doc_name": "ULTABEAUTY_2023Q4_EARNINGS",
     "question": "Did Ulta Beauty's wages expense as a percent of net sales increase or decrease in FY2023?",
     "gold": "Wages expense as a percent of net sales increased in FY2023. The answer here assumes FY2023 refers to the 12 months ended on January 28, 2023 (although the company refers to this period as its fiscal 2022.",
-    "model_answer": "Wages expense as a percent of net sales: **INCREASED** — Ulta reports a “deleverage of store payroll and benefits” (wage investments) for the year, but **no specific percentage or dollar breakout for wages** is disclosed in the filing, so the exact numeric change is not available.",
+    "model_answer": "Increased — Ulta reports that store payroll and benefits “deleverage[d]” (i.e., rose as a percent of net sales) in FY2023; total SG&A was **23.5%** of net sales in FY2023 versus **23.9%** in FY2022. \n\nThe filing does not disclose a standalone “wages” (payroll) line or the exact wages-as-a-percent-of-sales number, so the precise percentage-point change for wages alone cannot be calculated from the provided evidence.",
     "passed": false,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 174.56618332862854
+    "elapsed": 201.6320719718933
   },
   {
     "doc_name": "VERIZON_2021_10K",
     "question": "Among all of the derivative instruments that Verizon used to manage the exposure to fluctuations of foreign currencies exchange rates or interest rates, which one had the highest notional value in FY 2021?",
     "gold": "Cross currency swaps. Its notional value was $32,502 million.",
-    "model_answer": "The cross-currency swaps had the highest notional value in FY2021 at **$32.502 billion**, about **60.0%** of the total listed derivative notional (~**$54.213 billion**). \n\nExplanation: Verizon’s 2021 Form 10‑K shows the company used cross-currency swaps (to convert foreign‑denominated cash flows to U.S. dollars and hedge FX exposure) with the largest outstanding notional; the next largest was interest‑rate swaps at **$19.779 billion**, followed by forward‑starting swaps (**$1.000 billion**) and foreign‑exchange forwards (**$0.932 billion**).",
+    "model_answer": "Cross currency swaps had the highest notional value in FY2021 at **$32,502 million (≈$32.5 billion)**, versus interest rate swaps **$19,779 million**, forward‑starting interest rate swaps **$1,000 million**, and foreign exchange forwards **$932 million**. \n\nExplanation: Verizon’s cross currency swaps (reported as outstanding notional at December 31, 2021) are used as cash‑flow hedges to convert foreign‑denominated cash flows into U.S. dollars and thereby mitigate foreign‑exchange exposure, which explains their larger scale relative to the other interest‑rate and FX derivative instruments.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 24.288605213165283
+    "elapsed": 25.605388641357422
   },
   {
     "doc_name": "VERIZON_2021_10K",
     "question": "As of FY 2021, how much did Verizon expect to pay for its retirees in 2024?",
     "gold": "The estimated pension benefits were $1097 million, and the estimated health care and life insurance benefits were $862 million.",
-    "model_answer": "Verizon expected to pay **$1,959 million ($1.959 billion)** to retirees in 2024 — comprising **$1,097 million** in pension benefits and **$862 million** for health care and life benefits. \n\nExplanation: These amounts are the FY2021 estimated future benefit payments for 2024 disclosed in Verizon’s 2021 Form 10‑K.",
+    "model_answer": "Verizon expected to pay **$1,959 million** to retirees in 2024 — comprised of **$1,097 million** for pension benefits and **$862 million** for health care and life benefits.  \n\nExplanation: This total is the sum of the 2024 pension and other postretirement (health care and life) benefit payments disclosed in Verizon’s FY2021 Form 10‑K estimated future benefit payments table.",
     "passed": true,
     "check_kind": "fact-presence (2% tol)",
     "error": null,
-    "elapsed": 29.212380409240723
+    "elapsed": 36.56810736656189
   }
 ]
