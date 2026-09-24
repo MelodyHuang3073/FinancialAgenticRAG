@@ -29,6 +29,31 @@ from app.tools.hybrid_retriever import (
 )
 
 
+#: llm_client.py's own "CRITICAL: you MUST quote this exact PoT result
+#: number" instruction is worded strongly enough that the model sometimes
+#: prints the bare result_value a SECOND time, as its own trailing
+#: paragraph, in addition to already using it correctly in prose -- e.g.
+#: "...raised guidance by **1 percentage point** (from 8% to 9%).\n\n1" or
+#: "...paid a dividend of **$0.55 per share**.\n\nNumeric answer: **0.55**".
+#: The number and prose sentence are both already correct; only this
+#: redundant echo is wrong, so it is safe to strip mechanically -- but only
+#: when it's the LAST paragraph, contains NOTHING but a number (optionally
+#: bold-marked, optionally "Numeric answer:"-prefixed), and the answer has
+#: other substantive content before it (never strips a genuinely one-line
+#: numeric-only answer).
+_TRAILING_BARE_NUMBER_RE = re.compile(
+    r'^\s*(?:numeric\s+answer:?\s*)?\*{0,2}-?\$?[\d,]*\.?\d+\*{0,2}%?\s*$',
+    re.IGNORECASE,
+)
+
+
+def _strip_trailing_bare_number(answer: str) -> str:
+    paragraphs = re.split(r'\n\s*\n', answer.strip())
+    if len(paragraphs) >= 2 and _TRAILING_BARE_NUMBER_RE.match(paragraphs[-1]):
+        return '\n\n'.join(paragraphs[:-1]).strip()
+    return answer
+
+
 class FinAgentRAGOrchestrator:
     # Chunks per sub-question. Raised from 3 back toward the original 5:
     # a bare alias like "net income" can legitimately match several
@@ -1461,7 +1486,7 @@ class FinAgentRAGOrchestrator:
             verification_res=verifier_res, sub_questions=sub_questions,
         )
         if llm_answer:
-            return llm_answer
+            return _strip_trailing_bare_number(llm_answer)
 
         # ── Fallback: concise rule-based synthesis ──
         if answer_mode == "NUMERIC":

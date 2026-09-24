@@ -317,6 +317,30 @@ _NARRATIVE_TOPIC_QUERIES: List[Tuple[List[str], str]] = [
      "Risk Management VaR Total VaR average 95% confidence level CIB trading VaR"),
     (["largest liability", "biggest liability", "largest liabilities"],
      "consolidated balance sheets total liabilities customer deposits long-term debt"),
+    # Spin-off/separation-cost questions ("how much does X expect to pay to
+    # spin off Y", "is X spinning off any large business segments") have no
+    # _METRIC_KEYWORDS entry (it's a one-off narrative cost disclosure, not
+    # a financial-statement line item), so target_metrics comes back empty
+    # and either the LLM decomposer's own sub-queries or the bare question
+    # text is the entire retrieval query. Confirmed real case: Pfizer's own
+    # "we expect to incur costs of approximately $700 million in connection
+    # with separating Upjohn, of which approximately 90% has been incurred
+    # ... through the second quarter of 2023" sentence (10-Q p41) ranks
+    # well inside a plain top-20 BM25 search on the raw question text, but
+    # the REAL NUMERIC pipeline for this question (no registered formula,
+    # so it falls to the LLM decomposer) produced sub-queries that missed
+    # it entirely -- the 5 evidence items actually sent to the LLM were
+    # trade-receivables policy, a DOJ inquiry, a product-revenue table, and
+    # segment revenue, none related to the separation at all, and the
+    # model then answered with a plausible-sounding but unsupported "~75%
+    # through Dec 2021" figure (Pfizer's OWN wording from an unrelated,
+    # older filing, not anything in this call's actual evidence). Zero
+    # collision risk beyond JnJ's 2 Kenvue/Consumer-Health "separation"
+    # questions (which already retrieve correctly on their own) -- this
+    # bridge is additive-only, appended after whichever path already ran.
+    (["spin off", "spin-off", "spinoff", "spinning off", "separation cost",
+      "separating"],
+     "separation costs incurred spin-off transaction costs and expenses"),
 ]
 
 
@@ -776,6 +800,21 @@ class FinanceBenchClassifier:
             'CAGR', 'YOY', 'EPS', 'ROE', 'ROA', 'CapEx', 'EBITDA', 'MD',
             'Quick', 'Current', 'Ratio', 'Debt', 'Working', 'Capital',
             'Inventory', 'Receivable', 'Liabilities', 'Assets', 'Interest',
+            # Metric abbreviations, same category as EBITDA/EPS/ROA above --
+            # confirmed real case: "What drove the reduction in SG&A
+            # expense as a percent of net sales in FY2023?" (a genuinely
+            # company-less question) matched the capitalized-token regex
+            # on "SG&A" itself (an ampersand-containing acronym, not
+            # skipped by anything above) and resolved entity to the
+            # literal string "SG&A" instead of falling through to the
+            # generic "company" placeholder -- fine in a single-file
+            # corpus (nothing else to compete with), but in the full
+            # multi-company corpus this entity value matches no real
+            # company at all, so the retrieval score boost that would
+            # normally favor the right document's own passages never
+            # applies, letting unrelated companies' content compete with
+            # Ulta's own SG&A-driver passage on equal footing.
+            'SG&A', 'SGA', 'G&A',
         }
         # Only match single-token company-like words (no multi-word groups)
         cap_tokens = re.findall(
