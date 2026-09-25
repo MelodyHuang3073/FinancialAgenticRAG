@@ -184,36 +184,6 @@ function AnswerText({ text }) {
   );
 }
 
-function splitAnswerText(text) {
-  if (!text) return { summaryText: '', detailText: '' };
-
-  const lines = text.split('\n');
-  const firstHeadingIndex = lines.findIndex((line) => line.startsWith('### '));
-
-  if (firstHeadingIndex !== -1) {
-    return {
-      summaryText: lines.slice(0, firstHeadingIndex).join('\n').trim(),
-      detailText: lines.slice(firstHeadingIndex).join('\n').trim(),
-    };
-  }
-
-  const nonEmptyLines = lines.filter((line) => line.trim());
-  if (nonEmptyLines.length <= 3) {
-    return { summaryText: text.trim(), detailText: '' };
-  }
-
-  const summaryLines = [];
-  for (const line of nonEmptyLines) {
-    if (summaryLines.length >= 3) break;
-    summaryLines.push(line.trim());
-  }
-
-  return {
-    summaryText: summaryLines.join('\n').trim(),
-    detailText: nonEmptyLines.slice(summaryLines.length).join('\n').trim(),
-  };
-}
-
 function formatResultValue(value) {
   if (value === null || value === undefined || value === '') return '無可顯示結果';
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -346,19 +316,23 @@ function CodeBlock({ code, log }) {
 /* ─── Single Message Bubble ─── */
 function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
   const isOpen = openTrace === idx;
-  // detailText is part of the model's OWN answer (splitAnswerText only
-  // splits final_answer into a short lead-in + the rest, it never adds
-  // separate "internal logic" content) -- it must never be hidden behind
-  // a collapse toggle the way the genuinely internal reasoning/trace
-  // sections below are. showEvidence starts expanded for the same
-  // reason: the Source Evidence panel is part of judging whether an
-  // answer actually used the right data, not internal routing detail.
+  // The answer is rendered as ONE block, never split into a short lead-in
+  // + collapsible rest -- that split (via splitAnswerText, removed) only
+  // ever cut on a fixed line-count heuristic with no real understanding
+  // of Markdown structure, so it routinely landed inside a bullet list, a
+  // numbered list, or right between a list and its own trailing sentence,
+  // inserting a visually confusing divider inside what the model intended
+  // as one continuous answer. User's own call (2026-09-23): verbosity is
+  // a generation-quality problem to fix in the model's OWN output, not
+  // something a frontend collapse/split UI should paper over.
+  // showEvidence starts expanded since the Source Evidence panel is part
+  // of judging whether an answer actually used the right data, not
+  // internal routing detail.
   const [showEvidence, setShowEvidence] = useState(true);
   const [showReasoning, setShowReasoning] = useState(false);
   const [showTraceDetails, setShowTraceDetails] = useState(false);
   const [expandedEvidence, setExpandedEvidence] = useState(null);
   const [evidenceViewMode, setEvidenceViewMode] = useState({}); // { [index]: 'table' | 'markdown' }
-  const { summaryText, detailText } = splitAnswerText(msg.result.final_answer);
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -397,19 +371,11 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
             isQualitativeCharacterization={msg.result.is_qualitative_characterization}
           />
 
-          {summaryText && (
+          {msg.result.final_answer && (
             <div style={{ marginBottom: 12 }}>
-              <AnswerText text={summaryText} />
+              <AnswerText text={msg.result.final_answer} />
             </div>
           )}
-
-          {(detailText || msg.result.evidence_sources?.length > 0) && (
-            <div style={{ marginTop: 8, paddingTop: 12, borderTop: '1px solid #f0f0f0' }}>
-              {detailText && (
-                <div>
-                  <AnswerText text={detailText} />
-                </div>
-              )}
 
               <>
 
@@ -462,14 +428,12 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                           // kept and rendered on its own, not just the
                           // largest one, so nothing parent_content actually
                           // carries gets silently dropped from this panel.
-                          const tableCandidate = ev.chunk_type === 'table_row'
-                            ? (ev.parent_content || ev.content || '')
-                            : (ev.content || '');
+                          const tableCandidate = ev.parent_content || ev.content || '';
                           const fullTableBlocks = extractMarkdownTableBlocks(tableCandidate);
                           const isTable = fullTableBlocks.length > 0;
                           const fullContent = isTable
                             ? fullTableBlocks.join('\n\n')
-                            : ((ev.chunk_type === 'table_row' ? (ev.parent_content || ev.content) : ev.content) || '');
+                            : (ev.parent_content || ev.content || '');
                           const matchedLineItem = ev.chunk_type === 'table_row'
                             ? (ev.content || '').match(/Line Item:\s*([^|]+)/)?.[1]?.trim()
                             : null;
@@ -749,8 +713,6 @@ function MessagePair({ msg, idx, openTrace, setOpenTrace }) {
                     )}
                   </div>
                 </>
-            </div>
-          )}
         </div>
       </div>
     </div>

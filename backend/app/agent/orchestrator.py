@@ -29,6 +29,31 @@ from app.tools.hybrid_retriever import (
 )
 
 
+#: llm_client.py's own "CRITICAL: you MUST quote this exact PoT result
+#: number" instruction is worded strongly enough that the model sometimes
+#: prints the bare result_value a SECOND time, as its own trailing
+#: paragraph, in addition to already using it correctly in prose -- e.g.
+#: "...raised guidance by **1 percentage point** (from 8% to 9%).\n\n1" or
+#: "...paid a dividend of **$0.55 per share**.\n\nNumeric answer: **0.55**".
+#: The number and prose sentence are both already correct; only this
+#: redundant echo is wrong, so it is safe to strip mechanically -- but only
+#: when it's the LAST paragraph, contains NOTHING but a number (optionally
+#: bold-marked, optionally "Numeric answer:"-prefixed), and the answer has
+#: other substantive content before it (never strips a genuinely one-line
+#: numeric-only answer).
+_TRAILING_BARE_NUMBER_RE = re.compile(
+    r'^\s*(?:numeric\s+answer:?\s*)?\*{0,2}-?\$?[\d,]*\.?\d+\*{0,2}%?\s*$',
+    re.IGNORECASE,
+)
+
+
+def _strip_trailing_bare_number(answer: str) -> str:
+    paragraphs = re.split(r'\n\s*\n', answer.strip())
+    if len(paragraphs) >= 2 and _TRAILING_BARE_NUMBER_RE.match(paragraphs[-1]):
+        return '\n\n'.join(paragraphs[:-1]).strip()
+    return answer
+
+
 class FinAgentRAGOrchestrator:
     # Chunks per sub-question. Raised from 3 back toward the original 5:
     # a bare alias like "net income" can legitimately match several
@@ -1273,6 +1298,25 @@ class FinAgentRAGOrchestrator:
     # words "gross"/"margin"/"profit" nowhere in it.
     _RETRIEVAL_SYNONYM_TERMS: Dict[str, List[str]] = {
         "gross_profit": ["Cost of Products Sold", "Cost of Goods Sold", "Cost of Sales", "COGS"],
+        # pot_reasoner._has_finished_goods_inventory() decides the
+        # inventory_turnover convention (average vs. ending) from whatever
+        # evidence happens to reach PoT -- but a plain "inventory"/
+        # "inventories" alias query alone retrieves only the TOTAL
+        # inventory line (top ~5), never the breakdown sub-rows the
+        # convention check actually looks for. Confirmed real case: JnJ's
+        # own "Finished goods" row (page 58, needed to trigger the average
+        # convention) never made the top-5 for the plain "inventory"
+        # query -- only "Total inventories"/"Inventories (Notes 1 and 3)"
+        # did, both generic totals with neither "finished goods" nor
+        # "fuel"/"spare parts" wording, so the convention check silently
+        # saw no signal and fell back to the wrong (ending) default. These
+        # terms widen the SAME retrieval query (not the extraction alias
+        # list _extract_formula_guided() scores against, so the inventory
+        # VALUE used in the calculation is unaffected) to give the
+        # breakdown row a real chance at the top-5, for either convention.
+        "inventory": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
+        "inventory_old": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
+        "inventory_new": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
     }
 
     def _build_formula_subquestions(
@@ -1442,7 +1486,7 @@ class FinAgentRAGOrchestrator:
             verification_res=verifier_res, sub_questions=sub_questions,
         )
         if llm_answer:
-            return llm_answer
+            return _strip_trailing_bare_number(llm_answer)
 
         # ── Fallback: concise rule-based synthesis ──
         if answer_mode == "NUMERIC":

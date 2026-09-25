@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -95,6 +96,54 @@ def _is_reasoning_model(model_name: str) -> bool:
     """
     m = (model_name or "").lower()
     return m.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
+#: A spin-off/separation/divestiture STATUS question ("is X still spinning
+#: off/separating Y") vs. an AMOUNT question ("how much does X expect to
+#: pay ... in the future") need different handling -- only the status shape
+#: gets the "answer YES" override below, since rule 28 already covers the
+#: amount derivation via the generic "quote this exact PoT number" path
+#: once retrieval actually finds the right evidence (see
+#: question_classifier._NARRATIVE_TOPIC_QUERIES's "spin off"/"separation
+#: cost" bridge entry for that half of the fix).
+_SEPARATION_STATUS_QUERY_RE = re.compile(
+    r'\bspin(?:ning)?[\s-]?off\w*|\bseparat\w+\b', re.IGNORECASE
+)
+_HOW_MUCH_QUERY_RE = re.compile(r'\bhow\s+much\b', re.IGNORECASE)
+
+#: General (not Pfizer-specific) detector for the accounting-convention
+#: sentence rule 28 already describes in words: "we expect to incur costs
+#: of approximately $X million ..., of which approximately Y% has been
+#: incurred ... through <period>". When THIS exact sentence shape is
+#: present in the evidence actually sent to the model, the status verdict
+#: is no longer a judgment call -- it is directly stated by the filing
+#: itself (ongoing costs still being incurred = still in progress).
+#: Confirmed real case: Pfizer Q2'2023 Upjohn separation -- the model
+#: correctly QUOTED this exact evidence (700M / ~90% / Q2'23) in its
+#: answer text, then still concluded "No", reproduced 2/2 live runs even
+#: after rule 28 and a final-checklist reminder were both already in the
+#: prompt -- a plain reminder to "check rule 28" was not enough to
+#: override the model's own strong prior that a spin-off completed years
+#: earlier is not "still" happening; a directive stated as a fact about
+#: THIS evidence, not a rule to recall, is more likely to be followed
+#: (mirrors the same pattern already proven to work for the numeric
+#: "MUST quote this PoT result" instruction below). Captures the $X amount
+#: and Y% so the AMOUNT-question branch below can compute the derivation
+#: directly instead of asking the model to do the arithmetic itself --
+#: confirmed real case: even after retrieval found the right evidence
+#: (the earlier bare-recognition fix), the model still read $X as the
+#: TOTAL and answered "$70 million remaining" (700 * (1 - 90%)) instead of
+#: treating $X as the already-incurred 90% and computing implied total =
+#: 700/0.9 ≈ 777.8, remaining ≈ 77.8 -- rule 28's prose description of
+#: this convention was not enough on its own to prevent the more
+#: intuitive (but wrong, per the teacher-confirmed accounting reading)
+#: interpretation.
+_SEPARATION_COST_SENTENCE_RE = re.compile(
+    r'expects?\s+to\s+incur\s+costs?\s+of\s+approximately\s+\$?\s*([\d,]+(?:\.\d+)?)\s*'
+    r'(million|billion)\b[^.]{0,120}?of\s+which\s+approximately\s+(\d+(?:\.\d+)?)\s*%\s+'
+    r'has\s+been\s+incurred',
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_rows: int = 10) -> str:
@@ -316,6 +365,57 @@ class LLMAnswerGenerator:
             for item in sorted_evidence[:effective_cap]
         )
 
+        separation_status_summary = ""
+        sep_cost_match = (
+            _SEPARATION_COST_SENTENCE_RE.search(evidence_text)
+            if _SEPARATION_STATUS_QUERY_RE.search(query) else None
+        )
+        if sep_cost_match and not _HOW_MUCH_QUERY_RE.search(query):
+            separation_status_summary = (
+                "\n⚠️ CRITICAL: the evidence above contains a sentence disclosing "
+                "ONGOING, unfinished separation/spin-off costs still being incurred "
+                "as of the current reporting period (an \"we expect to incur costs "
+                "of approximately $X million ..., of which approximately Y% has "
+                "been incurred ... through <period>\" sentence). This means the "
+                "separation is STILL IN PROGRESS as of that period -- your VERDICT "
+                "on any question asking whether the company is still spinning off/"
+                "separating that business MUST be YES, even when another sentence "
+                "says the legal transaction (the entity split itself) closed on an "
+                "earlier date. The completed legal transaction and the still-"
+                "ongoing cost of finishing it are two different facts; do not "
+                "answer No solely because the transaction closed earlier."
+            )
+        elif sep_cost_match and _HOW_MUCH_QUERY_RE.search(query):
+            # Retrieval now finds this sentence (see the "spin off"/
+            # "separation cost" narrative-topic bridge in
+            # question_classifier.py), but even with the right evidence in
+            # hand the model read $X as the TOTAL and answered "$70
+            # million remaining" (700 * (1 - 90%)) instead of the correct
+            # accounting reading -- $X is the amount ALREADY incurred (the
+            # Y% portion), so implied total = X / (Y/100) and remaining =
+            # implied total - X. Computing it here removes the arithmetic
+            # from the model's hands entirely, the same way a PoT result
+            # does for a registered formula.
+            amount_str, unit, pct_str = sep_cost_match.group(1), sep_cost_match.group(2), sep_cost_match.group(3)
+            amount = float(amount_str.replace(",", ""))
+            pct = float(pct_str)
+            if pct > 0:
+                implied_total = amount / (pct / 100.0)
+                remaining = implied_total - amount
+                separation_status_summary = (
+                    f"\n⚠️ CRITICAL: the evidence above states an already-incurred "
+                    f"separation/spin-off cost of approximately {amount_str} {unit} "
+                    f"({pct_str}% of the total, NOT the total itself). Per the "
+                    f"accounting convention: implied total = {amount_str} / "
+                    f"({pct_str}/100) ≈ {implied_total:,.2f} {unit}; remaining "
+                    f"(future) amount = implied total - {amount_str} ≈ "
+                    f"{remaining:,.2f} {unit}. You MUST use these exact computed "
+                    f"figures (implied total ≈ {implied_total:,.2f} {unit}, "
+                    f"remaining ≈ {remaining:,.2f} {unit}) -- do NOT read the "
+                    f"disclosed {amount_str} {unit} as the total with "
+                    f"{100 - pct:g}% remaining; that is the wrong direction."
+                )
+
         pot_summary = ""
         if pot_res:
             result_value = pot_res.get("result_value")
@@ -425,6 +525,36 @@ class LLMAnswerGenerator:
                     "You MUST explicitly state this limitation in your answer -- do not "
                     "present the shown number as the exact metric the question asked for."
                 )
+            # The generic "quote this exact number as your HEADLINE" instruction
+            # above is worded to make the PoT result THE answer -- for most
+            # formulas that is correct, but capital_intensity_ratio (total
+            # assets / revenue) is explicitly NOT the deciding signal for a
+            # "is X capital-intensive" verdict (rule 22 says ROA is). Without
+            # this override, the two instructions actively conflict and the
+            # more mechanically-worded "quote this number as your answer" one
+            # wins: confirmed real case, CVS Health FY2022 -- the model quoted
+            # capital_intensity_ratio 0.7079 as if it were the verdict driver
+            # and concluded "No", directly contradicting gold's ROA-based
+            # "Yes" even though the model's OWN answer also correctly stated
+            # ROA=1.82% (rule 22's number-citation requirement was followed,
+            # but the verdict itself still wasn't). Reproduced consistently
+            # (3+ times), not sampling variance -- the conflict is structural,
+            # not random. General, not CVS-specific: fires for every question
+            # that resolves to this one formula key.
+            if pot_res.get("formula_used") == "capital_intensity_ratio":
+                pot_summary += (
+                    "\n⚠️ CRITICAL OVERRIDE: the PoT result above (the capital-"
+                    "intensity RATIO, total assets / revenue) is supporting "
+                    "context only -- it is NOT the signal that decides a "
+                    "capital-intensive verdict, and must not be quoted as if it "
+                    "were the answer. Per rule 22 below: find or compute ROA "
+                    "(net income / average total assets) from the evidence, and "
+                    "let ROA's direction alone decide Yes/No -- a low ROA (well "
+                    "under ~10%) means capital-intensive (Yes), a healthy ROA "
+                    "(~10%+) means it is not (No). Do NOT let this ratio, or a "
+                    "low Fixed-Assets/Total-Assets %, override the ROA-based "
+                    "verdict."
+                )
 
         verification_summary = ""
         if verification_res:
@@ -461,10 +591,20 @@ Routing Reason: {route_res.get('reason', '')}
 Available Evidence:
 {evidence_text}
 {pot_summary}
+{separation_status_summary}
 {verification_summary}
 
 【RESPONSE FORMAT REQUIREMENTS】:
-1. The first line MUST be a direct, conclusive answer (1-2 sentences) with key numbers and percentages.
+1. The first line MUST be a direct, conclusive answer (1-2 sentences) with key
+   numbers and percentages. Two failure shapes to avoid: (a) burying the
+   single most identifying fact (the acquired company's name, the specific
+   driver) at the END of the answer instead of attaching it to its FIRST
+   mention -- if the opening sentence says "acquisition-related" or "a
+   driver", name the deal/company right there, not several sentences
+   later; (b) opening with a figure that doesn't answer what was literally
+   asked (e.g. leading a "what products does X sell" answer with X's total
+   revenue) -- the opening sentence's numbers must be the ones the
+   question asked for, not other notable figures from the same evidence.
 2. Highlight key figures/results in **bold**.
 3. Keep total response under 150 words.
 4. Do NOT repeat raw evidence verbatim or list variable names.
@@ -592,12 +732,22 @@ Available Evidence:
     restructuring, a named exit), lead the explanation with the one-off
     items -- even when a routine factor's stated impact is numerically
     larger. Routine factors are secondary context, not the headline.
-24. If the question says "if <metric> is not a useful metric, state that and
-    explain why" and the company is a bank, card issuer, insurer or other
-    financial institution (no COGS/gross-profit/ordinary-operating-income
-    line), START by saying this metric isn't how such a company's
-    performance is measured, and why -- do not open with a plain Yes/No
-    about the metric itself.
+24. If asked about a margin/profitability TREND (gross margin, operating
+    margin, or similar) for a bank, card issuer, insurer or other financial
+    institution (no COGS/gross-profit/ordinary-operating-income line) --
+    even when the question is phrased as a plain "does X have an improving
+    <metric> profile" or "what drove <metric> change" with NO explicit "if
+    this isn't a useful metric" wording of its own -- START your answer by
+    saying this metric isn't how such a company's performance is measured,
+    and why, BEFORE any other computed verdict (e.g. net income margin).
+    Confirmed real case: American Express's own "Does AMEX have an
+    improving operating margin profile as of 2022?" -- the question never
+    says "if not useful, state that", but AmEx IS a card issuer with no
+    operating-margin line, so this rule still applies; leading with a
+    substitute net-income-margin verdict ("No -- margin fell from 19.0% to
+    14.2%") instead of the "not a useful metric for a card issuer" framing
+    is exactly the failure this rule exists to prevent -- do not require
+    the question to use this rule's own trigger wording before applying it.
 
 【FORWARD-LOOKING / GUIDANCE / ONE-TIME EVENTS】:
 25. If asked whether a dividend is STABLE/growing/consistent and the
@@ -659,13 +809,26 @@ Available Evidence:
     amount AND its percentage of the total (e.g. "employee-related $81
     million, about 87% of the $93 million liability").
 
-【FINAL CHECK before you answer -- these two failure modes have been observed live, more than once】:
+【FINAL CHECK before you answer -- these failure modes have been observed live, more than once, even when the rule above already covers them】:
 34. Did the question ask "best/worst/top performer" with no stated basis? If
     so, does your answer give BOTH the largest-amount reading AND the
     fastest-growth reading (rule 21)? Did the question ask about
     accelerating/decelerating growth with more than one guidance basis
     available? If so, are BOTH bases stated, with the verdict leading on
-    the operational/constant-currency basis (rule 26)?
+    the operational/constant-currency basis (rule 26)? Did the question ask
+    whether the company is CAPITAL-INTENSIVE (or a similarly-framed asset-
+    heavy/asset-light verdict) and does your evidence/PoT output include
+    ROA? If so, does your VERDICT follow ROA's direction -- a low ROA
+    (well under ~10%) means capital-intensive, a healthy ROA (~10%+) means
+    it is not -- rather than the bare CapEx/Revenue or Fixed-Assets/Total-
+    Assets ratio (rule 22)? Does the evidence contain a sentence shaped "we
+    expect to incur costs of approximately $X million ..., of which
+    approximately Y% has been incurred ... through <period>" about a spin-
+    off/separation/divestiture? If so: for a status question ("is it still
+    spinning off/separating"), did you answer YES (rule 28)? For an amount
+    question ("how much remains/is expected in the future"), did you
+    compute implied total = X / (Y/100) and remaining = implied total - X,
+    and state all three numbers (rule 28)?
 """
 
         try:
