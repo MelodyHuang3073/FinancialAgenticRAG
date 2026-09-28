@@ -1,6 +1,13 @@
-"""FinanceBenchClassifier rules: change verbs, Foot Locker entity, "how much ...
-USD" -> NUMERIC, and the leverage/deleverage narrative bridge for "expense as
-a percent of ..." questions (app/agent/question_classifier.py)."""
+"""FinanceBenchClassifier rules: change verbs, corpus-derived company name, and "how much
+... USD" -> NUMERIC (app/agent/question_classifier.py).
+
+The narrative-topic-query bridge (a hand-tuned per-question keyword list,
+including a former entry for "expense as a percent of net sales" questions) was removed from the classifier and replaced
+by decomposer.QueryDecomposer.suggest_narrative_topic_query(), a general
+LLM-based suggester called from orchestrator.py -- not something
+FinanceBenchClassifier.classify() does on its own anymore, so there is no
+deterministic per-string assertion left to test here for that behavior.
+"""
 import os
 import sys
 
@@ -11,22 +18,20 @@ from app.agent.question_classifier import FinanceBenchClassifier
 
 def test_classifier_change_verbs_and_foot_locker():
     clf = FinanceBenchClassifier()
-    assert clf.classify("Did Pfizer grow its PPNE between FY20 and FY21?")["calc_type"] == "change"
-    assert clf.classify("Was there any drop in Cash & Cash equivalents between FY 2023 and Q2 of FY2024?")["calc_type"] == "change"
+    assert clf.classify("Did Acme grow its net PP&E from the prior year to the current year?")["calc_type"] == "change"
+    assert clf.classify("Did cash holdings decline from the last year end to the second quarter?")["calc_type"] == "change"
     # a "which ... increase the most" selection question keeps no calc type
-    assert clf.classify("In which segment did sales proportionally increase the most?")["calc_type"] == ""
-    assert clf.classify("Does Foot Locker's new CEO have previous CEO experience?")["entity"] == "Foot Locker"
+    assert clf.classify("Which segment posted the largest proportional sales rise?")["calc_type"] == ""
+    # Company names are resolved against the uploaded corpus (no built-in list):
+    # the readable name comes from the query's own spelling of the filename stem.
+    from app.agent.orchestrator import FinAgentRAGOrchestrator
+    assert FinAgentRAGOrchestrator._readable_company_name(
+        "SPORTSDEPOT_2022_8K_dated_2022-08-19", "Does Sports Depot's new chief have prior top-executive experience?"
+    ) == "Sports Depot"
 
 
 def test_how_much_usd_question_is_numeric():
     c = FinanceBenchClassifier().classify(
-        "How much does Pfizer expect to pay to spin off Upjohn in the future in USD million?"
+        "How much does Acme expect to still pay for separating its unit, in USD million?"
     )
     assert c["answer_mode"] == "NUMERIC"
-
-
-def test_cost_share_of_sales_question_gets_leverage_bridge_query():
-    c = FinanceBenchClassifier().classify(
-        "Did Ulta Beauty's wages expense as a percent of net sales increase or decrease in FY2023?"
-    )
-    assert any("deleverage" in q.lower() for q in c["retrieval_queries"])

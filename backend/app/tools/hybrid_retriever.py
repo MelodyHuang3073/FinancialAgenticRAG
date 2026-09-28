@@ -11,29 +11,9 @@ _TERM_PATTERN_CACHE: Dict[str, "re.Pattern"] = {}
 
 
 def _term_present(term: str, text: str) -> bool:
-    """
-    Word-boundary-aware presence check for a financial term/alias inside a
-    (already-lowercased) query or document string -- NOT a plain `term in
-    text` substring check, which lets a short alias accidentally match
-    inside an unrelated word. Confirmed real case: the "eps" alias
-    (Earnings Per Share) is a literal substring of "pepsico" -- so a plain
-    substring check gave EVERY PepsiCo-related query/row pair a spurious
-    1.5x _line_item_match_score boost regardless of whether the row had
-    anything to do with EPS, silently neutralising the boost's ability to
-    discriminate for any PepsiCo question at all (it ends up applying
-    uniformly to every candidate, right and wrong alike).
-
-    An optional trailing "s" is allowed before the closing boundary --
-    plain word-boundary matching alone regresses a term like "total
-    revenue" (singular, as many aliases are written) against a filing's
-    own "Total revenues" (plural): "revenue" immediately followed by "s"
-    is NOT a word boundary, so a naive `\\bterm\\b` no longer matches what
-    the OLD plain-substring check used to catch by pure accident (a
-    singular alias is always also a literal PREFIX of its regular
-    plural). Confirmed real case: CVS Health's real "Total revenues" row
-    dropped out of a formula's own retrieval top-5 once word-boundary
-    matching alone was added, because "total revenue" (the alias) could
-    no longer match "total revenues" (the row's real label) at all.
+    """Word-boundary-aware presence check for a term/alias in a lowercased text.
+    Matches whole words and allows an optional trailing 's' so singular aliases match
+    plural labels, avoiding accidental substring matches inside unrelated words.
     """
     pattern = _TERM_PATTERN_CACHE.get(term)
     if pattern is None:
@@ -47,45 +27,20 @@ _FY_SHORT_YEAR_RE = re.compile(r'\bFY\s*(\d{2})\b', re.IGNORECASE)
 
 
 def _extract_years(text: str) -> "set[str]":
-    """
-    Every 4-digit year (optionally "FY"-prefixed, e.g. "FY2022" or bare
-    "2022") PLUS the common 2-digit fiscal-year shorthand ("FY22") that
-    the plain 4-digit pattern alone cannot see at all -- \\d{2} after "FY"
-    never matches inside "FY2022" (the boundary check after the first two
-    captured digits fails, since "20" is immediately followed by more
-    digits, "22"), so it only ever fires on a genuine 2-digit shorthand.
-    Returns each match normalised to its 4-digit form ("22" -> "2022").
-    Confirmed real case: "What drove revenue change as of the FY22 for
-    AMD?" -- the old 4-digit-only pattern found no year in this query at
-    all, so the entire year-relevance boost/penalty in search() silently
-    never activated, letting AMD's unrelated FY2015 filing content compete
-    on equal footing with the real FY2022 content for a question that
-    explicitly names its year.
+    """Match either a 4-digit year (optionally prefixed with FY) or the 2-digit fiscal
+    shorthand (FYXX).
+    Normalize any 2-digit shorthand to its 4-digit form before returning.
+    Needed because a 2-digit FY token cannot be captured by the plain 4-digit pattern.
     """
     years = set(_FULL_YEAR_RE.findall(text))
     years.update('20' + m for m in _FY_SHORT_YEAR_RE.findall(text))
     return years
 
 
-#: A question asking WHAT DROVE/CAUSED a change ("What drove revenue
-#: change...", "What caused the increase in...", "Why did X change...")
-#: has one specific, narrow correct answer shape: a sentence using real
-#: causal language ("driven by", "primarily due to", "as a result of") to
-#: name the actual driver(s) -- not just any prose that happens to repeat
-#: the metric name and a similar-sounding number. Module-level (not a
-#: HybridFinancialRetriever class attribute) so orchestrator.py can also
-#: import and evaluate it against the ORIGINAL full question -- a single
-#: attribution-shaped question typically gets decomposed into SEVERAL
-#: retrieval sub-queries (e.g. a plain keyword-stuffed "AMD Revenue Net
-#: Revenue" alongside the full original question text), and only checking
-#: each SUB-query's own text for "what drove" phrasing misses every
-#: sub-query that doesn't happen to repeat it -- confirmed real case: AMD's
-#: FY2022 "What drove revenue change" question's OWN keyword sub-query
-#: ("AMD Revenue Net Revenue...") never triggered the causal-language
-#: boost below at all, letting an unrelated ASC 606 boilerplate footnote
-#: win that sub-query's own top-5 and dilute the combined evidence pool
-#: even though the SAME question's other sub-query (the full original
-#: text) correctly boosted the real MD&A driver sentence.
+#: Detects questions asking what caused a metric change and flags them
+#: as attribution-style queries.
+#: Used so retriever/orchestrator can boost passages containing explicit causal phrasing;
+#: check the original full question text when deciding boosts.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Query-topic detectors (attribution / geography / legal) -- decide whether
@@ -102,59 +57,20 @@ def is_attribution_query(text: str) -> bool:
     return bool(_ATTRIBUTION_QUERY_RE.search(text))
 
 
-#: A question asking WHAT GEOGRAPHIES/REGIONS a company operates in has
-#: one specific correct source: a 10-K's own "Geographic Operations" /
-#: "Geographic Information" footnote (Note 24 or similar), which is
-#: usually the SECOND of two closely-related, heavily-overlapping
-#: sub-sections in the SAME segment-reporting note -- the first
-#: sub-section ("Reportable Operating Segments") describes BUSINESS
-#: segments (e.g. American Express's USCS/CS/ICS/GMNS), not geographies,
-#: and shares almost all the same vocabulary ("revenue", "segment",
-#: "operations", the fiscal year). Both sub-sections score close enough
-#: on plain BM25 that the wrong (business-segment) one can edge out the
-#: real geographic table even after every other ranking fix. Module-level
-#: for the same reason as is_attribution_query -- orchestrator.py needs to
-#: evaluate it against the ORIGINAL question, not each individual
-#: sub-query (a keyword-stuffed sub-query built from this topic still
-#: usually keeps "geographic" in it, but the guard is here for the same
-#: reason and consistency as the attribution case).
+#: Detects questions asking which geographies a filer operates in.
+#: Used to prefer the filing's geographic-disclosure note over similar segment text;
+#: evaluate this guard against the original question text.
 _GEOGRAPHY_QUERY_RE = re.compile(r'\bgeograph(?:y|ies|ic(?:al)?)\b', re.IGNORECASE)
-#: The literal section heading text a 10-K prints above its real
-#: geographic breakdown -- confirmed real case: American Express's own
-#: Note 24 prints "GEOGRAPHIC OPERATIONS" as a bold sub-heading
-#: immediately followed by "The following table presents our total
-#: revenues ... in different geographic regions", naming United States /
-#: EMEA / APAC / LACC. A plain "geographic" substring match alone isn't
-#: selective enough (the sibling business-segment sub-section's own body
-#: text also uses the word "geographic" in passing), so this requires the
-#: heading-style phrasing specifically -- deliberately narrow to
-#: "operations"/"information" only, NOT "areas" or "segments": both of
-#: those are common enough as ordinary prose (not a section title) that
-#: they produce false positives of their own. Confirmed real case:
-#: PepsiCo's "Our Customers" page discusses bottler distribution
-#: contracts "for specified geographic areas" -- completely unrelated to
-#: the company's own geographic revenue breakdown -- and "geographic
-#: areas" alone was enough to trigger this boost and outrank the real
-#: geographic-revenue table.
+#: Matches literal section headings that indicate a geographic breakdown
+#: (e.g., headings containing "Geographic Operations" or "Geographic Information").
+#: Narrow phrasing reduces false positives from generic words like "areas" or "segments."
 _GEOGRAPHIC_SECTION_RE = re.compile(
     r'geographic\s+(?:operations|information)\b', re.IGNORECASE
 )
 
-#: Not every filing labels its geography breakdown with the word
-#: "geographic" at all -- PepsiCo's own "geographies primarily operated
-#: in" answer lives entirely inside Item 1 Business's "Our Divisions"
-#: segment-by-segment description ("...Africa, the Middle East and South
-#: Asia...", "...Asia Pacific, Australia and New Zealand, and China
-#: region...") without the word "geographic" appearing anywhere in it, so
-#: _GEOGRAPHIC_SECTION_RE above (which requires that literal phrase)
-#: never fires for it -- confirmed real case: that passage ranked ~155th
-#: out of 200 candidates for the geography query, nowhere near the top-6
-#: that reaches the LLM. Region NAMES themselves are the signal instead:
-#: a passage mentioning several of them close together is very likely to
-#: be an actual geography enumeration regardless of company or filing
-#: structure, whereas a single incidental mention (e.g. "...Europe also
-#: manufactures...") isn't -- so this only counts as a match at 3+
-#: DISTINCT region names in the same passage, not a bare single hit.
+#: Catches geographic answers that do not use the word "geographic" by
+#: looking for multiple distinct region names in the same passage.
+#: Require at least three different region names close together to qualify.
 _GEOGRAPHIC_REGION_NAME_RE = re.compile(
     r'\b(?:north america|latin america|south america|asia pacific|'
     r'middle east|south asia|africa|europe|australia|new zealand)\b',
@@ -174,40 +90,19 @@ def is_geography_query(text: str) -> bool:
     return bool(_GEOGRAPHY_QUERY_RE.search(text))
 
 
-#: A question asking about ongoing legal battles/litigation has one
-#: specific, SEC-mandated source every 10-K carries under the exact same
-#: heading: "Item 3. Legal Proceedings." -- a far more reliable structural
-#: signal than any keyword overlap, since the heading text itself is
-#: standardized across every filer regardless of company or industry.
-#: Existing topic-query text alone ("Item 3 Legal Proceedings litigation
-#: lawsuit claims") isn't enough of a ranking signal on its own when a
-#: filing's OTHER pages also score reasonably on the same bag-of-words
-#: query -- confirmed real case: PepsiCo's real Item 3 page ranked 23rd
-#: among its own 2022 filing's pages (score 30.2) for that exact topic
-#: query, well outside the top-5 per-sub-query cutoff, even after
-#: eliminating the wrong-fiscal-year competition from PEPSICO_2021_10K.
+#: Identifies litigation questions that should be answered from the
+#: standard "Legal Proceedings" section present in filings.
+#: Use the standardized section heading as a strong structural signal for ranking.
 _LEGAL_QUERY_RE = re.compile(
     r'\blegal\s+(?:battle|proceeding|matter)s?\b|\blitigation\b|\blawsuit\b',
     re.IGNORECASE,
 )
 _LEGAL_PROCEEDINGS_SECTION_RE = re.compile(
     r'item\s*3\.?\s*legal\s+proceedings|'
-    # A multi-topic Item 3 section is routinely broken into several
-    # named sub-categories, each its own bolded heading line, several
-    # pages past wherever the "Item 3. Legal Proceedings" heading
-    # itself sits — the regex above alone only catches the FIRST page
-    # of a long section, not a sub-heading page deep inside it. These
-    # specific category names are standard terminology used across the
-    # pharmacy-benefit-manager/health-insurer/retail-pharmacy industry
-    # (CVS, Walgreens, Cigna/Express Scripts, UnitedHealth, Rite Aid all
-    # disclose litigation under these same category names), not unique
-    # to any one filer. Confirmed real case: CVS Health's own "Usual
-    # and Customary Pricing Litigation" and "PBM Litigation" sub-
-    # headings (page 173) sit between two other retrieved pages but
-    # never got the section boost themselves, so their content lost the
-    # tie-break to opioid-litigation pages that DID reuse the "Item 3"
-    # phrase nearby — the final answer cited opioid settlements but
-    # never the pricing/PBM litigation categories gold explicitly wants.
+    # Handles multi-part legal proceedings sections where relevant content
+    # appears under later sub-headings within the same Item 3 block.
+    # Boost standard category sub-headings too, since useful content can reside beyond
+    # the first page.
     r'usual\s+and\s+customary\s+pricing\s+litigation|pbm\s+litigation|'
     r'controlled\s+substances\s+litigation|opioid\s+litigation',
     re.IGNORECASE,
@@ -235,24 +130,12 @@ _SEGMENT_COMPARISON_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: The section heading a filer prints directly above its OWN consolidated,
-#: multi-segment results table -- confirmed real case: JPMorgan's 10-Q
-#: page 21 prints "Segment results – managed basis" then "The following
-#: tables summarize the Firm's results by segment for the periods
-#: indicated." immediately above a table listing EVERY segment side by
-#: side (Consumer & Community Banking / Corporate & Investment Bank /
-#: Commercial Banking / Asset & Wealth Management / Corporate), which is
-#: the one page that can actually answer a cross-segment comparison
-#: question -- but for a "which segment had the highest net income"
-#: query it ranked only 19th/47th by plain BM25 (score ~99/65), losing to
-#: FOUR separate single-segment MD&A pages that each individually discuss
-#: just one segment's own results in dense prose and score higher on raw
-#: term overlap, well outside any realistic evidence window. Confirmed
-#: this is NOT the "table structure never recognized" bug an earlier
-#: investigation diagnosed (see the jpm-wide-segment-table-parsing-gap
-#: project memory) -- the table itself is now correctly parsed with real
-#: segment-name column labels; this is purely a retrieval-ranking gap,
-#: the same shape as the geography/legal-section boosts above.
+#: Notes that a filer may print a consolidated, multi-segment results table with a
+#: section heading directly above it; such pages can answer cross-segment comparison
+#: queries but may be ranked lower by retrieval when many single-segment narrative pages
+#: match query terms more tightly.
+#: This is a retrieval-ranking issue rather than a table-parsing error; expect rank gaps
+#: when short, focused prose pages dominate term-overlap signals.
 _SEGMENT_RESULTS_SECTION_RE = re.compile(
     r'segment\s+results\b|results?\s+by\s+segment\b', re.IGNORECASE
 )
@@ -262,20 +145,11 @@ def is_segment_comparison_query(text: str) -> bool:
     return bool(_SEGMENT_COMPARISON_QUERY_RE.search(text))
 
 
-#: orchestrator._RETRIEVAL_SYNONYM_TERMS widens the inventory_turnover
-#: formula's own "inventory" retrieval query with these exact composition-
-#: category terms (see that dict's docstring) -- "Finished Goods" is a
-#: reliable marker that THIS query is one of those widened formula
-#: queries (a real user question is very unlikely to type this exact
-#: phrase), used below to decide whether the composition-label boost
-#: applies at all. Plain query-text widening alone was NOT enough:
-#: confirmed real case (JnJ FY2022 inventory turnover) -- even with
-#: "Finished Goods" added to the query text, the "Total inventories" row
-#: still ranked #1 (a short, exact "inventories" match that ALSO gets the
-#: unrelated total-row boost below), while the real "Finished goods"
-#: breakdown row (needed to pick the average-inventory convention, see
-#: pot_reasoner._has_finished_goods_inventory) didn't even reach the
-#: top-10.
+#: A config expands a formula query for inventory-related ratios with composition-
+#: category terms (e.g., Finished Goods) so composition-specific rows get considered;
+#: presence of that marker indicates the query was broadened.
+#: Query-term widening alone may still leave important breakdown rows unretrieved due to
+#: other ranking boosts.
 _INVENTORY_COMPOSITION_QUERY_RE = re.compile(r'\bfinished\s+goods\b', re.IGNORECASE)
 
 #: A filing's own inventory-note breakdown category labels -- the row
@@ -310,22 +184,9 @@ def _combined_pattern(terms: List[str]) -> "re.Pattern":
 
 
 def _load_alias_groups() -> List[List[str]]:
-    """
-    Lazily loads pot_reasoner.py's canonical-metric alias table
-    (_CANONICAL_TO_ALIASES) as a list of synonym groups, each group being
-    every alias (plus the canonical key itself) for one underlying metric
-    -- e.g. capex's group includes "capital expenditure", "capital
-    spending", "purchases of ppe", "資本支出", "capex". Reused by
-    _line_item_match_score so a query built around one alias ("capital
-    expenditure") still recognises a row that uses a DIFFERENT alias for
-    the same metric ("Capital spending", PepsiCo's own cash-flow-statement
-    label) as a genuine line-item match, instead of requiring the literal
-    same string on both sides -- which silently fails whenever the query's
-    wording and a filing's own wording for the same line item differ.
-    Imported lazily (not at module load) since app.agent.pot_reasoner is a
-    much larger module with its own heavier import chain; failures here
-    degrade gracefully to the plain FINANCIAL_TERMS check rather than
-    breaking retrieval.
+    """Lazily load the canonical-metric alias groups from the metric module.
+    Each group lists aliases for one metric so queries using one alias match rows using
+    another; imported lazily so failures fall back to basic term checks.
     """
     try:
         from app.agent.pot_reasoner import _CANONICAL_TO_ALIASES
@@ -355,19 +216,11 @@ def _get_alias_groups() -> List[List[str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class HybridFinancialRetriever:
-    # Used for a 1.5x _line_item_match_score boost when a query and a
-    # candidate passage both mention the same term — this is what lets a
-    # short, clean balance-sheet/cash-flow table ROW outrank a long prose
-    # page that happens to repeat the company's own name many times (e.g.
-    # a subsidiary list or legal exhibit index) purely on raw BM25 term
-    # frequency. Several formula-library primary aliases (the literal text
-    # used to build retrieval queries — see
-    # orchestrator._build_formula_retrieval_steps) were missing here
-    # entirely, leaving those specific lookups with no such protection.
-    # Confirmed real case: Kraft Heinz's real "Inventories" row (page 52)
-    # ranked #12, behind 11 boilerplate/legal pages that just happened to
-    # repeat "Kraft Heinz" and a stray "2018" many times — "inventory"/
-    # "inventories" wasn't in this list at all.
+    # Apply a 1.5x boost when a query and candidate passage share the same line-item
+    # term so concise table rows can outrank verbose non-relevant prose that repeats
+    # company tokens.
+    # Ensure primary formula aliases include expected terms (e.g.,
+    # inventory/inventories) or those lookups get no protection.
     FINANCIAL_TERMS = [
         "營業收入", "營收", "毛利", "毛利率", "營業利益", "營業利益率", "營業費用",
         "研發費用", "本期淨利", "淨利", "每股盈餘", "資本支出", "銷貨成本", "營業成本",
@@ -381,58 +234,25 @@ class HybridFinancialRetriever:
         "provision for income taxes", "income tax", "dividends paid",
         "net cash provided by operating activities", "property and equipment",
         "property, plant and equipment",
-        # The cash-flow statement's own line for acquisition spend --
-        # present in every filing whether or not any acquisition
-        # actually happened that year, unlike a narrative "Acquisitions
-        # and Divestitures" note (which only exists for a filer that HAD
-        # one to write about). Without this, a table_row candidate like
-        # this one gets NO boost at all under prefer_narrative (only
-        # text_note passages do, via the narrative-content boost below),
-        # so a company with no acquisitions to narrate about — whose
-        # only real evidence IS this bare table row — loses to unrelated
-        # prose that merely shares generic vocabulary. Confirmed real
-        # case: Ulta Beauty's own "Acquisitions, net of cash acquired"
-        # cash-flow row (proving zero acquisitions in FY2023/FY2022)
-        # ranked outside the top 5 under an acquisitions-topic query,
-        # losing to MD&A/results-of-operations prose that never
-        # mentions acquisitions at all.
+        # Ensure the cash-flow statement row for acquisition-related cash flows is
+        # eligible for ranking even when a filer has no narrative note; this row is the
+        # only direct evidence of zero acquisition activity for some filers.
+        # Do not rely solely on narrative boosts when the factual signal resides only in
+        # a table row.
         "acquisitions, net of cash acquired", "acquisitions net of cash acquired",
     ]
 
-    #: A row whose own Line Item label starts with "Total" (e.g. "Total
-    #: cost of sales", "Total current assets") is a genuine consolidated
-    #: total, not a sub-item/segment/note breakdown row — the SAME
-    #: total-row-priority principle already applied at the extraction
-    #: stage (_score_row_match() in pot_reasoner.py), needed here too
-    #: because a wrong sub-item row can outrank the real total on pure
-    #: BM25 score before extraction ever gets a chance to choose between
-    #: them (confirmed real case: AES Corporation's "Cost of Sales—Non-
-    #: Regulated" note row, and even a different page's own "Cost of
-    #: Sales" sub-row, both outscored the real "Total cost of sales" row
-    #: on the same page — the total row was retrieved, ranked 7th, and
-    #: never made the top-3 cutoff actually used).
+    #: Treat rows whose label begins with Total as consolidated totals rather than sub-
+    #: item or breakdown rows; apply total-row priority during retrieval to prevent
+    #: specific sub-item rows from outranking the true total on raw term overlap.
+    #: This is a ranking safeguard prior to any extraction-stage tie-breaking.
     _TOTAL_ROW_RE = re.compile(r'Line Item:\s*Total\b', re.IGNORECASE)
 
-    #: A table_row whose own linearized content contains a generic "ColN:"
-    #: placeholder (parser.py's own fallback whenever it couldn't resolve
-    #: a real year/period header for one of a row's value columns -- see
-    #: e.g. parser._inject_missing_year_header, _reconstruct_table_from_
-    #: word_positions) is a low-confidence extraction: the row's real
-    #: label may be right, but at least one of its numbers has an
-    #: unreliable or entirely wrong year attached to it. A CORRECTLY
-    #: parsed row never contains this literal text (a real year header
-    #: always reads "2022:"/"2021:" etc, never "Col4:"), so this only
-    #: ever demotes genuinely uncertain rows -- soft penalty, not
-    #: exclusion, since the row may still be the only evidence available
-    #: for its line item. Confirmed real case: MGM Resorts' "Consolidated
-    #: Statements of Stockholders' Equity" is a rollforward/waterfall
-    #: statement (one narrative block per year, not year-column pairs),
-    #: which the standard table parser mis-splits into "Col4"/"Col6"/
-    #: "Col8" placeholders -- its own confusing "(77,606)" value (really
-    #: 2020's dividend total) outranked the cash-flow-statement's cleanly
-    #: 2022-labeled "(4,048)" row for a FY2022 dividends question, and
-    #: even survived an explicit "trust the PoT sandbox result" prompt
-    #: instruction because the raw evidence looked more detailed/complete.
+    #: Rows containing a generic ColN: placeholder in their linearized content indicate
+    #: low-confidence extraction for one or more period/value columns; apply a soft
+    #: demotion since year alignment may be unreliable.
+    #: Do not exclude these rows outright — they can still be sole evidence for a line
+    #: item but should be treated cautiously.
     _LOW_CONFIDENCE_COLUMN_RE = re.compile(r'\bCol\d+:')
 
     _CAUSAL_LANGUAGE_RE = re.compile(
@@ -441,26 +261,11 @@ class HybridFinancialRetriever:
         re.IGNORECASE,
     )
 
-    #: A table_row's own Line Item label is often a far more reliable
-    #: signal for which financial statement it belongs to than the
-    #: page-level `section`/`statement_type` tag the parser assigned at
-    #: ingestion time — that tag is a coarse, page-range heuristic that
-    #: can mis-fire for a filing's own unusual layout (e.g. a "Financial
-    #: Highlights"/MD&A summary page placed right before the real
-    #: statements), silently excluding the correct row from the
-    #: statement_type_hint boost below while an unrelated page elsewhere
-    #: (mis-tagged with the matching label) still gets it purely by
-    #: document-level metadata. Confirmed real case: MGM Resorts' own
-    #: "Net revenues" row (the real consolidated FY2018-2020 total) was
-    #: tagged section="general_mda" instead of "income_statement", so an
-    #: "income_statement" hint gave it no boost at all — while a
-    #: completely unrelated revenue-RECOGNITION accounting-policy
-    #: footnote (prose explaining casino/hotel revenue recognition
-    #: rules, no dollar figures) was tagged section="income_statement"
-    #: and got the full 1.5x boost instead, burying the real total below
-    #: narrative noise and a segment note's own smaller "Reportable
-    #: segment net revenues" sub-total, which then won retrieval by
-    #: default with no real competition.
+    #: Table-row label is often a stronger indicator of its statement than a coarse page-
+    #: level section tag assigned at ingestion.
+    #: Rationale: page-level tags are page-range heuristics and can misclassify isolated
+    #: summary or policy pages, causing incorrect boosts.
+    #: Caveat: rely on row labels for statement hints; treat page-level tags as noisy.
     _CORE_STATEMENT_LINE_ITEMS: Dict[str, List[str]] = {
         "income_statement": [
             "revenue", "net revenue", "net sales", "total revenue",
@@ -492,40 +297,14 @@ class HybridFinancialRetriever:
 
     def __init__(self, corpus: List[Dict[str, Any]]):
         self.corpus = corpus
-        # BM25's length-normalization term needs THIS corpus's own average
-        # document length, not an arbitrary guess -- _bm25_score used to
-        # hardcode avgdl=50, which systematically penalizes every
-        # text_note passage here (this corpus's real text_note average is
-        # ~125 tokens, ~80 overall across text_note + table_row) as if it
-        # were 2-3x longer than "normal", silently burying long,
-        # information-dense narrative passages under short ones that only
-        # superficially match. Confirmed real case: Amcor's own "Note 5 -
-        # Acquisitions and Divestitures" passage (the ACTUAL list of the
-        # three FY2023 acquisitions the gold answer names) scored BELOW a
-        # much shorter, less informative passage that merely says "refer
-        # to Note 5" without any of the real content, purely because it's
-        # longer -- not because it's less relevant.
-        # Document-frequency table for BM25's IDF term -- without it, every
-        # matching token (a rare, meaningful word like "margin"/"jnj" OR an
-        # ultra-common stopword like "a"/"of"/"is"/"not"/"this", which
-        # appears in nearly every passage in the corpus) contributed
-        # EXACTLY the same score per occurrence. When a query's real
-        # content words don't literally appear in the one passage that
-        # actually answers it (common: a filing says "cost of products
-        # sold increased" where the question says "gross margin"), ranking
-        # degenerated into noise -- whichever unrelated candidate happened
-        # to also contain more incidental stopword substrings won, with no
-        # connection to topical relevance at all. Confirmed real case:
-        # Johnson & Johnson's FY2022 "what drove gross margin change"
-        # question -- the ONE passage containing the exact gold-answer
-        # bullet list ("driven by: One-time COVID-19 vaccine manufacturing
-        # exit related costs...") ranked #24, behind an unrelated page
-        # about an $0.8bn drug-compound acquisition, because neither
-        # passage shared any real content word with the query and the
-        # acquisition page merely contained a few more incidental stopword
-        # hits ("is", "not", "this"). Built in the same corpus pass as
-        # doc_lens (one tokenize() call per document, not two) since both
-        # need every document's own token list.
+        # BM25 length-normalization must use this corpus's actual average document
+        # length, not an arbitrary constant; otherwise long informative passages are
+        # unfairly penalized.
+        # Also compute document-frequency (IDF) from the corpus so rare topical terms
+        # score more than ubiquitous stopwords; both doc_lens and DF are built from a
+        # single tokenization pass per document.
+        # Caveat: keep tokenization/DF consistent across components to avoid ranking
+        # artifacts.
         doc_freq: Dict[str, int] = {}
         doc_lens: List[int] = []
         for d in corpus:
@@ -557,16 +336,13 @@ class HybridFinancialRetriever:
 
     def _tokenize(self, text: str) -> List[str]:
         text_lower = text.lower()
-        # Split Chinese chars individually; keep alphanumeric words and decimal numbers.
-        # Comma-grouped numbers (e.g. "7,772") MUST be matched as one token before the
-        # plain [a-z0-9]+ alternative, which stops at the comma \u2014 otherwise "7,772"
-        # becomes two tokens ("7","772") while an unrelated same-row value like "13"
-        # stays one token, artificially inflating doc_len (and thus penalising BM25
-        # score) for every row that happens to have 4-digit accounting figures.
-        # Confirmed real case: Corning's real "Cost of sales" row (7,772/7,468/6,829)
-        # scored BELOW an unrelated footnote row with tiny 2-digit values (13/11/13)
-        # purely because of this length-normalisation artifact, not any real relevance
-        # difference.
+        # Tokenize Chinese characters individually; keep alphanumeric words and decimal
+        # numbers as units.
+        # Ensure comma-grouped numbers (e.g. 7,772) are tokenized as one token before
+        # the plain alphanumeric rule, to avoid inflating document length and skewing
+        # BM25.
+        # Caveat: improper ordering creates length-normalization bias against rows with
+        # grouped numerals.
         tokens = re.findall(
             r'[\u4e00-\u9fff]'
             r'|\d{1,3}(?:,\d{3})+(?:\.\d+)?'
@@ -675,28 +451,10 @@ class HybridFinancialRetriever:
 
     @staticmethod
     def _normalise_company(name: str) -> str:
-        """Strip years, underscores/extensions, and 10-K/10-Q filing-type
-        boilerplate; lowercase.
-
-        Years and the "10K"/"10Q" filing-type suffix used to be stripped
-        with `\\b(?:20|19)\\d{2}\\b` applied BEFORE underscores were turned
-        into spaces. `\\b` requires a transition between a word char and a
-        non-word char, and `_` counts as a word char to regex -- so in a
-        real corpus company id like "BESTBUY_2017_10K" there is no `\\b`
-        on either side of "2017" (underscore before, underscore after),
-        and the year survived normalisation entirely, along with the "10k"
-        boilerplate. Confirmed real case: this let "BESTBUY_2017_10K" and
-        "COCACOLA_2017_10K" share the surviving "2017"/"10k" tokens, so
-        _company_match_score's word-overlap check scored them as a
-        PARTIAL MATCH (1.2x mild boost) instead of a mismatch (0.05x
-        penalty) -- silently turning the entity filter into a same-year
-        same-filing-type free-for-all and letting Coca-Cola's/Microsoft's
-        own "Net income" table rows outrank Best Buy's on raw BM25 alone
-        for a Best Buy net-profit-margin question. Fixed by tokenising
-        AFTER the underscore/hyphen-to-space conversion and dropping any
-        token that IS a bare year, a fused year+quarter ("2023q2"), or the
-        "10k"/"10q" boilerplate -- rather than trying to regex them out of
-        an underscore-joined string first.
+        """Normalize a raw company/doc id by lowercasing and removing year and filing-type
+        boilerplate after converting underscores/hyphens to spaces.
+        Tokenize first, then drop tokens that are bare years, fused year+quarter (e.g.
+        2023q2), or filing-type boilerplate (e.g. 10k/10q) to avoid false matches.
         """
         n = re.sub(r'\.(pdf|csv|txt|xlsx?|json)$', '', name, flags=re.IGNORECASE)
         n = re.sub(r'[_\-]+', ' ', n)
@@ -712,64 +470,25 @@ class HybridFinancialRetriever:
 
     @staticmethod
     def _extract_company_filing_year(name: str) -> Optional[str]:
-        """First bare 4-digit year (optionally with a Q1-4 suffix, e.g.
-        "2023q2") found in a raw company/doc id string, or None if it has
-        none. Used only to DEMOTE `_company_match_score`'s top tier when
-        two DIFFERENT fiscal years of the SAME company are both in the
-        corpus -- see that method's docstring for the confirmed real
-        case this fixes.
+        """Return the first bare 4-digit year (optionally with a Q1-4 suffix like 2023q2)
+        from a raw company/doc id, or None.
+        Used to detect and demote same-company candidates from different filing periods.
         """
         m = re.search(r'(?:19|20)\d{2}(?:q[1-4])?', name, flags=re.IGNORECASE)
         return m.group(0).lower() if m else None
 
     def _company_match_score(self, doc_company: str, entity: str) -> float:
-        """
-        Returns a multiplier based on how well doc_company matches entity.
-          2.0  → strong match  (boost)
-          1.0  → neutral
-          0.4  → same company, WRONG specific filing period (demotion)
-          0.05 → mismatch      (heavy penalty, not hard exclusion)
+        """Return a multiplier for how well a document's company metadata matches the
+        target entity:
+        2.0 → strong match (boost)
+        1.0 → neutral
+        0.4 → same company but wrong filing period (demotion)
+        0.05 → mismatch (heavy penalty)
 
-        Deliberately still a SOFT penalty, not a hard filter — several
-        confirmed fixes this session (Activision Blizzard's capex,
-        General Mills' CCC placeholders) depend on a right-company
-        PARTIAL/sub-item match being able to outrank a wrong-company
-        EXACT match, which requires the wrong-company candidate to still
-        be scoreable at all rather than excluded outright; the actual
-        correctness guarantee against a wrong-company row winning lives
-        in pot_reasoner.py's entity-identity-aware reduction, not here.
-        Lowered from 0.15 (still 3x stricter) purely to cut down how
-        often an obviously-wrong-company row is visible at all in the
-        Source Evidence panel for an already-correct answer — a cosmetic/
-        noise concern, verified via the full calc-question suite to
-        confirm no previously-correct answer actually depended on a
-        wrong-company candidate surviving at the old, looser penalty.
-
-        The 0.4 same-company-wrong-period tier applies uniformly across
-        EVERY match tier below (exact/substring/collapsed/word-overlap),
-        computed once up front via _extract_company_filing_year -- not
-        just the exact-match branch. Confirmed real regression this fixes
-        (2026-09-19): with 21 non-10-K filings added alongside the
-        original 63 10-Ks, several companies now have 3-5 same-year
-        filings of different types (10-K/10-Q/8-K/earnings release) in
-        the corpus. The OLD demotion (1.5, still a BOOST above the 1.0
-        neutral tier) was calibrated back when the only same-company
-        rivals were adjacent FISCAL YEARS of one 10-K series -- still
-        boosting a wrong-year 10-K over an unrelated company was
-        reasonable then. It's no longer safe now that a same-BASE-YEAR
-        but wrong-filing-type document (e.g. AMCOR_2023_10K, a much
-        longer, keyword-denser annual report) can and does raw-BM25-
-        outrank the actual intended AMCOR_2023Q2_10Q content even with
-        the entity correctly resolved -- three DIFFERENT wrong-period
-        Amcor filings (the 2023 10-K, the 2023Q4 earnings release, and
-        even the unrelated 2020 10-K) filled the top several ranks ahead
-        of the one correct-document hit for "Amcor restructuring charges
-        costs plan 2023", because 1.5-1.8x was still enough of a boost
-        for their sheer raw term density to win outright. 0.4 is a real
-        penalty (below the 1.0 neutral baseline), not just a smaller
-        boost, so a same-company-wrong-period candidate now has to lose
-        to ANY correctly-scoped or genuinely neutral candidate on raw
-        relevance alone rather than starting from a multiplier head start.
+        Keep this a soft penalty so partially-matching candidates remain scoreable; the
+        stricter demotion for wrong-period same-company docs prevents wrong-period
+        documents from unfairly outranking correct-period or neutral documents on raw
+        relevance.
         """
         if not entity or entity.lower() in ("company", "unknown", ""):
             return 1.0  # no filter if entity is generic
@@ -780,20 +499,12 @@ class HybridFinancialRetriever:
         if not norm_doc or not norm_ent:
             return 1.0
 
-        # _normalise_company deliberately STRIPS the fiscal year (see its
-        # own docstring — needed to fix Best Buy's word-boundary bug),
-        # which means none of the match tiers below can tell apart two
-        # DIFFERENT filing periods of the SAME company on their own —
-        # "MGMRESORTS_2022_10K" and "MGMRESORTS_2018_10K" (or
-        # "AMCOR_2023_10K" and "AMCOR_2023Q2_10Q") all normalise to the
-        # same base company string. Computed once, applied uniformly
-        # below as the 0.4 demotion tier whenever BOTH sides carry a
-        # detectable period that DIFFERS -- a real disambiguating signal
-        # this project's own doc-id convention (COMPANY_YEAR[Q#]_TYPE)
-        # always carries. Left unset (no demotion) whenever either side
-        # has no detectable period (a generic entity like "company", or a
-        # doc-id convention without one), since there's then no signal to
-        # disambiguate with at all.
+        # _normalise_company strips fiscal-period markers, so identical base company
+        # strings can represent different filing periods.
+        # Apply a demotion factor when both items have detectable but differing periods;
+        # leave unset if either side lacks a period signal.
+        # Caveat: period stripping prevents match tiers from distinguishing filing years
+        # unless an explicit period signal is present.
         doc_period = self._extract_company_filing_year(doc_company)
         ent_period = self._extract_company_filing_year(entity)
         period_mismatch = bool(doc_period and ent_period and doc_period != ent_period)
@@ -806,22 +517,12 @@ class HybridFinancialRetriever:
         if norm_ent in norm_doc or norm_doc in norm_ent:
             return 0.4 if period_mismatch else 1.8
 
-        # Collapsed (no-space) comparison: catches a human-readable name
-        # like "Best Buy"/"General Mills"/"Coca Cola" against this
-        # project's doc_name convention, which concatenates multi-word
-        # company names WITHOUT a space ("BESTBUY_2023_10K",
-        # "GENERALMILLS_2020_10K", "COCACOLA_2021_10K"). Neither the
-        # exact-match nor the word-overlap check below can ever catch
-        # this -- there's no word boundary inside "bestbuy" to compare
-        # against the separate word "best" -- so every candidate
-        # document, same-company or not, fell straight through to the
-        # 0.05 "different company" penalty, silently turning the entity
-        # filter into a no-op for any multi-word company whose doc_name
-        # strips the space. Confirmed real case: a "Best Buy" entity
-        # query got the SAME 0.05x penalty on Best Buy's OWN
-        # BESTBUY_2023_10K passages as on every other company's, so an
-        # unrelated company's page could freely outrank Best Buy's own
-        # actual answer on raw term overlap alone.
+        # Handle collapsed multiword company names (no-space doc_name convention)
+        # specially: exact-match and word-overlap checks miss internal word boundaries.
+        # Detect and treat collapsed forms so same-company documents do not receive a
+        # generic different-company penalty.
+        # Caveat: without this, multiword companies may be incorrectly penalized,
+        # weakening the entity filter.
         collapsed_doc = norm_doc.replace(' ', '')
         collapsed_ent = norm_ent.replace(' ', '')
         if collapsed_ent and (collapsed_ent in collapsed_doc or collapsed_doc in collapsed_ent):
@@ -859,64 +560,24 @@ class HybridFinancialRetriever:
         is_segment_comparison: bool = False,
         query_years: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Search the corpus with BM25 + overlap scoring.
+        """Search the corpus with BM25 plus overlap scoring.
 
         Args:
-            query              : user query
-            top_k              : max results to return
-            exclude_ids        : passage IDs to skip (already retrieved)
-            entity             : company filter (soft, via _company_match_score)
-            section            : legacy Step-3 section label (0.05x penalty on mismatch)
-            statement_type_hint: Step-4 report type hint — income_statement | balance_sheet |
-                                 cash_flow | notes | unknown.  Matching docs get a 1.5x boost;
-                                 non-matching docs are unaffected (no penalty).
-            prefer_narrative   : True for genuinely qualitative/narrative questions with
-                                 no matching formula and no recognized financial-metric
-                                 keyword (legal proceedings, dividend disclosures,
-                                 business-combination lists, geographies, customers,
-                                 industry/product overviews — see
-                                 question_classifier._detect_narrative_topic_query).
-                                 Defaults to False and is only ever passed True from
-                                 orchestrator.py's non-numeric, no-formula retrieval
-                                 branch, so every numeric/formula-driven retrieval call
-                                 (everything the calc-question suite depends on) is
-                                 bit-for-bit unaffected by the two behaviors below.
-                                 Confirmed real case (Boeing FY2022 legal-proceedings
-                                 question): with this off, the one passage actually
-                                 describing the Lion Air/Ethiopian Airlines litigation
-                                 ranked ~100th out of 200 candidates — table ROWS
-                                 (a handful of tokens each) get a much friendlier BM25
-                                 length-normalization than a full prose paragraph, and
-                                 the unconditional "Total row" boost below adds a 1.3x
-                                 bonus to any "Total X" balance-sheet row regardless of
-                                 whether the query has anything to do with financial
-                                 totals at all — both systematically bury narrative
-                                 content under unrelated financial tables.
-            is_attribution      : True when the ORIGINAL user question (not
-                                 necessarily THIS specific sub-query's own
-                                 text) asks what drove/caused a change --
-                                 see is_attribution_query's module-level
-                                 docstring for why the caller must pass
-                                 this explicitly rather than relying on
-                                 this call's own `query` text alone.
-            is_geography        : True when the ORIGINAL user question asks
-                                 what geographies/regions a company
-                                 operates in -- see is_geography_query's
-                                 module-level docstring.
-            query_years         : years the classifier extracted from the
-                                 ORIGINAL question (classification["years"]),
-                                 used to disambiguate between multiple
-                                 fiscal years of the SAME company's filings
-                                 when `entity` itself is a bare, year-less
-                                 company name (e.g. "PepsiCo", from
-                                 question_classifier's hardcoded fast-path
-                                 lookup) -- _company_match_score's own
-                                 same-company-different-year demotion only
-                                 fires when BOTH sides carry a detectable
-                                 year, so it's a no-op here. See the
-                                 "Preferred-year boost" below for the
-                                 confirmed real case this fixes.
+            query: user query
+            top_k: max results to return
+            exclude_ids: passage IDs to skip
+            entity: company filter (soft via _company_match_score)
+            section: legacy section label (mismatch gives a small penalty)
+            statement_type_hint: hint for statement type (income_statement | balance_sheet | cash_flow | notes | unknown); matching docs get a boost
+            prefer_narrative: True for qualitative/narrative questions (defaults False); when True, apply behaviors that favor paragraph narrative over short table rows
+            is_attribution: True when the original question asks what caused a change; caller must set this explicitly
+            is_geography: True when the original question asks about geographies/regions
+            query_years: years extracted from the original question; used to disambiguate among multiple filings for the same company
+
+        Behavior notes:
+            Matching statement types receive a positive boost; non-matching documents are not penalized.
+            prefer_narrative changes ranking to avoid short table rows systematically outranking prose for narrative questions.
+            query_years help prefer documents covering the requested period when entity names lack year information.
         """
         exclude_ids = set(exclude_ids or [])
         query_tokens = self._tokenize(query)
@@ -942,15 +603,11 @@ class HybridFinancialRetriever:
         # query text IS the signal (see _INVENTORY_COMPOSITION_QUERY_RE's
         # docstring), always auto-detected.
         inventory_composition_active = bool(_INVENTORY_COMPOSITION_QUERY_RE.search(query))
-        # The LATEST year mentioned, not just any of them -- matches this
-        # project's established convention of sourcing a multi-year
-        # question from that single filing's own comparative columns
-        # (e.g. Boeing's gross-margin-trend question is answered entirely
-        # from BOEING_2022_10K alone, never a separate BOEING_2021_10K),
-        # so when a question spans several years, only the most recent
-        # filing gets the boost -- not every year mentioned, which would
-        # boost multiple competing fiscal years equally and never actually
-        # break the tie it exists to break.
+        # When questions span multiple years, boost only the latest year mentioned per
+        # the project's convention of sourcing multi-year queries from one filing.
+        # Rationale: boosting every year mentioned would amplify competing periods
+        # equally and fail to disambiguate.
+        # Caveat: use the latest-year signal to break ties between filings.
         preferred_filing_year = max(query_years) if query_years else None
 
         scored_results = []
@@ -988,11 +645,11 @@ class HybridFinancialRetriever:
             # it applies to ANY "Total ..." row regardless of topic) for a
             # question that isn't about a financial total at all.
             if not prefer_narrative and self._TOTAL_ROW_RE.search(content):
-                # ... but only when the total row is ABOUT something the query
-                # names: a bare "Total ..." row (Total equity, Total reportable
-                # segments, Total net lease cost) used to outrank the question's
-                # own "Total debt" row after the corpus gained rows (Verizon debt
-                # change came out -2,749 instead of -229)
+                # Handle cases where a generic "Total ..." table row in a document can
+                # outrank a query-specific total row after more rows are added to the
+                # corpus.
+                # This prevents unrelated total rows from being selected when the query
+                # expects a specific total row.
                 _lab = re.search(r'Line Item:\s*([^|]+)', content)
                 _lab_stems = {
                     t[:5] for t in self._tokenize(_lab.group(1)) if len(t) > 2
@@ -1014,11 +671,10 @@ class HybridFinancialRetriever:
             if prefer_narrative and doc.get("type") == "text_note":
                 multiplier *= 1.5
 
-            # ── Causal-language boost (attribution questions only) ────────────
-            # Only ever active alongside prefer_narrative, so this is
-            # bit-for-bit unreachable from any numeric/formula-driven call
-            # too — see _ATTRIBUTION_QUERY_RE's docstring for the confirmed
-            # AMD real case this fixes.
+            # Apply a causal-language relevance boost only for attribution-style
+            # questions and only when narrative-preference is enabled.
+            # This boost is never used for purely numeric or formula-driven retrieval
+            # paths.
             if prefer_narrative and attribution_active and self._CAUSAL_LANGUAGE_RE.search(content):
                 multiplier *= 1.4
 
@@ -1030,101 +686,55 @@ class HybridFinancialRetriever:
             # "Geographic Operations" table otherwise).
             if prefer_narrative and geography_active and _GEOGRAPHIC_SECTION_RE.search(content):
                 multiplier *= 1.4
-            # ── Dense region-name boost (geography questions only) ─────────────
-            # Catches the case above's own literal-heading requirement can't:
-            # a passage enumerating a company's own operating geographies
-            # without ever using the word "geographic" at all -- see
-            # _has_dense_geographic_region_names's docstring for the
-            # confirmed PepsiCo real case.
-            #
-            # Scales with how many DISTINCT regions were found rather than
-            # a flat 1.4x for any match at or above the 3-region floor --
-            # a passage naming 8 distinct regions is unambiguously THE
-            # geography enumeration itself, while one naming exactly 3 is
-            # only borderline evidence of that (e.g. an MD&A passage that
-            # merely mentions three regions' results in passing). A flat
-            # boost couldn't tell the two apart; scaling can. Confirmed
-            # real case: PepsiCo's own Item 1 Business segment
-            # description (8 distinct regions) still ranked ~49th behind
-            # several completely unrelated MD&A/balance-sheet pages under
-            # a flat 1.4x, because those pages' higher raw BM25 term
-            # overlap with the query ("revenue", "2022") outweighed the
-            # fixed boost -- capped well below the legal-section boost's
-            # own ceiling so this can never out-rank a literal section-
-            # heading match above it.
+            # Boost passages that enumerate distinct geographic regions when the passage
+            # does not use explicit geography headings.
+            # Scale the boost by the number of distinct regions found so stronger multi-
+            # region lists receive higher weight than borderline lists.
             elif prefer_narrative and geography_active and _has_dense_geographic_region_names(content):
                 region_count = _geographic_region_name_count(content)
                 multiplier *= min(1.4 + 0.3 * (region_count - 3), 2.9)
 
-            # ── Legal-proceedings-section boost (legal questions only) ──────────
-            # See _LEGAL_PROCEEDINGS_SECTION_RE's docstring for the
-            # confirmed PepsiCo real case -- a stronger, more targeted
-            # boost than the geography one above (1.8x, not 1.4x) since
-            # the section heading itself is SEC-mandated and identical
-            # across every filer, a much more reliable signal than any
-            # bag-of-words topic query alone.
+            # Apply a stronger boost for passages that appear under legal-proceedings
+            # section headings, since those headings are standardized and reliable
+            # signals.
+            # Use this boost for legal questions to prefer section-heading matches over
+            # bag-of-words topic matches.
             if prefer_narrative and legal_active and _LEGAL_PROCEEDINGS_SECTION_RE.search(content):
                 multiplier *= 1.5
 
-            # ── Segment-results-section boost (segment-comparison questions only) ──
-            # Applies regardless of prefer_narrative -- this question shape
-            # stays NUMERIC (see _SEGMENT_COMPARISON_QUERY_RE's docstring).
-            # See _SEGMENT_RESULTS_SECTION_RE's docstring for the confirmed
-            # JPMorgan real case: the one page holding every segment side
-            # by side needs a strong boost to overcome four separate
-            # single-segment MD&A pages that each individually outscore it.
+            # Boost documents that contain side-by-side segment results for segment-
+            # comparison questions; this applies even when narrative preference is off.
+            # This ensures multi-segment summary pages rank above multiple single-
+            # segment pages that individually have high overlap.
             if segment_comparison_active and _SEGMENT_RESULTS_SECTION_RE.search(content):
                 multiplier *= 2.0
 
-            # ── Inventory-composition-label boost (inventory_turnover formula
-            #    retrieval only) ─────────────────────────────────────────────
-            # Applies regardless of prefer_narrative -- stays NUMERIC. See
-            # _INVENTORY_COMPOSITION_QUERY_RE's docstring for the confirmed
-            # JnJ real case: plain query widening alone left the composition
-            # row outside the top-10, losing to the short, generic "Total
-            # inventories" row (itself already boosted by the total-row rule
-            # above) even with the composition terms added to the query text.
+            # Boost label matches that indicate inventory composition when retrieving
+            # inputs for inventory-turnover formulas; applies in numeric retrieval mode.
+            # This helps surface the composition row over shorter, generic inventory
+            # total rows that would otherwise rank higher.
             if inventory_composition_active and _INVENTORY_COMPOSITION_LABEL_RE.search(content):
                 multiplier *= 3.0
 
-            # ── Preferred-year boost (bare, year-less entity only) ──────────────
-            # Applies regardless of prefer_narrative. entity is frequently a
-            # bare human-readable company name with no fiscal year at all
-            # (question_classifier's hardcoded "pepsico" -> "PepsiCo"
-            # fast-path lookup, not "PEPSICO_2022_10K"), so
-            # _company_match_score's own same-company-different-year
-            # demotion never fires (it requires a detectable year on BOTH
-            # sides) -- two fiscal years of the same company's filings tie
-            # at the same top entity-match tier, competing for the same
-            # top-k slots on nothing but raw content similarity, which is
-            # often nearly identical boilerplate year over year. This
-            # breaks that tie using the year(s) the classifier already
-            # extracted from the question itself. Confirmed real case:
-            # "Has Pepsico reported any materially important ongoing legal
-            # battles from FY2022 and FY2021?" needed PEPSICO_2022_10K's
-            # own Item 3 Legal Proceedings page, but PEPSICO_2021_10K's
-            # near-identical boilerplate page narrowly outscored it under
-            # a bare "PepsiCo" entity match with top_k=5, pushing the
-            # right filing's own page out of the retrieved evidence
-            # entirely.
+            # Preferred-year boost for bare entity matches.
+            # When a query names an entity without a year, boost documents whose year
+            # matches the year(s) extracted from the query to break ties among same-
+            # entity filings with similar boilerplate.
             if preferred_filing_year and not self._extract_company_filing_year(entity or ""):
                 doc_filing_year = self._extract_company_filing_year(doc.get("company", ""))
                 if doc_filing_year == preferred_filing_year:
                     multiplier *= 1.3
 
-            # ── Low-confidence column penalty ─────────────────────────────────
-            # Applies regardless of prefer_narrative -- a mis-parsed year
-            # header is exactly as misleading for a NUMERIC lookup (the
-            # confirmed MGM dividends real case is answer_mode=NUMERIC) as
-            # for a narrative one. See _LOW_CONFIDENCE_COLUMN_RE's docstring.
+            # Low-confidence column penalty applies to numeric and narrative lookups.
+            # A mis-parsed year header can mislead any lookup mode; see the column-
+            # confidence pattern's docstring for details.
             if self._LOW_CONFIDENCE_COLUMN_RE.search(content):
                 multiplier *= 0.5
 
-            # ── Unrequested "restricted" qualifier ────────────────────────────
-            # "Cash and cash equivalents" must not be answered from the
-            # "Total cash, cash equivalents and restricted cash" row (the total
-            # row also got the Total boost above: Best Buy's cash-drop question
-            # ranked 2,253 -> 1,491 (-33.8%) first, the plain row is -41.7%).
+            # Avoid answering "X and equivalents" from a combined "Total X, X
+            # equivalents and restricted X" row.
+            # This prevents returning an aggregated total when the question requests the
+            # plain row.
             if (
                 doc.get("type") == "table_row"
                 and re.search(r'Line Item:[^|]*\brestricted\b', content, re.IGNORECASE)

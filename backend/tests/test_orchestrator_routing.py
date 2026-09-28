@@ -31,6 +31,6 @@ def test_separation_cost_question_routes_to_most_recent_filing():
     orch = FinAgentRAGOrchestrator.__new__(FinAgentRAGOrchestrator)
     orch.vector_store = _FakeVS()
     resolved = orch._match_entity_to_corpus(
-        "Pfizer", "How much does Pfizer expect to pay to spin off Upjohn in the future in USD million?"
+        "Pfizer", "How much more will Acme expect to spend on separating its unit, in USD million?"
     )
     assert resolved == "Pfizer_2023Q2_10Q"

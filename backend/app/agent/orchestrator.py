@@ -1,20 +1,19 @@
-"""
-FinAgent-RAG Orchestrator
+"""FinAgent-RAG Orchestrator
 
-核心流程：
-  1. FinanceBench 問題分類（question_classifier）
-  2. 多步拆解（decomposer）
-  3. Hybrid RAG 檢索（vector_store + hybrid_retriever）
-  4. PoT 推理（pot_reasoner + sandbox）
-  5. 三重自我驗證（verifier） + 迭代精練（refiner）
-  6. LLM 回答綜合（llm_client）
+Main flow:
+  1. question classification
+  2. multi-step decomposition
+  3. hybrid retrieval (vector + sparse)
+  4. chain-of-thought style reasoning in a sandbox
+  5. verification passes and iterative refinement
+  6. final answer synthesis via LLM client
 """
 
 import re
 from typing import Dict, Any, List, Optional
 
 from app.rag.vector_store import FinancialVectorStoreManager
-from app.agent.question_classifier import FinanceBenchClassifier, _detect_narrative_topic_query
+from app.agent.question_classifier import FinanceBenchClassifier
 from app.agent.decomposer import QueryDecomposer
 from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical
 from app.agent.verifier import TriCheckSelfVerifier
@@ -55,54 +54,20 @@ def _strip_trailing_bare_number(answer: str) -> str:
 
 
 class FinAgentRAGOrchestrator:
-    # Chunks per sub-question. Raised from 3 back toward the original 5:
-    # a bare alias like "net income" can legitimately match several
-    # differently-scoped rows on the SAME income statement ("Net income
-    # from continuing operations", "Consolidated net income", "Net income
-    # attributable to shareowners of ..."), and the one GAAP convention
-    # actually wants can rank #4-#5 for a generic query even though it's
-    # sitting cleanly in a real evidence chunk — confirmed real case:
-    # Coca-Cola FY2017 net income for ROA, where top_k=3 never retrieved
-    # any of the pages carrying the correctly-labeled "attributable to
-    # shareowners" row at all, leaving only mis-scoped rows to choose
-    # from no matter how good the downstream tie-break logic is.
+    # Chunks per sub-question raised from 3 toward 5.
+    # A short alias like "net income" can match multiple differently scoped rows on the
+    # same statement, so a larger per-subquestion chunk count helps ensure the correctly
+    # scoped row appears among candidates.
     RETRIEVAL_TOP_K = 5
-    # A wider top_k used ONLY for the non-numeric/narrative retrieval path
-    # (prefer_narrative=True) below -- a genuinely qualitative question
-    # ("who are Boeing's primary customers", "what drove JnJ's gross
-    # margin change", "is 3M capital-intensive") only ever issues 1-2
-    # search queries total (a topic query plus the bare question text),
-    # nowhere near CONTEXT_CHUNK_LIMIT's headroom, so
-    # there's no accumulation-cap risk in widening just this path the way
-    # there would be for a composite NUMERIC formula's 8-placeholder fan-
-    # out. Confirmed real, repeated pattern across three separate
-    # questions: the genuinely correct passage consistently ranked
-    # #8-#24 -- comfortably inside a wider window, but always just
-    # outside the narrower RETRIEVAL_TOP_K=5 this shared constant used to
-    # apply everywhere -- while a topically-adjacent but wrong passage
-    # (a same-company statistic about a DIFFERENT metric, an unrelated
-    # accounting-policy note, a different business segment's own
-    # sub-table) narrowly won the 5 available slots instead. Confirmed
-    # cases: Boeing's "primary customers" question retrieved a real
-    # "non-U.S. customers = 41% of revenue" sentence (rank ~1, a true
-    # statistic about a DIFFERENT metric) while the actual gold-relevant
-    # "U.S. government = 40% of revenue" sentence (rank ~8-9) never made
-    # the cut; Johnson & Johnson's "what drove gross margin change"
-    # question needed a passage with zero direct "gross margin" wording
-    # at all (rank ~2-24 depending on phrasing) that always lost to
-    # shorter, more topically-generic prose.
+    # Use a wider top_k only for narrative/non-numeric retrieval paths.
+    # Qualitative questions often require passages ranked lower by topical signals, so
+    # expand retrieval window for narrative queries to avoid missing the correct
+    # passage.
     RETRIEVAL_TOP_K_NARRATIVE = 15
-    # Cap applied right before evidence reaches PoT/the
-    # LLM (sorted by relevance_score, top N kept) — raising
-    # A tight window here can truncate a lower-but-still-correct-scoring row
-    # out of the final window even though it was retrieved.
-    # Confirmed real case: General Mills' own real "Net earnings
-    # attributable to General Mills" row (score ~43) ranked #3 for its
-    # own retrieval query — comfortably inside the retrieved set —
-    # but still got squeezed out of the final CONTEXT_CHUNK_LIMIT=8 window
-    # by higher-scoring prose chunks from OTHER sub-queries in the same
-    # evidence_buffer, leaving retention_ratio's net_income_attributable
-    # placeholder unresolved and falling back to an ungrounded guess.
+    # Cap applied just before evidence is passed to the model (keep top N by
+    # relevance_score).
+    # A too-tight final window can drop a lower-scoring but correct chunk that was
+    # retrieved earlier, so ensure final limit preserves diversity across subqueries.
     CONTEXT_CHUNK_LIMIT = 30
 
     def __init__(self, vector_store: FinancialVectorStoreManager):
@@ -115,25 +80,10 @@ class FinAgentRAGOrchestrator:
         self.llm_generator = LLMAnswerGenerator()
 
     def _top_evidence(self, evidence_buffer: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        The CONTEXT_CHUNK_LIMIT-item slice of evidence_buffer that actually
-        reaches verification/answer synthesis -- sorted by relevance_score
-        (highest first) and THEN capped, never a plain `[-N:]` insertion-
-        order slice. evidence_buffer accumulates hits from every retrieval
-        sub-query in the order those sub-queries happened to run, not in
-        score order -- a plain `[-CONTEXT_CHUNK_LIMIT:]` slice keeps
-        whichever sub-queries ran LAST, silently dropping a genuinely
-        top-scoring item from an EARLIER sub-query the instant later
-        sub-queries together contribute CONTEXT_CHUNK_LIMIT-or-more items
-        of their own -- regardless of how low those later items scored.
-        Confirmed real case: Amcor's "what are major acquisitions" question
-        (HYBRID strategy, 3 sub-queries) retrieved its own "Note 5 -
-        Acquisitions and Divestitures" note as the #1-scoring passage
-        overall (from the FIRST sub-query), but the 2nd and 3rd sub-queries
-        together still contributed CONTEXT_CHUNK_LIMIT-or-more MORE items
-        afterward, so the plain insertion-order slice dropped it entirely
-        -- the model then denied the note was ever supplied, when it had
-        simply never been shown it despite retrieval finding it perfectly.
+        """Select the top-scoring CONTEXT_CHUNK_LIMIT items after sorting by relevance,
+        not a plain insertion-order slice. evidence_buffer accumulates hits in
+        sub-query execution order, so a tail slice can drop earlier high-score items;
+        always sort and then cap to avoid silently losing top evidence.
         """
         # Each sub-query keeps its own top passages (scores of different
         # queries are not comparable); the rest is filled by raw score --
@@ -226,7 +176,7 @@ class FinAgentRAGOrchestrator:
         evidence_meta: List[Dict[str, Any]] = []    # per-item sub_question metadata
         retrieved_ids = set()
 
-        # ── Step 1: FinanceBench Classification ──
+        # Step 1: classification of financial question type.
         classification = self.classifier.classify(query)
         answer_mode = classification["answer_mode"]
         complexity = classification["complexity"]
@@ -238,30 +188,16 @@ class FinAgentRAGOrchestrator:
         # branch further down).
         is_segment_comparison = is_segment_comparison_query(query)
 
-        # Entity alignment: match entity against actual corpus company names.
-        # The classifier's OWN clean entity ("General Mills") is kept
-        # separately as `clean_entity` for embedding in retrieval QUERY
-        # TEXT — production's raw filename-stem company field (e.g.
-        # "GENERALMILLS_2022_10K") is what classification["entity"] becomes
-        # below, and that's the right form for the entity= soft-filter
-        # parameter passed to search() (_company_match_score compares it
-        # against doc_company), but a poor form to paste into the query
-        # string itself: many FinanceBench filenames glue multi-word
-        # company names together with no separator ("GENERALMILLS",
-        # "BESTBUY", "KRAFTHEINZ", "AMERICANWATERWORKS"...), so the
-        # tokenizer produces one fused token that can never match the two
-        # separate words ("general", "mills") the filing's own text
-        # actually uses — silently losing all of that token's BM25
-        # contribution. Confirmed real case: General Mills' FY2022
-        # "Net earnings attributable to General Mills" row scored far
-        # lower against a query built from "GENERALMILLS_2022_10K" than
-        # the identical query built from "General Mills", pushing an
-        # unrelated row into the retrieval results the formula extraction
-        # then had to guess from.
+        # Entity alignment: match extracted entity against corpus company names.
+        # Keep a cleaned human-readable entity for query text and use the raw filename-
+        # stem form only for the corpus filter; fused filename tokens can lose retrieval
+        # signal if used directly in the query.
         clean_entity = classification["entity"]
         classification["entity"] = _entity_override or self._match_entity_to_corpus(
             classification["entity"], query
         )
+        if not _entity_override:
+            clean_entity = self._readable_company_name(classification["entity"], query) or clean_entity
 
         # statement_type_hint: from question_classifier (income_statement / balance_sheet /
         # cash_flow / notes).  Used for 1.5x boost in hybrid_retriever.
@@ -298,20 +234,10 @@ class FinAgentRAGOrchestrator:
         # formula's own aliases guarantees retrieval searches for
         # exactly what extraction will later look for, deterministically.
         formula_entry = detect_formula(query) if answer_mode == "NUMERIC" else None
-        # A question asking whether a metric is "improving"/"declining" as
-        # of year Y implies a comparison against year Y-1, even when the
-        # classifier's own year extraction names only Y -- without this,
-        # RETRIEVAL never fetches the prior year at all, so by the time
-        # pot_reasoner.py's own _with_implied_trend_year (used at
-        # CALCULATION time) tries to compare two years, there is no prior-
-        # year evidence in the buffer to find, and the formula silently
-        # falls back to "0.0 -- not a useful metric" instead of the real
-        # trend answer. Confirmed real case: "Does Boeing have an
-        # improving gross margin profile as of FY2022?" -- classification
-        # extracted only ["2022"], retrieval fetched gross_profit(2022)
-        # alone, and the answer came back 0.0 even though Boeing's real
-        # FY2021->FY2022 gross margin trend (4.8% -> 5.3%) is a clean,
-        # directly answerable "Yes".
+        # If a question asks whether a metric is improving/declining as of year Y, treat
+        # it as implying a comparison to year Y-1.
+        # Without this implied prior-year fetch, retrieval may lack the earlier-year
+        # evidence needed for trend calculations, causing fallback answers.
         retrieval_years = _with_implied_trend_year(classification["years"], query.lower())
         query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
         if formula_entry:
@@ -330,34 +256,35 @@ class FinAgentRAGOrchestrator:
                 query, answer_mode, classification.get("target_metrics")
             )
 
-        # Both NUMERIC sub-question builders above (formula-guided and
-        # LLM-decomposed) search purely on the target line item's OWN
-        # alias vocabulary (e.g. "dividends paid to common shareholders"),
-        # which reliably finds the STRUCTURED statement row (a dollar
-        # total) but never a filing's plain-English narrative sentence
-        # stating the same fact in different words (e.g. Item 5's "we
-        # maintained an annual dividend of $0.01 per share throughout
-        # 2022") -- a prose detail FinanceBench gold answers often want
-        # alongside the total, that alias-matching alone will never
-        # surface within RETRIEVAL_TOP_K. Reuses the same narrative-topic
-        # vocabulary bridge the non-numeric path already relies on
-        # (_detect_narrative_topic_query) as one extra retrieval step --
-        # additive only, appended after whichever NUMERIC path already
-        # ran, never replacing its steps. A no-op for the non-numeric
-        # `else` branch above, which already gets topic-aware queries via
-        # classification["retrieval_queries"]. Confirmed real case: "Has
-        # MGM Resorts paid dividends to common shareholders in FY2022?"
-        # retrieved the correct $4,048K cash-flow total but never the
-        # $0.01/share sentence, because "dividends paid to common
-        # shareholders" has almost no vocabulary overlap with "annual
-        # dividend...per share".
-        if answer_mode == "NUMERIC":
-            topic_query = _detect_narrative_topic_query(query.lower())
-            if topic_query:
+        # Both NUMERIC sub-question builders above search only on the target line
+        # item's own alias vocabulary, which finds the structured statement row
+        # but not a filing's plain-English sentence stating the same fact in
+        # different words. For direct-amount/lookup questions (calc_type empty)
+        # one extra, additive query built by the LLM suggester covers that
+        # prose. Skipped for computed-ratio questions (calc_type set): their
+        # alias-matched multi-row retrieval already targets the exact line items,
+        # and an extra generic query there displaced correct evidence rows.
+        # LLM-decomposed sub-queries vary run to run and can drop the user's own
+        # key terms; the original question is always kept as one extra query so
+        # retrieval never depends on the decomposition alone (standard
+        # multi-query practice; the non-numeric path already does the same).
+        if answer_mode == "NUMERIC" and not formula_entry:
+            sub_questions.append({
+                "step": len(sub_questions) + 1,
+                "type": "retrieval",
+                "query": query,
+                "target_metric": "",
+                "target_year": "",
+                "source": "original_question",
+            })
+
+        if answer_mode == "NUMERIC" and not classification.get("calc_type"):
+            topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
+            if topic_terms:
                 sub_questions.append({
                     "step": len(sub_questions) + 1,
                     "type": "retrieval",
-                    "query": f"{query_entity} {topic_query}".strip(),
+                    "query": f"{query_entity} {topic_terms}".strip(),
                     "target_metric": "",
                     "target_year": "",
                     "source": "narrative_topic",
@@ -408,24 +335,11 @@ class FinAgentRAGOrchestrator:
                         target_metric = sub_q.get("target_metric")
                         target_year   = sub_q.get("target_year")
 
-                        # ── Check if this (metric, year) is already in the buffer ──
-                        # Restricted to table_row evidence: only a structured
-                        # "Line Item: X | year: value" row's bare co-occurrence
-                        # of the metric name and year genuinely means a usable
-                        # value was already captured. A text_note chunk merely
-                        # CONTAINING both words somewhere is no such guarantee
-                        # -- prose routinely mentions a year and a metric name
-                        # in unrelated sentences, and this got dramatically
-                        # more likely once chunk_size grew from 800 to 3000
-                        # chars (a single chunk covers much more of a page's
-                        # MD&A prose). Confirmed real case: Activision
-                        # Blizzard's capex query at 3000-char chunks pulled in
-                        # a text_note chunk that happened to also say "2017"
-                        # and "revenue" incidentally, so ALL THREE of the
-                        # question's own separate revenue(2017/2018/2019)
-                        # sub-queries got silently skipped as "already
-                        # retrieved" -- no revenue evidence was ever actually
-                        # fetched, and the calculation fell back to 0.0.
+                        # Check if this (metric, year) pair is already in the buffer.
+                        # Only structured table_row evidence (a Line Item | year: value
+                        # row) counts;
+                        # prose chunks that merely contain both words are not reliable
+                        # indicators.
                         def _already_has(metric: str, year: str) -> bool:
                             if not metric or not year:
                                 return False
@@ -486,24 +400,10 @@ class FinAgentRAGOrchestrator:
                         sub_hint = self.classifier._infer_statement_type_hint(sub_metrics)
                         effective_hint = sub_hint if sub_hint != "unknown" else statement_type_hint
 
-                        # A narrative_topic-sourced sub-question (see
-                        # _detect_narrative_topic_query) targets a PROSE/
-                        # narrative topic bridge, not a structured line
-                        # item -- the alias-matched NUMERIC sub-queries
-                        # around it already cover the structured value.
-                        # The narrower RETRIEVAL_TOP_K=5 used for every
-                        # OTHER sub-question here is tuned for a specific,
-                        # well-aliased line item that reliably ranks near
-                        # the top; a bridge query's TARGET is often a
-                        # terse, generic-labeled row (e.g. a filer's own
-                        # "Results of Operations" table literally printing
-                        # just "Total | 2022: 1.3%") with very little
-                        # distinctive vocabulary for BM25 to rank highly on
-                        # -- confirmed real case: JnJ's own stated revenue
-                        # %-change row ranked outside the top 8 for both
-                        # this bridge query AND the plain "Total revenue
-                        # 2022" query, so top_k=5 missed it entirely even
-                        # though a wider net would have caught it.
+                        # Narrative-topic sub-questions target prose topics, not
+                        # structured line items.
+                        # Use a wider retrieval top_k for terse, generically labeled
+                        # table rows to avoid missing them.
                         step_top_k = (
                             self.RETRIEVAL_TOP_K_NARRATIVE
                             if sub_q.get("source") == "narrative_topic"
@@ -638,20 +538,10 @@ class FinAgentRAGOrchestrator:
                 "verification": {}
             }
 
-            # If the target metric happens to match a registered formula
-            # (e.g. "working_capital" = current_assets - current_liabilities),
-            # search for its OWN required_vars instead of the classifier's
-            # generic retrieval_queries — those are often just the raw
-            # question text plus a fixed boilerplate suffix ("operating
-            # margin cost structure segment" for every EXPLANATION
-            # question), which can score near zero against a filing that
-            # never literally prints the derived metric's own name.
-            # Confirmed real case: "Does American Water Works have
-            # positive working capital..." searched for "Working Capital"
-            # itself, which appears nowhere as a real line item, and
-            # retrieved unrelated debt-exhibit boilerplate instead of
-            # "Total current assets"/"Total current liabilities" (both of
-            # which retrieve cleanly on their own).
+            # If a metric matches a registered formula, search for that formula's
+            # required variables.
+            # The raw question text often omits the derived metric's component line-item
+            # names.
             non_numeric_formula = detect_formula(query)
             # Evaluated against the ORIGINAL question, not each individual
             # sub-query below (a keyword-stuffed sub-query like "AMD
@@ -665,71 +555,37 @@ class FinAgentRAGOrchestrator:
                     step["query"] for step in
                     self._build_formula_subquestions(non_numeric_formula, formula_query_entity, classification["years"])
                 ]
-                # _build_formula_subquestions() only ever emits ONE query
-                # PER PLACEHOLDER (e.g. "3M op income 2022", "3M revenue
-                # 2022") -- unlike classification["retrieval_queries"]
-                # below (which always appends the bare question text as a
-                # fallback), it has no equivalent, so a "what DROVE X
-                # change" attribution question whose metric X happens to
-                # match a registered ratio formula NEVER actually searches
-                # for the causal narrative itself -- only the bare numbers
-                # that go into computing X. Confirmed real case: 3M's own
-                # "what drove operating margin change" question matched
-                # the operating_margin formula and only ever searched "3M
-                # op income 2022"/"3M revenue 2022", never surfacing the
-                # MD&A page naming the real drivers (Combat Arms Earplugs
-                # litigation, PFAS manufacturing exit costs) at all.
+                # _build_formula_subquestions() emits one query per placeholder only.
+                # Attribution questions for a formula-derived metric must also search
+                # for causal narrative, not just the numeric inputs.
                 if is_attribution:
                     search_queries.append(query)
             else:
                 search_queries = classification["retrieval_queries"]
-            # No registered formula matched at all — this is reached ONLY
-            # by genuinely qualitative/narrative questions (every formula-
-            # backed non-numeric question, e.g. working_capital/inventory_
-            # turnover/effective_tax_rate, took the `if` branch above
-            # instead), so it's safe to bias ranking toward prose content
-            # here without touching anything a numeric/formula answer
-            # depends on — see hybrid_retriever.search()'s prefer_narrative
-            # docstring for the confirmed real case this fixes. Also
-            # widened to attribution questions even when a formula DID
-            # match, for the same reason the bare query got appended just
-            # above -- the narrative-content and causal-language boosts
-            # (see hybrid_retriever.search()'s own prefer_narrative/
-            # attribution_active handling) only ever activate together
-            # under prefer_narrative=True, so without this the bare query
-            # just appended would compete on equal footing with dense
-            # table rows and rarely win anyway.
-            # "What was the LARGEST liability in the Balance Sheet?" is answered by
-            # comparing the statement's own rows, so the narrative-prose boost must
-            # not demote those rows (AmEx: the balance-sheet rows ranked 4th/6th
-            # per query at ~90 but fell below the top-16 cut behind prose chunks
-            # scoring 100-200; the right answer came from a table on another page).
-            is_statement_item_question = bool(
-                re.search(r"\b(largest|biggest|highest|smallest|lowest)\b[^?]{0,60}\b(liabilit\w*|asset\w*|expense\w*|equity)\b", query, re.IGNORECASE)
-                and re.search(r"balance sheet|income statement|cash flow statement", query, re.IGNORECASE)
-            )
-            prefer_narrative = (non_numeric_formula is None or is_attribution) and not is_statement_item_question
+                # Additive: one extra query from the LLM suggester (which filing
+                # section/vocabulary would hold this answer). A failed or empty
+                # response leaves the classifier's own queries unchanged.
+                llm_topic_terms = self.decomposer.suggest_narrative_topic_query(
+                    query, clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
+                )
+                if llm_topic_terms:
+                    search_queries = search_queries + [
+                        f"{classification['entity']} {llm_topic_terms}".strip()
+                    ]
+            # This branch runs when no registered formula matches, so it biases ranking
+            # toward prose content.
+            # Also widen retrieval for attribution questions so narrative boosts can
+            # surface causal explanations.
+            prefer_narrative = (non_numeric_formula is None or is_attribution)
             is_geography = is_geography_query(query)
             is_legal = is_legal_query(query)
             new_hits = []
             for sq_idx, sq in enumerate(search_queries):
                 new_hits.extend(self._tag_subquery(sq_idx, self.vector_store.search(
-                    # This whole retrieval block only ever runs for the
-                    # non-numeric answer_mode branch (ASSESSMENT/
-                    # EXPLANATION/EXCLUSION) -- always uses the wider
-                    # narrative top_k here regardless of prefer_narrative
-                    # (which only controls search()'s internal SCORING
-                    # boost, not how many candidates get through at all).
-                    # Confirmed real case beyond the pure-narrative ones
-                    # RETRIEVAL_TOP_K_NARRATIVE was first added for: 3M's
-                    # FY2022 "is 3M capital-intensive" question (a
-                    # formula-backed non-numeric question, so
-                    # prefer_narrative=False) needed its real "Net sales"
-                    # row, which ranked #6 for its own dedicated revenue
-                    # sub-query -- just one past the base
-                    # RETRIEVAL_TOP_K=5 cutoff, with several unrelated
-                    # accounting-policy notes from the SAME filing
-                    # occupying the 5 available slots instead.
+                    # This retrieval block runs for non-numeric answer modes and always
+                    # uses the wider narrative top_k.
+                    # prefer_narrative controls scoring boosts but not how many
+                    # candidates pass the cutoff.
                     sq, top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
                     exclude_ids=list(retrieved_ids),
                     entity=classification.get("entity"),
@@ -748,20 +604,12 @@ class FinAgentRAGOrchestrator:
                 iter_trace["retrieved_passages"].append(info)
                 evidence_meta.append(info)
 
-            # An EXPLANATION/ASSESSMENT question ("does X have positive
-            # working capital", "did Y's margin improve") still turns on a
-            # real number comparison whenever it matches a registered
-            # formula — it just ALSO needs qualitative framing in the
-            # final text. This used to always return a stub pot_res with
-            # no code and result_value=None, meaning the LLM derived
-            # every number itself straight from raw evidence text with
-            # zero sandbox grounding — exactly the failure mode the
-            # "trust the sandbox" instruction in llm_client.py exists to
-            # prevent elsewhere, just never reached here at all. Confirmed
-            # real case: American Water Works' FY2022 working-capital
-            # question got the right numbers this time purely by LLM
-            # luck, with no Python trace to show for it or to have caught
-            # it if the LLM had been wrong.
+            # Explains that some explanation/assessment questions still require a
+            # numeric comparison when they match a registered formula; they also need
+            # qualitative framing in the final text.
+            # Notes that previously the pipeline returned an empty numeric result object
+            # so the LLM supplied numbers without any sandbox trace, which can lead to
+            # ungrounded outputs; keep sandbox-backed numeric computation to avoid that.
             context_window = []
             for ev in select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT):
                 ev_enriched = dict(ev)
@@ -822,14 +670,11 @@ class FinAgentRAGOrchestrator:
             "total_iterations": iteration_count,
             "final_answer": final_answer,
             "resolved_entity": classification["entity"],
-            # The sandbox's "result is not reliable" placeholder (result = 0.0
-            # printed with that warning when no retrieved data matched the
-            # question) is not a computed answer; sending its bare 0.0 made
-            # the frontend headline "0" as the final calculation result
-            # (11+ real cases: 3M dividend trend, Amcor adjusted EBITDA, Best
-            # Buy cash drop / store count, Boeing production rates and tax
-            # rate, MGM EBITDAR region, ...). sandbox_log below still carries
-            # the warning text.
+            # The sandbox placeholder for 'result not reliable' is not a computed
+            # answer; emitting its raw numeric default can be misinterpreted as a real
+            # computed result by downstream UI layers.
+            # Log messages still carry the warning and should be surfaced instead of the
+            # raw placeholder value.
             "result_value": (
                 None
                 if pot_res and "result is not reliable" in (pot_res.get("output_log") or "")
@@ -888,9 +733,10 @@ class FinAgentRAGOrchestrator:
         r"\b(?:regions?|segments?|topline)\b|\b(?:us|u\.s\.)\b.*\binternational\b"
         r"|non[- ]?gaap|\badjusted\s+(?:eps|ebitda|ebit|operating|net income|earnings|non)"
         r"|\bguidance\b|\boutlook\b"
-        # "excluding the impact of FX, passthrough costs and one-off items" is the
-        # earnings release's "comparable constant currency" bridge (Amcor QA 29
-        # routed to the 10-K, which has no such table)
+        # Maps a descriptive earnings-release phrase to the canonical comparable-
+        # constant-currency adjustment concept used for like-for-like comparisons.
+        # This is a normalization for aligning different wording to the same analytical
+        # bridge.
         r"|constant[- ]currency|pass-?through|one-?off"
     )
     #: A question asking what is EXPECTED for year Y is answered by a filing
@@ -898,19 +744,33 @@ class FinAgentRAGOrchestrator:
     _FORWARD_LOOKING_CUE_RE = re.compile(
         r"\bexpected?\s+to\b|\bexpects?\b|\bguidance\b|\boutlook\b|\bforecast\w*|\banticipat\w+"
     )
-    #: A question about an ongoing separation/spin-off/divestiture cost, with
-    #: no year at all named (so the plain-annual-10-K default tier below has
-    #: nothing to override it), needs the MOST RECENT filing -- the running
-    #: cumulative "percent incurred so far" figure is stale in an older
-    #: annual 10-K. Confirmed real case: "How much does Pfizer expect to pay
-    #: to spin off Upjohn in the future?" resolved to PFIZER_2021_10K (its
-    #: own "~75% incurred through December 31, 2021" sentence) instead of
-    #: Pfizer_2023Q2_10Q (the more complete "~90% incurred through Q2 2023"),
-    #: purely because the tier-3 "prefer the plain annual 10-K" default below
-    #: has no year-based signal to lose to when the query names none at all.
+    #: If a question about an ongoing multi-period liability names no year, the code
+    #: prefers the most recent filing rather than an older annual filing; otherwise
+    #: cumulative-in-progress percentages can be stale.
+    #: When queries omit a period, ensure selection logic looks for the latest available
+    #: filing for that entity.
     _SEPARATION_TOPIC_RE = re.compile(
         r"\bseparat\w+|\bspin[- ]?off\w*|\bdivest\w*", re.IGNORECASE
     )
+
+    @staticmethod
+    def _readable_company_name(matched_company: str, query: str) -> str:
+        """Derive a human-readable entity name for retrieval queries from the
+        corpus filename stem: use the stem's original spacing if it matches,
+        otherwise join the stem's underscore-separated parts.
+        """
+        import re as _re
+        base = _re.split(r"(?<!\d)(?:19|20)\d{2}", matched_company or "")[0].strip("_- ")
+        if not base:
+            return ""
+        compact = _re.sub(r"[^a-z0-9]", "", base.lower())
+        words = _re.findall(r"[A-Za-z0-9&]+", query)
+        for n in (4, 3, 2, 1):
+            for i in range(len(words) - n + 1):
+                span = words[i:i + n]
+                if _re.sub(r"[^a-z0-9]", "", "".join(span).lower()) == compact:
+                    return " ".join(span)
+        return base.replace("_", " ").title()
 
     def _match_entity_to_corpus(self, classifier_entity: str, query: str) -> str:
         """
@@ -923,80 +783,56 @@ class FinAgentRAGOrchestrator:
             return classifier_entity  # no uploads yet — use classifier result as-is
 
         q_lower = query.lower()
-        # Normalise helper: strip year tokens, underscores, hyphens
-        #
-        # \b only fires at a word/non-word transition, and both "_" and
-        # digits count as word characters to regex -- so \b2022\b never
-        # matches inside "3M_2022_10K" (underscore on both sides) at
-        # all, silently leaving the year token in norm_corpus. Every
-        # OTHER same-year company's filing then ALSO keeps its own
-        # literal year token, and a query merely mentioning that year
-        # (as a two-year comparison like "between 2022 and 2021"
-        # routinely does) scores a spurious match against EVERY one of
-        # them equally via the "corpus words appear in query" signal
-        # below -- ties broken by nothing but iteration order once the
-        # real classifier-entity-based scores (which correctly stay at
-        # 0 for a company genuinely not yet in uploaded_files) can't
-        # break them. (?<!\d)...(?!\d) checks for a DIGIT boundary
-        # instead, matching the same fix already applied to this
-        # method's own query_years extraction just below (_YEAR_RE) --
-        # underscore isn't a digit, so this correctly strips the year
-        # out of "3M_2022_10K" too. Confirmed real case: "Has Verizon
-        # increased its debt...between 2022 and the 2021 fiscal
-        # period?" resolved matched-entity to "3M_2022_10K" -- the
-        # first 2022-year filing in upload order -- because "2022"
-        # survived normalisation on every 2022 filing's own company
-        # string, tying all of them at the same score.
+        # Normalise helper: remove year tokens, underscores, hyphens using digit-
+        # boundary checks rather than word-boundary so years inside filenames like
+        # X_2022_10K get stripped.
+        # This avoids many filings sharing a literal year token and falsely tying query
+        # matches across different entities; use (?<!\d)...(?!\d) to detect standalone
+        # years.
         def _normalise(s: str) -> str:
             s = _re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', s)   # strip years
             s = _re.sub(r'[_\-]+', ' ', s)             # underscores → spaces
             return s.lower().strip()
 
         norm_classifier = _normalise(classifier_entity)
+        abbr_tokens = _re.findall(r"\b[A-Za-z][A-Za-z0-9&]{2,}\b", query)
+        compact_query = _re.sub(r"[^a-z0-9]", "", q_lower)
+        _DOC_TYPE_WORDS = {"10k", "10q", "8k", "dated", "earnings"}
+        q_stop = {"the", "and", "for", "has", "had", "have", "does", "did", "was", "were", "are",
+                  "what", "which", "who", "how", "when", "why", "that", "this", "with", "from"}
+
+        def _is_subsequence(needle: str, hay: str) -> bool:
+            it = iter(hay)
+            return all(ch in it for ch in needle)
         best_company = None
         best_score = 0
 
-        # Years the query itself mentions — used only to break ties between
-        # multiple filings of the SAME company (see below), since
-        # _normalise() deliberately strips year tokens before scoring so
-        # "Corning" can match either "CORNING_2021_10K" or
-        # "CORNING_2022_10K" equally well in the first place.
-        #
-        # Uses (?<!\d)...(?!\d) rather than \b: \b only fires at a
-        # word/non-word transition, and both "_" and digits count as word
-        # characters to regex — so \b2021\b never matches inside
-        # "CORNING_2021_10K" (underscore before) or "FY2021" (letter
-        # before, no separator) at all, silently defeating year detection
-        # in exactly the two places years actually show up here.
+        # Use years mentioned in the query only to break ties between multiple filings
+        # of the same entity; normalisation still strips year tokens for initial
+        # matching so entity names match consistently across filings.
+        # Detect years with digit-boundary regex rather than word-boundary so common
+        # filename patterns and adjacent characters don't prevent year extraction.
         _YEAR_RE = r'(?<!\d)(?:20|19)\d{2}(?!\d)'
         query_years = set(_re.findall(_YEAR_RE, query))
 
-        # Quarter the QUERY itself names (e.g. "In 2022 Q2, which of JPM's
-        # segments...", "...net revenue in 2021 Q1?") -- a bare word-
-        # boundary "q1"-"q4" token, independent of adjacency to a year.
-        # Used only for the tie-break below; unrelated to query_years.
+        # Detect a bare quarter token (q1..q4) in the query text as an independent word
+        # token.
+        # Used only for tie-breaking between candidate documents; unrelated to extracted
+        # query years.
         _query_quarter_m = _re.search(r'\bq([1-4])\b', q_lower)
         query_quarter = f"q{_query_quarter_m.group(1)}" if _query_quarter_m else None
-        # Forward-looking question about year Y ("is X expected to ... in FY2023?"):
-        # the source is a filing from year Y-1, so that year outranks Y itself.
+        # For forward-looking questions about year Y, prefer documents dated in year Y-1
+        # over those dated in Y.
+        # This treats the prior-year filing as the more likely source for forward-
+        # looking statements.
         forward_year_prior = None
         if query_years and self._FORWARD_LOOKING_CUE_RE.search(q_lower) and query_quarter is None:
             forward_year_prior = str(int(max(query_years)) - 1)
 
-        # Quarter-aware period extraction for the SAME purpose the bare
-        # _YEAR_RE above already served (tie-breaking between multiple
-        # filings of the same company) — now also captures an adjacent
-        # "Q1"-"Q4" suffix (e.g. "MGMRESORTS_2022Q4_EARNINGS" -> year
-        # "2022", quarter "q4"), which the bare year-only regex collapsed
-        # to plain "2022", indistinguishable from "MGMRESORTS_2022_10K".
-        # Confirmed real case: "What was MGM's interest coverage ratio
-        # using FY2022 Adjusted EBIT...?" — no quarter word anywhere in
-        # the question itself, so the old tie-break's ONLY signal (bare
-        # year, identical for both filings) couldn't distinguish them and
-        # silently fell back to whichever was inserted first into
-        # DOC_TO_FILE, resolving to the wrong document (MGMRESORTS_2022_
-        # 10K instead of the intended MGMRESORTS_2022Q4_EARNINGS) and
-        # extracting nonsense values from unrelated line items.
+        # Extract both year and adjacent quarter suffix from filenames (e.g. _2022Q4) to
+        # distinguish same-year documents.
+        # This prevents wrong-document selection when multiple filings share the same
+        # bare year.
         _PERIOD_RE = _re.compile(r'(?<!\d)((?:20|19)\d{2})(q[1-4])?(?!\d)', _re.IGNORECASE)
 
         def _extract_period(s: str):
@@ -1049,9 +885,39 @@ class FinAgentRAGOrchestrator:
 
             score = 0
             # Score 1: corpus company words appear in query
-            corpus_words = [w for w in norm_corpus.split() if len(w) >= 2]
+            # Filing-type words and leftover date digits are not company names.
+            corpus_words = [
+                w for w in norm_corpus.split()
+                if len(w) >= 2 and not w.isdigit() and w not in _DOC_TYPE_WORDS
+            ]
             query_hits = sum(1 for w in corpus_words if w in q_lower)
             score += query_hits * 3
+
+            # Match company names in queries that contain spaces to corpus filenames
+            # that omit spaces by normalizing spacing.
+            # Ensures consistent name matching regardless of spacing in query vs
+            # filename.
+            base_name = _re.sub(r"[^a-z0-9]", "", _re.split(r"(?<!\d)(?:19|20)\d{2}", corpus_company)[0].lower())
+            if len(base_name) >= 3 and base_name in compact_query:
+                score += 6
+
+            # Handle abbreviated company tokens in queries by matching prefixes or
+            # acronym-shaped tokens to compact corpus names.
+            # Matches tokens that are prefixes or whose letters appear in order in the
+            # compact name.
+            compact_corpus = norm_corpus.replace(" ", "")
+            for tok in abbr_tokens:
+                tl = tok.lower()
+                if tl in corpus_words or tl in q_stop:
+                    continue
+                if compact_corpus.startswith(tl):
+                    score += 3
+                elif (
+                    (tok.isupper() or any(ch.isupper() for ch in tok[1:]))
+                    and tl[0] == compact_corpus[:1]
+                    and _is_subsequence(tl, compact_corpus)
+                ):
+                    score += 2
 
             # Score 2: classifier entity words appear in corpus company name
             if norm_classifier and norm_classifier != "company":
@@ -1063,64 +929,27 @@ class FinAgentRAGOrchestrator:
                 if norm_classifier in norm_corpus or norm_corpus in norm_classifier:
                     score += 5
 
-            # Tie-break key between multiple filings of the SAME company
-            # (identical score, since the company-name portion is identical
-            # once years are stripped) -- compared as a tuple, higher wins:
-            #   1) does this filing's quarter match one the query itself
-            #      names (e.g. "Q2 2023")? Highest-confidence signal when
-            #      present -- this is the ONLY tier that uses corpus_quarter
-            #      at all. Fixes "What was MGM's interest coverage ratio
-            #      using FY2022 Adjusted EBIT...?" IF the question had named
-            #      a quarter, and robustly (not by accident) fixes JPM's own
-            #      "In 2022 Q2, which of JPM's segments..." shape.
-            #   2) is this filing's bare year one the query mentions at all?
-            #   3) does this filing have NO quarter suffix at all (i.e. is
-            #      it a plain annual 10-K rather than a 10-Q/earnings-
-            #      release/8-K)? Preferred as the safer default source when
-            #      nothing else disambiguates, since it's far more likely to
-            #      be a complete, self-contained annual filing than a
-            #      quarterly document is.
-            #   4) the bare year itself, as the final "prefer more recent"
-            #      fallback among same-specificity candidates.
-            #
-            # Tier 3 exists because bare-year recency ALONE (the entire
-            # fallback prior to today) is no longer a safe proxy for "most
-            # complete/appropriate filing" now that the corpus can contain
-            # quarterly documents dated LATER in calendar terms than an
-            # older but more complete annual 10-K. Confirmed real
-            # regression this fixes: "Are Best Buy's gross margins
-            # historically consistent...?" (no year or quarter named at
-            # all) resolved to BESTBUY_2024Q2_10Q -- purely because "2024"
-            # sorts after "2023" -- instead of BESTBUY_2023_10K, which is
-            # what actually carries the multi-year income-statement trend
-            # this question needs; a 10-Q fragment doesn't.
-            #
-            # Tier 1 remains the ONLY tier that uses corpus_quarter to
-            # PREFER a quarter-suffixed filing (when the query itself names
-            # that exact quarter, e.g. JPM's "In 2022 Q2, which of JPM's
-            # segments..."). An earlier version of this fix used
-            # corpus_quarter more broadly, as a blanket "prefer the more
-            # specific filing" default tiebreaker -- that caused a separate
-            # real regression (JnJ's "Roughly how many times has JnJ sold
-            # its inventory in FY2022?", resolved to JOHNSON_JOHNSON_2022Q4_
-            # EARNINGS, a press release with no balance sheet at all,
-            # instead of the 10-K that actually has inventory data) and was
-            # removed for the same reason tier 3 now exists: whether the
-            # MORE or LESS specific filing is correct depends on what kind
-            # of data the question needs, which isn't something this
-            # function can infer -- so the safe default is the plain annual
-            # filing, not the quarterly one, absent an explicit signal.
+            # Tie-break among multiple filings for the same company using a four-tier
+            # tuple (higher wins):
+            # 1) does the filing's quarter match a quarter explicitly named in the
+            # query? (only tier that uses corpus quarter)
+            # 2) does the filing's bare year appear in the query?
+            # 3) does the filing have no quarter suffix (prefer plain annual filings as
+            # safer defaults)?
+            # 4) the bare year (prefer more recent as final fallback).
+            # This favors an explicit quarter signal first, otherwise prefers annual
+            # filings when no other signal exists to avoid selecting fragmentary
+            # quarterly documents.
             tie_key = (
                 _date_key(corpus_company),
                 1 if (query_quarter is not None and corpus_quarter == query_quarter) else 0,
                 (2 if (forward_year_prior and corpus_year == forward_year_prior)
                  else 1 if corpus_year in query_years else 0),
-                # See _SEPARATION_TOPIC_RE's docstring: overrides tier 3's
-                # "prefer the plain annual 10-K" default, but ONLY for this
-                # narrow forward-looking-separation-cost shape, so it cannot
-                # fire on an unrelated no-year question (e.g. Best Buy's
-                # gross-margin-consistency question, which tier 3 exists
-                # for) and never collides with it.
+                # Refers to a specific regex's behavior: it overrides a higher-tier
+                # default preference for plain annual reports, but only for a narrowly
+                # defined forward-looking separation-cost question shape; it is guarded
+                # so it cannot trigger on unrelated no-year questions and will not
+                # conflict with the higher-tier rule.
                 1 if (
                     not query_years and corpus_quarter
                     and self._FORWARD_LOOKING_CUE_RE.search(q_lower)
@@ -1136,13 +965,10 @@ class FinAgentRAGOrchestrator:
                 best_tie_key = tie_key
 
         if best_company and best_score > 0:
-            # Several filings of the same company that tie on EVERY signal above
-            # (e.g. two 8-Ks of one year) are told apart by which one actually
-            # talks about what the question asks: count, per tied filing, the
-            # passages containing at least two of the question's distinctive
-            # words. Confirmed real case: "Does Foot Locker's new CEO have
-            # previous CEO experience...?" chose the May 8-K (shareholder vote
-            # results) instead of the August 8-K that announces the CEO change.
+            # Tie-breaker when multiple filings from the same filer score identically on
+            # all other signals: count, per tied filing, the passages containing at
+            # least two of the question's distinctive words and prefer the filing with
+            # the higher count; avoids relying solely on metadata ordering.
             tied_docs = [c for (sc, tk, c) in scored if sc == best_score and tk == best_tie_key]
             if len(tied_docs) >= 2:
                 _stop = {
@@ -1169,16 +995,11 @@ class FinAgentRAGOrchestrator:
                     _ranked = sorted(_counts.items(), key=lambda kv: kv[1], reverse=True)
                     if _ranked[0][1] > _ranked[1][1]:
                         best_company = _ranked[0][0]
-            # Regional/segment BREAKDOWN questions ("which region had the
-            # worst topline...", "how did US sales growth compare to
-            # international...") are answered from the simplified regional
-            # supplemental tables a company's own EARNINGS RELEASE carries;
-            # the formal 10-K reports a different (reportable-segment)
-            # cut. Each question needs exactly ONE file, so among
-            # same-company, same-named-year candidates that TIE, an
-            # earnings-release file wins for this question shape only.
-            # BM25 content mass could not make this call (the larger 10-K
-            # always scores higher), so it is keyed on the question shape.
+            # For regional/segment breakdown questions, prefer a company's simplified
+            # regional supplemental table from its earnings release rather than the
+            # formal annual report; when same-filer, same-year candidates tie, select
+            # the earnings-release file for this question shape because the table format
+            # matches the question intent.
             if self._REGIONAL_BREAKDOWN_CUE_RE.search(q_lower):
                 tied_earnings = [
                     (tk, c) for (sc, tk, c) in scored
@@ -1210,24 +1031,18 @@ class FinAgentRAGOrchestrator:
 
     @staticmethod
     def _company_key(name: str) -> str:
-        """Company part of a corpus doc name: "JOHNSON_JOHNSON_2022Q4_EARNINGS"
-        -> "JOHNSONJOHNSON"; "" when the name has no year segment (e.g. the
-        unresolved placeholder "company")."""
+        """Extract the entity part of a corpus document name: e.g. STEM_YEAR_TAG
+        -> STEMWITHOUTSPACES; return empty when no year/identifier segment exists.
+        """
         m = re.match(r"^(.*?)_(?:19|20)\d\d", name or "")
         return re.sub(r"[^A-Za-z0-9]", "", m.group(1)).upper() if m else ""
 
     def _restrict_to_company(self, hits: List[Dict[str, Any]], entity: Optional[str]) -> List[Dict[str, Any]]:
-        """Drop retrieved passages that belong to a DIFFERENT company than the
-        resolved entity's document. Every question in the benchmark is about
-        one named company, but the retriever only down-weights (0.4x) other
-        companies' passages, so they still surface when the resolved
-        company has few strong matches -- and the PoT sandbox then extracts
-        numbers from them. Confirmed real case: "How did JnJ's US sales
-        growth compare to international sales growth" had MGM Resorts table
-        rows in its evidence and the sandbox computed 77.29% from MGM's
-        "Las Vegas Strip Resorts net revenues". Only applied when the entity
-        resolved to a real corpus document, and never when it would leave
-        nothing."""
+        """Filter out retrieved passages from other entities when the resolved
+        entity maps to a specific corpus document. Retriever down-weighting can
+        leave unrelated-entity passages; dropping them avoids extracting numbers
+        from the wrong entity. Do not apply this filter if it would leave no evidence.
+        """
         key = self._company_key(entity or "")
         if not key:
             return hits
@@ -1235,27 +1050,18 @@ class FinAgentRAGOrchestrator:
         return kept or hits
 
     def _deduplicate_hits(self, hits: List[Dict[str, Any]], entity: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Keeps the HIGHEST-scoring occurrence of a passage id, not just the
-        first one encountered. `hits` here is the concatenation of every
-        sub-query's own results in whichever order those sub-queries ran
-        (see the `for sq in search_queries: new_hits.extend(...)` call
-        site) -- the SAME passage routinely gets found by more than one
-        sub-query with a DIFFERENT score each time (BM25 scores depend on
-        the exact query text), and a plain first-seen-wins dedup locks in
-        whichever score its EARLIEST matching sub-query happened to give
-        it, discarding a later, more-targeted sub-query's much higher
-        score for the exact same passage. Confirmed real case: AMD's
-        FY2022 "what drove revenue change" question retrieves its own
-        real driver passage ("...driven by a 64% increase in Data Center
-        segment revenue... EPYC...") via TWO sub-queries -- a generic
-        "AMD Revenue Net Revenue" alias query (which only weakly matches
-        it, score ~97) that happens to run FIRST, and the bare question
-        text itself (which matches it strongly via the causal-language
-        boost, score ~195) that runs second. First-seen-wins kept the
-        weak 97 score, which then ranked the passage outside the top-12
-        evidence cap the LLM actually sees -- even though its own
-        genuinely-best score would have ranked it comfortably inside.
+        """Keep the HIGHEST-scoring occurrence of each passage id rather than the first one
+        seen.
+
+        Args:
+        hits: list of hit records where the same passage id may appear multiple times
+        with different scores.
+
+        Returns:
+        A deduplicated list preserving the record with the maximum score per passage id.
+
+        Note: This avoids locking in a lower score from an earlier sub-query when a
+        later sub-query produces a higher, more relevant score.
         """
         hits = self._restrict_to_company(hits, entity)
         best_by_id: Dict[str, Dict[str, Any]] = {}
@@ -1270,50 +1076,17 @@ class FinAgentRAGOrchestrator:
                 best_by_id[hit_id] = hit
         return [best_by_id[hit_id] for hit_id in order]
 
-    # Retrieval-only synonym terms, appended to a placeholder's own search
-    # query TEXT but deliberately NEVER fed into required_vars/extraction
-    # (pot_reasoner._extract_formula_guided() still scores candidate rows
-    # against the formula library's own unmodified alias lists). A real
-    # filing routinely discusses what moved a DERIVED metric entirely in
-    # terms of its own COST-side line ("cost of products sold increased
-    # as a percent to sales driven by...") without ever literally saying
-    # "gross profit"/"gross margin" in that passage -- a direct accounting
-    # equivalence (gross margin moves inversely to cost-of-sales-as-%-of-
-    # revenue), but with zero real word overlap against a query built
-    # purely from gross_profit's own aliases. Widening the retrieval query
-    # alone (not the extraction-time alias list) is deliberate: adding
-    # "cost of products sold" etc. AS an extraction alias for gross_profit
-    # would make _extract_formula_guided() treat a COGS row's own VALUE as
-    # if it WERE gross profit for a NUMERIC gross-margin calculation --
-    # wrong by definition (COGS is revenue MINUS gross profit, not gross
-    # profit itself) and a correctness regression risk for every
-    # already-passing NUMERIC gross_margin question. This dict only ever
-    # widens what evidence gets RETRIEVED for a qualitative/EXPLANATION-
-    # mode "what drove X change" question to read from; it changes
-    # nothing about what value gets treated as gross_profit. Confirmed
-    # real case: Johnson & Johnson's FY2022 "what drove gross margin
-    # change" question -- the filing's own driver bullets ("One-time
-    # COVID-19 vaccine manufacturing exit related costs...") sit entirely
-    # under a "Cost of products sold... driven by:" heading with the
-    # words "gross"/"margin"/"profit" nowhere in it.
+    # Retrieval-only synonym expansions appended to a placeholder's search query to
+    # widen evidence recall for explanation-style questions; these terms are never added
+    # to extraction alias lists so numeric extraction logic remains correct. Purpose:
+    # retrieve passages that discuss drivers using different wording (e.g., cost-side
+    # language) without treating those rows as the numeric target variable.
     _RETRIEVAL_SYNONYM_TERMS: Dict[str, List[str]] = {
         "gross_profit": ["Cost of Products Sold", "Cost of Goods Sold", "Cost of Sales", "COGS"],
-        # pot_reasoner._has_finished_goods_inventory() decides the
-        # inventory_turnover convention (average vs. ending) from whatever
-        # evidence happens to reach PoT -- but a plain "inventory"/
-        # "inventories" alias query alone retrieves only the TOTAL
-        # inventory line (top ~5), never the breakdown sub-rows the
-        # convention check actually looks for. Confirmed real case: JnJ's
-        # own "Finished goods" row (page 58, needed to trigger the average
-        # convention) never made the top-5 for the plain "inventory"
-        # query -- only "Total inventories"/"Inventories (Notes 1 and 3)"
-        # did, both generic totals with neither "finished goods" nor
-        # "fuel"/"spare parts" wording, so the convention check silently
-        # saw no signal and fell back to the wrong (ending) default. These
-        # terms widen the SAME retrieval query (not the extraction alias
-        # list _extract_formula_guided() scores against, so the inventory
-        # VALUE used in the calculation is unaffected) to give the
-        # breakdown row a real chance at the top-5, for either convention.
+        # Add retrieval aliases for specific inventory breakdown terms so the convention
+        # check (average vs. ending inventory) can find sub-rows like finished goods;
+        # these aliases only affect retrieval ranking and do not change which numeric
+        # value extraction treats as the inventory number.
         "inventory": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
         "inventory_old": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
         "inventory_new": ["Finished Goods", "Merchandise Inventory", "Fuel Inventory", "Raw Materials and Supplies"],
@@ -1352,37 +1125,11 @@ class FinAgentRAGOrchestrator:
 
         steps: List[Dict[str, Any]] = []
         for placeholder, aliases in required_vars.items():
-            # This codebase's alias lists consistently put the Chinese
-            # term first (e.g. required_vars["ap_old"] ==
-            # ["應付帳款", "accounts payable"]) — aliases[0] would search
-            # an all-English 10-K for Chinese text, retrieving nothing
-            # relevant (confirmed real case: DPO's own retrieval queries
-            # came out as "Amazon 應付帳款 2016" etc., matching zero real
-            # content in the English filing). Prefer ASCII/Latin-alphabet
-            # aliases — every formula in the library also lists an English
-            # variant — falling back to aliases[0] only if none exists.
-            #
-            # Uses up to the first THREE distinct ASCII aliases, not just
-            # one: different companies genuinely use different phrasings
-            # for the same line item (e.g. "net income attributable to
-            # shareowners" vs. "net earnings attributable to <company>"),
-            # and picking only the single first alias means the query only
-            # ever matches ONE company's convention. Confirmed real case:
-            # General Mills' "Net earnings attributable to General Mills"
-            # row scored below an unrelated NCI row when the query only
-            # contained "net income attributable to shareowners" (Coca-
-            # Cola's own phrasing) — combining alias variants into one
-            # query correctly ranks the right row #1 for EITHER company's
-            # wording, without needing a second retrieval round-trip.
-            # Bumped from 2 to 3: cogs alone has FOUR genuinely common
-            # phrasings across real 10-Ks ("cost of goods sold", "cost of
-            # sales", "cost of revenue", "cost of products sold"), and
-            # with only 2 covered, a company using the 3rd/4th variant
-            # (Kraft Heinz: "Cost of products sold") got literally zero
-            # _line_item_match_score credit for its own real row while an
-            # unrelated OTHER company's row using one of the covered
-            # phrasings scored an exact match and outranked it even after
-            # the entity-mismatch penalty.
+            # Prefer ASCII/Latin-alphabet aliases first when building queries, falling
+            # back to other-language variants only if no ASCII aliases exist. Use up to
+            # three distinct ASCII aliases per line item to cover common phrasings
+            # across different filers, improving retrieval robustness without changing
+            # extraction alias lists.
             ascii_aliases = [a for a in aliases if a.isascii()]
             primary_alias = " ".join(dict.fromkeys(ascii_aliases[:3])) if ascii_aliases else (
                 aliases[0] if aliases else placeholder
@@ -1413,33 +1160,9 @@ class FinAgentRAGOrchestrator:
     def _build_non_numeric_subquestions(
         self, query: str, answer_mode: str, target_metrics: Optional[List[str]] = None,
     ) -> List[Dict[str, str]]:
-        # The retrieval suffix for each template used to be a fixed phrase
-        # ("operating margin cost structure segment" for EVERY EXPLANATION
-        # question, regardless of what the question actually asked about),
-        # which only coincidentally overlaps with what a given question
-        # needs. When the classifier already identified specific
-        # target_metrics, search for THOSE instead — a general improvement
-        # for any qualitative question, not just this one. Confirmed real
-        # case: "Does American Water Works have positive working capital"
-        # (target_metrics=['working_capital']) retrieved evidence about
-        # operating margin and cost structure instead of current assets/
-        # liabilities, so the model's answer never stated the actual
-        # -$1,561M figure at all — just a generic non-answer.
-        #
-        # NOTE: this function's output is ONLY used for the "Query
-        # Decomposition" trace display and the (currently unused by the
-        # LLM prompt) sub_questions parameter — NOT for actual retrieval.
-        # The real non-numeric retrieval query, whenever no formula
-        # matches the question, comes from
-        # classification["retrieval_queries"] (built by
-        # FinanceBenchClassifier._build_retrieval_queries()), a
-        # completely separate code path. A general query-vocabulary fix
-        # for narrative questions (legal proceedings, dividends,
-        # restructuring, etc.) belongs there, not here — confirmed by
-        # tracing an actual failing case (Boeing legal-battles question)
-        # end to end: this function's suffix showed up correctly in the
-        # trace, but the retrieved evidence was completely unaffected by
-        # it.
+        # Earlier logic appended a fixed phrase to every template's retrieval
+        # suffix regardless of the question's actual target metrics.
+        # Use the classifier-identified target_metrics to build a focused suffix.
         metric_terms = " ".join(m.replace("_", " ") for m in (target_metrics or []))
         fallback_suffix = {
             "ASSESSMENT": "capital expenditure assets depreciation",

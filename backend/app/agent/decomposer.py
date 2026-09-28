@@ -1,13 +1,12 @@
-"""
-QueryDecomposer (FinAgent-RAG Section 3.3 / FinanceBench SKILL Stage 3)
+"""QueryDecomposer
 
-Decomposes a complex financial question into sequential retrieval + computation steps.
-Each retrieval step targets a specific (metric × year) pair so the orchestrator can
-retrieve the right table rows one-by-one.
+Decomposes a complex financial question into sequential retrieval and computation steps.
+Each retrieval step targets a specific metric and year so the orchestrator can fetch
+relevant table rows in order.
 
-Decomposition modes (in priority order):
-  1. LLM (OpenAI / Gemini) — structured sub-queries via FinanceBench SOP prompt
-  2. Rule-based fallback — deterministic (metric × year) expansion
+Decomposition modes (priority order):
+1. LLM — structured sub-queries via the SOP prompt
+2. Rule-based fallback — deterministic metric×year expansion
 """
 
 import json
@@ -51,13 +50,10 @@ _METRIC_NAMES: Dict[str, str] = {
     "total_liab":    "Total Liabilities 總負債",
     "equity":        "Shareholders Equity 股東權益 Total Equity",
     "cash":          "Cash Equivalents 現金及約當現金",
-    # "Capital Spending" is PepsiCo's own cash-flow-statement line item
-    # name for capex (confirmed real case: PepsiCo FY2021 10-K page 53/63)
-    # -- without it here, a query built from this alias list alone never
-    # mentions the one term that actually appears in PepsiCo's own filing,
-    # so the real "Capital spending" row gets no BM25/line-item-boost
-    # advantage over an unrelated "Total ..." row that happens to sit near
-    # a heading mentioning "capital spending" in passing.
+    # Alias list must include the filer-specific label used in that company's cash-flow
+    # statement for capital expenditures.
+    # If the alias is omitted, retrieval ranking can miss the correct row in that filing
+    # and favor unrelated nearby rows.
     "capex":         "Capital Expenditure CapEx Capital Spending 資本支出",
     "ppe":           "Property Plant and Equipment PP&E Fixed Assets 不動產廠房及設備 固定資產",
     "depreciation":  "Depreciation Amortization 折舊",
@@ -106,14 +102,10 @@ _RATIO_COMPONENTS: Dict[str, List[str]] = {
 
 
 class QueryDecomposer:
-    """
-    Decomposes a complex financial question into an ordered list of retrieval sub-tasks.
-
-    Uses OpenAI / Gemini when available (FinanceBench SOP Stage 3),
-    otherwise falls back to the deterministic rule-based expansion.
+    """Decomposes a complex financial question into an ordered list of retrieval sub-tasks.
+    Prefers an LLM when available; otherwise uses a deterministic rule-based expansion.
     """
 
-    # ── LLM system prompt aligned with FinanceBench SKILL.md Stage 3 ──────────
     _SYSTEM_PROMPT = (
         "You are a financial analysis assistant following the FinanceBench SOP.\n"
         "Your task (Stage 3 — Multi-Step Retrieval Decomposition):\n"
@@ -266,6 +258,55 @@ class QueryDecomposer:
         except Exception:
             return None
 
+    def suggest_narrative_topic_query(self, query: str, entity: str) -> Optional[str]:
+        """
+        LLM-suggested extra retrieval query for narrative/qualitative questions
+        (topics that are not statement line items): asks which disclosure
+        section / accounting vocabulary would hold the answer, in the filing's
+        own wording (e.g. "Legal Proceedings" for "legal battles"). Used as ONE
+        extra query next to the classifier's own queries, never a replacement;
+        a failed or empty response is a silent no-op.
+        """
+        client = self._get_llm_client()
+        if not client:
+            return None
+
+        prompt = (
+            "A user asked this question about a company's SEC filing "
+            f"(10-K/10-Q/8-K): \"{query}\"\n"
+            f"Company: {entity or 'the company'}\n\n"
+            "What specific disclosure topic, SEC filing section/item "
+            "name, or accounting vocabulary would most likely contain "
+            "the answer? Give 4-8 concise search KEYWORDS/PHRASES (not a "
+            "sentence), using the filing's own typical wording (the "
+            "actual SEC item heading or standard accounting term), "
+            "separated by spaces. Output ONLY the keywords, nothing else."
+        )
+        try:
+            if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+                reasoning = _is_reasoning_model(self._llm_model)
+                create_kwargs: Dict[str, Any] = {
+                    "model": self._llm_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    # Increase model token budget beyond 800 for complex reasoning
+                    # prompts.
+                    # Internal reasoning tokens count toward completion limits and can
+                    # exhaust output on nontrivial questions.
+                    "max_completion_tokens": 100 if not reasoning else 2000,
+                }
+                if not reasoning:
+                    create_kwargs["temperature"] = 0
+                response = client.chat.completions.create(**create_kwargs)
+                record_usage(self._llm_model, "decomposer", getattr(response, "usage", None), len(prompt))
+                raw = (response.choices[0].message.content or "").strip()
+            else:
+                response = client.models.generate_content(model=self._llm_model, contents=prompt)
+                record_usage(self._llm_model, "decomposer", getattr(response, "usage_metadata", None), len(prompt))
+                raw = (getattr(response, "text", "") or "").strip()
+            return raw or None
+        except Exception:
+            return None
+
     def _rule_decompose(
         self,
         query: str,
@@ -365,7 +406,6 @@ class QueryDecomposer:
         target_metrics = list(target_metrics or [])
         entity = (entity or "").strip()
 
-        # ── Try LLM first (FinanceBench SOP Stage 3) ─────────────────────────
         llm_steps = self._llm_decompose(query, entity, target_metrics, years)
 
         if llm_steps:

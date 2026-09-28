@@ -31,7 +31,7 @@ def test_adjusted_ebit_derived_from_ebitdar_reconciliation_and_floored_at_zero()
         "content": "Line Item: Operating income (loss) | 2022 (12M): 1,439,372",
         "parent_content": parent,
     }]
-    q = "What was TestCo's interest coverage ratio using FY2022 Adjusted EBIT as the numerator and annual Interest Expense as the denominator?"
+    q = "Report TestCo's interest coverage ratio with FY2022 Adjusted EBIT as numerator and yearly Interest Expense as denominator?"
     res = ProgramOfThoughtReasoner().generate_and_execute(q, evidence, entity="TESTCO_2022_10K")
     assert res.get("result_value") == 0.0
     assert "ebit = -1935362.0" in res.get("code", "")
@@ -56,7 +56,7 @@ def test_total_row_rollforward_gives_deterministic_store_count_change():
             "Fiscal 2023 Total Stores at End of Second Quarter: 982"
         ),
     }]
-    q = "Was there any change in the number of TestCo stores between Q2 of FY2024 and FY2023?"
+    q = "Has the change in the number of TestCo stores been positive between Q2 of FY2024 and FY2023?"
     res = ProgramOfThoughtReasoner().generate_and_execute(q, evidence, entity="TESTCO_2024Q2_10Q")
     assert res.get("result_value") == -13.0
     assert res.get("extraction_method") == "total-row-rollforward"
@@ -73,6 +73,6 @@ def test_total_row_rollforward_does_not_fire_without_a_matching_noun():
         "Fiscal 2023 Total Warehouses at End of Second Quarter: 10"
     )
     res = _derive_total_row_period_end_change(
-        [{"content": content}], "was there any change in the number of testco stores?"
+        [{"content": content}], "has the change in the number of testco stores been positive?"
     )
     assert res is None
