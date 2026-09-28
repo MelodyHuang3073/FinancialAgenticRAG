@@ -513,11 +513,9 @@ def _leading_yn_stance(text: str) -> Optional[bool]:
 #: no minus sign already (a genuinely negative gold number is compared
 #: as-is, unchanged); only ADDS an alternative target to check the model
 #: against, so this can only turn a previously-missed hit into a match,
-#: never suppress an already-correct check. Confirmed real case: 3M's
-#: "which segment dragged down 3M's overall growth" question -- gold
-#: "The consumer segment shrunk by 0.9% organically" (bare 0.9), model
-#: "organic sales decline of -0.9%" (signed -0.9) -- both state the exact
-#: same fact, but the raw digits are numeric opposites.
+#: never suppress an already-correct check. Example: gold says a segment
+#: "shrunk by 0.9%" (bare 0.9) while the model says "a decline of -0.9%" --
+#: the same fact, but the raw digits are numeric opposites.
 _DECREASE_WORD_RE = re.compile(
     r"\b(?:shrunk|shrank|shrink\w*|declin\w*|decreas\w*|drop\w*|fell|fall\w*|reduc\w*|lower)\b",
     re.IGNORECASE,

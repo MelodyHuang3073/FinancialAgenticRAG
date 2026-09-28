@@ -63,32 +63,13 @@ class FinancialFileParser:
         r'^(.{2,55}?)\s{2,}([\(\-]?\d[\d,\.]*(?:\))?)\s{2,}([\(\-]?\d[\d,\.]*(?:\))?)',
         re.MULTILINE,
     )
-    # Recognises year headers: FY2023, 2023, Dec 2023, December 31 2023, etc.
+    # Recognises year headers: formats like YYYY, Mon YYYY, Month DD YYYY, and similar
+    # variants.
     _YEAR_HEADER_RE = re.compile(r'(?:FY\s*|fiscal\s+)?(20\d{2}|19\d{2})', re.IGNORECASE)
-    #: "First ... Second ... Third ... Fourth" quarter-ordinal column
-    #: headers for a single-year quarterly breakdown table (e.g. a 10-K's
-    #: own "Quarterly Results" footnote disclosure). These carry no
-    #: 4-digit year of their own — the year sits in a SEPARATE "Year
-    #: Ended December 31, 20XX" caption line just above them — so without
-    #: this check, _inject_missing_year_header's year-only search below
-    #: would skip right past this genuine, close-by header (finding no
-    #: year in it at all) and keep climbing until it hit an unrelated,
-    #: far-away line that coincidentally mentions 2+ years. Confirmed
-    #: real case: Amazon's own FY2017 10-K "Note 12 — QUARTERLY RESULTS"
-    #: page has "First Second Third Fourth" and "Quarter Quarter Quarter
-    #: Quarter" as two SEPARATE lines (a filer PDF line-wrap artifact,
-    #: not one contiguous "First Quarter" phrase) sitting right below
-    #: "Year Ended December 31, 2016 (1)" — the year-only search skipped
-    #: past all of that and landed on the page's own INTRO paragraph
-    #: several lines further up ("...selected...information for each
-    #: quarter of 2016 and 2017..."), which merely NAMES both years being
-    #: covered across TWO separate quarterly tables on the page, and
-    #: wrongly synthesized "2016 | 2017 | Col3 | Col4" as if this were a
-    #: 2016-vs-2017 comparison instead of four quarters within 2016 alone
-    #: — every quarter's own dollar figure ended up mislabeled as if it
-    #: were a different YEAR's whole-period total. .{0,40} between each
-    #: ordinal tolerates the line-wrap gap (a newline plus the other
-    #: three ordinals' own text) between "First" and "Second" etc.
+    #: Detects quarter-ordinal column headers like 'First Second Third Fourth' spread
+    #: across lines.
+    #: Allows for short gaps between ordinals to account for line-wrapped PDF text and
+    #: avoid misattributing a nearby multi-year caption as the column year.
     _QUARTER_ORDINALS_RE = re.compile(
         r'\bfirst\b.{0,40}\bsecond\b.{0,40}\bthird\b.{0,40}\bfourth\b',
         re.IGNORECASE | re.DOTALL,
@@ -327,22 +308,9 @@ class FinancialFileParser:
     _VALUE_TOKEN = r'(?:\$\s{0,3})?[\(\-]?\d[\d,\.]*\)?%?|[—–-]'
     _LAYOUT_VALUE_RE = re.compile(_VALUE_TOKEN)
 
-    # Digit-only variant of _VALUE_TOKEN, excluding the bare dash/
-    # placeholder alternative — used wherever a token needs to count as
-    # POSITIVE evidence of where a real value column sits (anchor
-    # discovery), as opposed to merely being recognized as a value once a
-    # column position is already established. A bare "—"/"–"/"-" is just
-    # as likely to be a mid-label typographic dash (e.g. "Authorized
-    # shares — 5,000") as a genuine blank-value placeholder, so letting it
-    # seed or vote for an anchor position can pull the whole cluster off
-    # the real column — confirmed real case: Amazon's balance sheet
-    # "Issued and outstanding shares — none — —" / "Authorized shares —
-    # 5,000" rows in the stockholders' equity section dragged
-    # _cluster_value_column_anchors's computed anchors away from the real
-    # value columns (x1≈508/588) to a bogus x1≈150/546, causing every
-    # real data row on the page — including "Accounts payable" — to fail
-    # is_data_row and be silently discarded as prose instead of recovered
-    # as a table row.
+    # Digit-only value token matcher that excludes bare dash/placeholder tokens.
+    # Used to identify real numeric column anchors without letting typographic dashes
+    # act as anchors.
     _LAYOUT_DIGIT_VALUE_RE = re.compile(r'(?:\$\s{0,3})?[\(\-]?\d[\d,\.]*\)?%?')
 
     #: Words that mark a number as part of an inline narrative aside
@@ -350,32 +318,11 @@ class FinancialFileParser:
     #: entry — see _LAYOUT_DIGIT_VALUE_RE's docstring.
     _NUMERIC_CONNECTOR_WORDS = {"and", "to", "or", "through"}
 
-    # A "layout row" is a label followed by 2+ whitespace-only numeric-looking
-    # tokens — this is how pdfplumber's extract_text(layout=True) renders a
-    # table COLUMN whose boundary is only whitespace/background-shading,
-    # never a ruled line (the standard style for real 10-K statements, e.g.
-    # Activision Blizzard's cash-flow statement: no grid lines, just
-    # alternating row shading and right-aligned numbers).
-    #
-    # - Requires at least one letter/CJK char before the values, so a bare
-    #   year-header line like "2019   2018   2017" (no real label) is never
-    #   mistaken for a data row — it should stay a header candidate.
-    # - The label-to-first-value gap, AND the gap between subsequent value
-    #   tokens, only need 1+ space. A 2+-space requirement between values
-    #   looks safer on paper, but real-world layout=True output frequently
-    #   collapses adjacent numeric columns down to a single space when the
-    #   source PDF wasn't built with a wide, rule-aligned column grid (e.g.
-    #   a proportional-font page where columns are only whitespace-padded
-    #   in the source text, not laid out on a true fixed grid) — with a 2+
-    #   requirement, EVERY row on such a page fails to match and the whole
-    #   table silently falls back to unconverted plain text. At least TWO
-    #   value tokens are still required — real financial tables always show
-    #   2+ comparison periods side by side — which is what actually keeps
-    #   this from matching an ordinary prose sentence that trails off with
-    #   one number; an isolated single-row false match (e.g. a "Month DD,
-    #   YYYY" date landing on two token-shaped fragments) is harmless on its
-    #   own since _flush() below additionally requires 3+ CONSECUTIVE
-    #   matching rows before anything is treated as a real table.
+    # Defines a 'layout row' as a label followed by 2+ whitespace-separated numeric-
+    # looking tokens.
+    # Requires at least one letter/CJK in the label and allows single-space gaps to
+    # accommodate PDF text extraction quirks; only treats as table after 3+ consecutive
+    # matches.
     _LAYOUT_ROW_RE = re.compile(
         r'^(?=.*[A-Za-z一-鿿])(?P<label>\S.{0,80}?)\s+'
         r'(?P<values>(?:' + _VALUE_TOKEN + r')(?:\s+(?:' + _VALUE_TOKEN + r'))+)\s*$'
@@ -389,10 +336,10 @@ class FinancialFileParser:
 
     @staticmethod
     def _split_text_header(line: str, n_cols: int) -> list:
-        """Column names from a header line made of words only ("By Business Segment
-        Organic sales Acquisitions Divestitures Translation Total sales change",
-        3M p25): each column caption starts with a capital letter; a short row-label
-        caption at the left is dropped. Only when exactly n_cols captions come out."""
+        """Parse column names from a header line composed solely of words; each caption
+        starts with a capital letter and a short leftmost row label is dropped. Accept
+        only when exactly n_cols captions are found.
+        """
         toks = (line or "").split()
         if not (3 <= n_cols <= 8) or len(toks) < n_cols or len(toks) > 24 or re.search(r"[0-9$%]", line or ""):
             return []
@@ -445,8 +392,9 @@ class FinancialFileParser:
                 n_cols = current_n_cols[0]
                 years = self._extract_year_headers(header_candidate[0]) if header_candidate[0] else []
                 if not years and header_candidate[0]:
-                    # quarterly highlights tables head their columns "1Q21 4Q20 3Q20 2Q20
-                    # 1Q20" (JPM p3): label them "1Q 2021" ... so the year is visible
+                    # Normalises compact quarter column labels so the year is explicit,
+                    # e.g. converts short forms like "1Q" with two-digit years into a
+                    # clear "1Q YYYY" style.
                     _qs = re.findall(r"(?<![A-Za-z0-9])([1-4])Q(\d{2})(?![A-Za-z0-9])", header_candidate[0])
                     if len(_qs) == n_cols:
                         years = [f"{q}Q 20{yy}" for q, yy in _qs]
@@ -513,10 +461,10 @@ class FinancialFileParser:
                 current_rows.append((label, values))
                 current_n_cols[0] = len(values)
             else:
-                # a short label-only sub-heading printed INSIDE a table
-                # ("Operating Income", "Reconciling items:") must not end the
-                # block: the rows above and below it are one table (Verizon p100
-                # segment reconciliation lost its first five rows to prose)
+                # Treats short label-only sub-headings printed inside a table as part of
+                # the same table rather than as block terminators.
+                # Prevents splitting a single table into separate blocks when an
+                # internal row is a label.
                 if (
                     current_rows
                     and len(stripped) <= 60
@@ -776,16 +724,11 @@ class FinancialFileParser:
             row_numeric = [
                 w for i, w in enumerate(row)
                 if self._LAYOUT_DIGIT_VALUE_RE.fullmatch(w["text"].strip())
-                # A number wrapped by an inline narrative connector ("...
-                # shares — 477 and 484", "years 1 to 3") is describing a
-                # count/range in running prose, not sitting in its own
-                # value column — including it as anchor evidence pulls
-                # the whole column cluster toward wherever that aside
-                # happens to fall (confirmed real case: Amazon's
-                # "Outstanding shares — 477 and 484" equity-section row
-                # dragged the balance sheet's real value-column anchors
-                # away from their true x1 positions). Real tabular values
-                # are never adjacent to a connector word within the row.
+                # Numeric tokens embedded in running prose with connector words (e.g.,
+                # "... shares — 477 and 484", "years 1 to 3") represent asides or
+                # ranges, not standalone column values.
+                # Treating them as column anchors can misalign detected columns; exclude
+                # such narrative-adjacent numbers from anchor voting.
                 and not (i > 0 and row[i - 1]["text"].strip().lower() in self._NUMERIC_CONNECTOR_WORDS)
                 and not (i + 1 < len(row) and row[i + 1]["text"].strip().lower() in self._NUMERIC_CONNECTOR_WORDS)
             ]
@@ -824,50 +767,23 @@ class FinancialFileParser:
     def _dominant_anchor_shape_fraction(
         self, rows: List[List[Dict[str, Any]]], anchors: List[float], tolerance: float
     ) -> float:
-        """
-        Of every row with 2+ numeric-looking tokens AND at least one of
-        them landing on a real anchor, what fraction share the single
-        most common "shape" (the sorted set of anchor indices those
-        numbers matched)? Computed from numeric tokens ONLY — label words
-        are excluded, since a label word coincidentally landing near an
-        anchor by chance is noise, not evidence of real column structure.
-        See _WORD_COL_MIN_SHAPE_CONFIDENCE for how this is used.
-
-        A row whose numbers matched NO anchor at all (empty shape ()) is
-        excluded from both the vote and the denominator — it's proof of
-        the ABSENCE of column structure for that one row, not evidence
-        FOR any particular shape, so it must not be allowed to compete in
-        most_common() (or even worse, WIN, silently outvoting the real
-        table shape purely by being the single most common kind of
-        "miss"). Confirmed real case: 3M's own FY2018 Free Cash Flow page
-        has exactly 4 rows sharing the real (1, 2, 4) table shape, but 5
-        OTHER unrelated numeric mentions elsewhere on the page (a "$96
-        million" aside, a page number, etc.) all failed to land on any
-        anchor and so all shared the same empty shape () — which,
-        included in the vote, outnumbered the real 4-row shape and became
-        "dominant" at 5/12 ≈ 0.42, just under the 0.5 confidence
-        threshold, so the whole page's Tier 2 pass abstained and all four
-        real data rows fell back to unstructured prose.
+        """Compute, over rows with 2+ numeric tokens and at least one hitting an anchor,
+        the fraction that share the single most common numeric "shape" (the sorted set
+        of anchor indices). Use numeric tokens only; label words are excluded as noise.
+        Exclude rows whose numbers match no anchors from both numerator and denominator
+        so empty matches do not dominate the vote; this prevents unrelated numeric
+        mentions from outvoting real table row shapes.
         """
         shapes = []
         for row in rows:
             numeric_words = [w for w in row if self._LAYOUT_VALUE_RE.fullmatch(w["text"].strip())]
             if len(numeric_words) < 2:
                 continue
-            # A repeated multi-category year header's own numeric tokens
-            # (e.g. "2018 2017 2016 2018 2017 2016") are narrower than the
-            # real dollar values below them, so their x1 frequently drifts
-            # outside `tolerance` of the anchors those wider values
-            # produced -- landing on a scattered, effectively RANDOM
-            # subset of anchors rather than the real data rows' shared
-            # shape. Left in the vote, this is the same failure mode the
-            # empty-shape exclusion above already guards against (a row
-            # that's evidence of the ABSENCE of real structure, not FOR
-            # any shape), just non-empty instead of empty -- confirmed
-            # real case: 3M's FY2018 "Business Segment Information" page,
-            # where the two header rows' scattered shapes diluted the 8
-            # real data rows' dominant fraction to just under 0.5,
-            # abstaining the whole page's Tier 2 pass.
+            # Repeated multi-category header rows whose numeric tokens are narrower than
+            # the data below can produce scattered x1 anchors that do not reflect the
+            # real data rows' shape.
+            # Avoid letting such header-token clusters dominate anchor voting; they
+            # often indicate header repetition rather than true column alignment.
             if self._is_bare_year_row(row):
                 continue
             matches = [self._assign_to_value_anchor(w["x1"], anchors, tolerance) for w in numeric_words]
@@ -880,16 +796,10 @@ class FinancialFileParser:
         return most_common_count / len(shapes)
 
     def _is_bare_year_row(self, row: List[Dict[str, Any]]) -> bool:
-        """
-        True when a row's value-like tokens are ALL bare 4-digit years (no
-        currency symbol, comma, decimal, or parens) -- a year-header line,
-        never real financial data. Shared by _dominant_anchor_shape_fraction
-        (so a repeated-year header's own scattered anchor votes don't
-        dilute/outvote the real data rows' shape) and the per-row
-        classification loop in _reconstruct_table_from_word_positions (so
-        such a row is treated as text/header-candidate, not a data row) --
-        see the callers' docstrings for the confirmed 3M FY2018 "Business
-        Segment Information" case this exists for.
+        """Detect rows whose value tokens are all bare 4-digit years (no currency, commas,
+        decimals, or parens) and treat them as year-header lines rather than data. This
+        prevents repeated-year header rows from diluting column-shape votes and ensures
+        they're classified as headers/text, not data.
         """
         value_like_tokens = [
             w["text"].strip() for w in row
@@ -977,19 +887,10 @@ class FinancialFileParser:
                 " ".join(w["text"] for w in row).strip() for row in rows
             ).strip()
 
-        # No real value-column structure found on this page at all (either
-        # no numeric tokens formed a column, or the ones that did don't
-        # dominate their rows) — genuinely a prose-only page, not a table
-        # with weak column alignment. The words themselves are still real
-        # content and must not be dropped; every row is returned as prose
-        # instead of silently discarding it. Confirmed real regression:
-        # a pure-MD&A page's five prose lines vanished entirely (both
-        # tables AND prose came back empty) once narrative-adjacent
-        # numbers ("2023 and into 2024") were correctly excluded from
-        # anchor-candidate voting elsewhere — removing that noise left
-        # zero anchors, and the old "anchors empty -> return ''" path
-        # threw the real prose away along with the (correctly rejected)
-        # phantom table.
+        # If no strong value-column structure exists on the page, return every row as
+        # prose rather than discarding content.
+        # This ensures prose-only pages are preserved even when anchor candidates are
+        # correctly excluded and no table anchors remain.
         anchors, tolerance = self._cluster_value_column_anchors(rows)
         if not anchors:
             return [], _rows_as_prose()
@@ -997,32 +898,18 @@ class FinancialFileParser:
             return [], _rows_as_prose()
 
         tables: List[str] = []
-        # Each entry pairs with the SAME index in `tables` — the y-position
-        # (page top-coordinate) of that table's own first accumulated row.
-        # Needed so a caller resolving each table's year/period header from
-        # nearby page text (see _reinject_year_header_if_missing()) can use
-        # THIS table's own actual position instead of one shared reference
-        # point for every table this function recovers — see
-        # current_first_row_top's docstring for the confirmed real case.
+        # Each recovered table entry pairs with the same index in tables: the y-position
+        # of that table's first accumulated row.
+        # This lets callers resolve nearby headers using the specific table's actual
+        # position instead of a shared reference.
         table_positions: List[float] = []
         prose_lines: List[str] = []
         current_rows: List[Tuple[str, List[str]]] = []
         current_n_cols = [None]
-        # The y-position of the FIRST row in the CURRENT accumulating run
-        # — captured once per run, reset after each _flush(). Without
-        # this, every table this function recovers from one page shared
-        # a single caller-supplied reference point (typically the page's
-        # very first ruled-line table's own top), so a SECOND recovered
-        # table further down the SAME page would search for its header
-        # starting from the FIRST table's position instead of its own —
-        # silently inheriting an earlier, unrelated table's year/period
-        # context. Confirmed real case: Amazon's own FY2017 "Quarterly
-        # Results" footnote recovers TWO "Operating income" tables (one
-        # per fiscal year, 2016 and 2017) via this function on the same
-        # page; both searched for a nearby header from the SAME shared
-        # position, so the 2017 table's four quarters were mislabeled
-        # "Q1 2016".."Q4 2016" — the position that was actually correct
-        # for the OTHER (2016) table recovered earlier on the same page.
+        # Track the y-position of the first row in the current accumulating run; capture
+        # it once per run and reset after flush.
+        # Without this, multiple tables recovered on one page could incorrectly share
+        # the same header search origin and inherit another table's context.
         current_first_row_top = [None]
         # Which anchor INDICES were actually populated for the row run
         # currently being accumulated — not just how many. Two rows can
@@ -1044,42 +931,12 @@ class FinancialFileParser:
 
         def _flush():
             n_cols = current_n_cols[0]
-            # A real financial-statement row almost never carries more
-            # than a handful of year/period columns (this project's own
-            # confirmed cases top out at 3). A row with MANY more numeric
-            # columns than that is a different shape of table entirely —
-            # a segment/category breakdown for a SINGLE period (e.g. "Total
-            # revenues | Pharmacy Services | Retail/LTC | Health Care
-            # Benefits | Corporate/Other | Eliminations | Consolidated"),
-            # not a multi-year comparison — and _extract_year_headers has
-            # no way to tell "2018" (a section divider introducing THAT
-            # year's own segment breakdown) apart from a genuine 3-column
-            # year header, so every segment's own value would be labeled
-            # as if it were a DIFFERENT year's whole-company total.
-            # Confirmed real case: CVS Health's FY2018 segment-analysis
-            # table has a "Total revenues" row reading "134,128 | 83,989 |
-            # 5,549 | 606 | (29,693) | 194,579" (Pharmacy Services segment
-            # revenue, four more segments, then the real consolidated
-            # total last) -- labeling column 1 "2018" made downstream
-            # extraction treat 134,128 (just the Pharmacy Services slice)
-            # as CVS's whole FY2018 revenue instead of the real 194,579.
-            # Safer to leave an implausibly-wide row as prose (same as
-            # before this reconstruction existed at all) than to mislabel
-            # segment data as a simple year comparison.
-            #
-            # EXCEPT when the nearby header line itself shows a clean
-            # repeating year pattern matching n_cols exactly (see
-            # _extract_repeating_year_headers) -- that's the OTHER wide-row
-            # shape: multiple metric categories side by side (e.g. "Net
-            # Sales | Operating Income", each spanning the same 3 years),
-            # not a single-period segment breakdown. Confirmed real case:
-            # 3M's FY2018 "Business Segment Information" page has a 6-value
-            # "Industrial" row under a "(Millions) 2018 2017 2016 2018 2017
-            # 2016" header -- a genuine multi-year table, just wider than
-            # 4 columns because of the two side-by-side categories. This is
-            # a strong, narrow signal (exact repeat count match) that won't
-            # misfire on CVS's case, whose header never repeats a year
-            # sequence at all.
+            # Rows with an unusually large number of numeric columns usually indicate a
+            # single-period segment/category breakdown, not a multi-period comparison;
+            # labeling them as years risks misinterpreting segment slices as whole-
+            # period totals.
+            # Treat implausibly-wide numeric rows as prose unless a nearby header shows
+            # a clean repeating year pattern that matches the row width exactly.
             repeating_years = (
                 self._extract_repeating_year_headers(header_candidate[0], n_cols)
                 if header_candidate[0] and n_cols is not None else []
@@ -1127,43 +984,22 @@ class FinancialFileParser:
             cells: List[List[str]] = [[] for _ in range(len(anchors) + 1)]
             for w in row_words:
                 w_text = w["text"].strip()
-                # Only a word that actually LOOKS like a value token (or a
-                # bare '$', handled specially just below) is even eligible
-                # for value-anchor assignment — an ordinary label word
-                # (e.g. "cash" in "Net cash provided by...") must never be
-                # pulled into a value column purely because its x1
-                # coincidentally lands within `tolerance` of some OTHER,
-                # unrelated numeric token's anchor elsewhere on the page.
-                # Confirmed real case: 3M's own "Net cash provided by
-                # operating activities" row had "cash" (x1≈83.7) collide
-                # with a spurious low-x1 value anchor seeded by unrelated
-                # stray numbers in nearby MD&A prose (anchor≈82.68,
-                # tolerance=3.0) — "cash" got wrenched out of the label
-                # and into its own bogus value cell, corrupting both the
-                # label text and the column count for the whole row.
+                # Only tokens that clearly resemble numeric values (or a bare '$',
+                # handled specially) are eligible for value-anchor assignment.
+                # Ordinary label words must not be moved into a value column solely
+                # because their x1 happens to fall within tolerance of an unrelated
+                # numeric anchor elsewhere on the page.
+                # This prevents label words from being misassigned as numeric cells.
                 is_value_like = bool(self._LAYOUT_VALUE_RE.fullmatch(w_text)) or w_text == "$"
                 col = self._assign_to_value_anchor(w["x1"], anchors, tolerance) if is_value_like else None
-                # A standalone '$' too far from its own number to satisfy
-                # _WORD_DOLLAR_MERGE_GAP (some filings right-align the
-                # glyph at the LEFT edge of a wide value column, well
-                # over 20pt from the digits at the right edge) can still
-                # land within `tolerance` of the SAME value anchor as the
-                # real number. Keeping it there glues a stray "$" onto an
-                # otherwise-clean value ("25,309 $"), which then fails
-                # numeric parsing downstream and silently drops that
-                # year's value entirely — confirmed real case: Amazon's
-                # balance-sheet "Accounts payable" row lost its FY2016
-                # column this way, leaving DPO's ap_old/ap_new to both
-                # fall back to the FY2017 figure. The glyph adds no
-                # numeric information once a real column is assigned, so
-                # it's dropped here rather than carried into the cell —
-                # unconditionally now, not just when it landed on a value
-                # anchor: since a bare "$" is never label content either,
-                # one that missed every anchor (e.g. too far from its own
-                # number, and no OTHER column happened to be nearby) would
-                # otherwise fall into the label bucket instead and litter
-                # the row's label with stray "$ $ $" (confirmed real case:
-                # 3M's "Net cash provided by operating activities $ $ $").
+                # A standalone '$' that missed matching its own number can still lie
+                # within tolerance of some value anchor and attach to that column,
+                # producing non-numeric cell text and breaking numeric parsing.
+                # Since a bare '$' conveys no numeric magnitude once a numeric column
+                # exists, drop such standalone dollar glyphs rather than carrying them
+                # into cells.
+                # Also drop any lone '$' that would otherwise end up in the label to
+                # avoid littering labels with stray symbols.
                 if w_text == "$":
                     continue
                 cells[0 if col is None else col + 1].append(w["text"])
@@ -1180,28 +1016,12 @@ class FinancialFileParser:
                 and len(numeric_rest) >= max(1, len(rest_cols) // 2)
             )
 
-            # A row whose value-like tokens are ALL bare 4-digit years (no
-            # currency symbol, comma, decimal, or parens) is a year-header
-            # line, never real financial data -- even when it just got
-            # classified as a data row above. A repeated multi-category
-            # year header (e.g. "(Millions) 2018 2017 2016 2018 2017 2016"
-            # for a table with TWO metric groups -- Net Sales, Operating
-            # Income -- each spanning the same 3 years) is exactly the
-            # case this catches: year tokens are narrower than the real
-            # dollar values below them, so their x1 often drifts outside
-            # `tolerance` of the anchors those wider values produced --
-            # some years land on an anchor, the rest spill into cell[0]
-            # and glue onto the label. The row that survives looks like a
-            # tiny "data row" (a corrupted label plus 1-2 stray numbers),
-            # gets flushed alone as too short to be a table (< MIN_ROWS),
-            # and is discarded as prose -- so header_candidate never
-            # captures the one line that actually names this table's
-            # years, and every real data row below falls back to generic
-            # Col4/Col5/Col6 placeholders. Confirmed real case: 3M's own
-            # FY2018 "Business Segment Information" page. Forcing this
-            # row through the text/header-candidate branch instead fixes
-            # both problems: the row is no longer corpus noise, and
-            # header_candidate gets the real repeated-year text intact.
+            # If all value-like tokens in a row are bare 4-digit years (no currency
+            # symbols, commas, decimals, or parens), treat the row as a year-header
+            # line, not data.
+            # This captures repeated multi-category year header rows that might
+            # otherwise be mis-parsed as short data rows and discarded, preserving
+            # header text for downstream column assignment.
             if is_data_row and self._is_bare_year_row(row_words):
                 is_data_row = False
 
@@ -1226,43 +1046,21 @@ class FinancialFileParser:
                 current_col_shape[0] = col_shape
             else:
                 _flush()
-                # Built from row_words' own natural left-to-right order
-                # (already sorted by x0 — see _cluster_words_into_rows),
-                # NOT from cell_texts (anchor-bucketed). Anchor bucketing
-                # is tuned for separating DATA VALUES into columns and
-                # relies on a tolerance that adapts to whatever numeric
-                # spacing dominates the page; a header/prose line's own
-                # words can legitimately sit at slightly different x
-                # positions than the data rows below (e.g. a "2015 2016
-                # 2017" year header isn't always exactly right-aligned to
-                # the same edge as the dollar values under it), and once
-                # a word falls outside that adaptive tolerance it gets
-                # shoved into the leftover "label" bucket instead of its
-                # own column — silently reordering the line when cells
-                # are rejoined by bucket index. Reading the words back in
-                # their own original order sidesteps that entirely.
-                # Confirmed real case: Amazon's FY2017 "Cost of sales"
-                # table header read as raw words "2015 2016 2017" (correct
-                # order) but reassembled via cell_texts as "2016 2017
-                # 2015" (2016/2017 fell outside the page's — tightened by
-                # many nearby percentage-row numbers — anchor tolerance
-                # and got bucketed as leftover text ahead of 2015), which
-                # then fed _extract_year_headers a scrambled year sequence
-                # and mislabeled every value in the table by one year.
+                # Reconstruct rows from row_words' original left-to-right ordering
+                # (sorted by x0), not from anchor-bucketed cell_texts.
+                # Anchor bucketing adapts to numeric spacing and can reorder
+                # header/prose words relative to data; preserving original word order
+                # avoids scrambling header sequences like year lists.
                 line_text = " ".join(w["text"] for w in row_words).strip()
                 if line_text:
                     prose_lines.append(line_text)
                     if self._extract_year_headers(line_text) or not header_candidate[0]:
-                        # A real 10-K commonly page-wraps a table's LAST
-                        # column header ("After" over "2023") across two
-                        # separate physical rows even though it's
-                        # logically one column label -- stitch a
-                        # standalone "After"/"Thereafter" row sitting
-                        # immediately above this one onto its own trailing
-                        # bare year, same as _inject_missing_year_header's
-                        # Tier 1 equivalent (see that fix's docstring for
-                        # the confirmed 3M FY2018 "Contractual Obligations"
-                        # case this covers).
+                        # Handle cases where a table's last column header is split
+                        # across two physical rows (e.g., a leading word on the prior
+                        # line over a trailing year).
+                        # If a standalone trailing label word sits immediately above a
+                        # year-like cell, stitch that word onto the year so the logical
+                        # column header is unified.
                         if prev_line_text[0].strip().lower() == "after":
                             m = re.search(r'(?:20|19)\d{2}$', line_text)
                             if m:
@@ -1275,43 +1073,11 @@ class FinancialFileParser:
 
     @staticmethod
     def _compact_row_cells(row: list) -> list:
-        """
-        Collapse pdfplumber's raw per-row cell grid down to [label, value1,
-        value2, ...] by dropping blank cells and lone '$' cells. A real
-        10-K commonly shows the currency symbol only on the FIRST row of a
-        section and on subtotal/total rows... except pdfplumber's ruled-
-        line cell detector does the opposite just as often — a data row
-        gets a dedicated '$' cell but the very next subtotal row doesn't
-        (or vice versa) — so the SAME logical column lands at a different
-        index depending on which row you're looking at. Since every row
-        is later matched to the header purely by column INDEX (see
-        _extract_from_markdown_table_block in pot_reasoner.py), that
-        positional drift silently drops values from any row whose shape
-        doesn't match the header's. Compacting away the blank/'$' noise
-        makes every row's shape the same: label, then exactly its real
-        values in order — immune to whichever row happened to get the
-        '$' cell. A real placeholder value like '—' (em dash) is kept,
-        since it's a meaningful zero/blank for that period, not noise.
-        Also re-merges a negative number's closing parenthesis back onto
-        its digits when pdfplumber's cell-splitting has put them in two
-        adjacent cells ('(116' + ')' -> '(116)') — otherwise that single
-        value eats two column slots instead of one, throwing off every
-        later column's index-based year match on that row. The same
-        splitting artifact happens to a trailing '%' just as often — a
-        percentage value like '23%' or a negative one like '(11%)' comes
-        back from pdfplumber's grid as two separate cells ('23' + '%', or
-        '(11' + '%)') whenever some OTHER row in the same ruled-line table
-        has its own column boundary fall between the digits and the sign
-        (e.g. a "$" or ")" cell elsewhere in the table shifts the shared
-        grid's gutter). Left unmerged, every percentage-only row (a
-        margin, an effective tax rate, a "% of net sales" row) reports
-        twice its real column count, which then desyncs its values from
-        the year header by however many stray '%' cells preceded them.
-        Confirmed real case: Corning's "Effective tax rate 23% 20%" row
-        compacted to 4 cells (23, %, 20, %) instead of 2 (23%, 20%),
-        pushing the year-header injection logic to treat "2022 2021 22
-        vs. 21" as belonging to a *different*, wider row shape and
-        synthesize bogus "2023"/"Col2"/"Col3"/"Col4" headers instead.
+        """Collapse a raw per-row cell grid into [label, value1, value2, ...] by dropping
+        blank and lone-symbol cells (e.g., '$') while keeping meaningful placeholders
+        (e.g., em dash). Also rejoin split tokens like a trailing ')' or '%' back onto
+        their digits so single logical values occupy one cell. This stabilizes column
+        indices across rows so later index-based header matching remains correct.
         """
         if not row:
             return row
@@ -1340,39 +1106,11 @@ class FinancialFileParser:
                 merged.append(rest[i])
                 i += 1
 
-        # A line-item label that wraps across two physical PDF lines (e.g.
-        # "Property and equipment," on one line, "net $" on the next) can
-        # land in pdfplumber's cell grid with the SECOND line's fragment as
-        # row[0] (the label) and the FIRST line's fragment pushed into what
-        # looks like the first value column — a non-numeric string sitting
-        # where a dollar figure should be. Reclaim any such leading
-        # non-numeric "value" cells back into the label (prepended, since
-        # they came from the line ABOVE the fragment that ended up as
-        # row[0]) rather than leaving them to either masquerade as data or
-        # silently break the row's column-index alignment with the header.
-        # Confirmed real case: CVS Health's "Property and equipment, net"
-        # balance-sheet row parsed as label="net $" with "Property and
-        # equipment," sitting in the first value slot — no alias for
-        # "property and equipment, net" could ever match a label of just
-        # "net $", so fixed-asset-turnover fell back to guessing.
-        # Bounded to AT MOST ONE reclaim, matching the single-stray-
-        # fragment scenario this is actually meant to fix (documented
-        # above) — an unbounded `while` here would also fire on a genuine
-        # multi-column HEADER row whose cells are non-numeric date/period
-        # strings ("January 28, 2023", "January 29, 2022", "January 30,
-        # 2021") rather than a wrapped label fragment: with no numeric
-        # cell to stop at, every column gets popped and PREPENDED in turn,
-        # which both destroys the header's column structure AND reverses
-        # the columns' left-to-right order in the process (each pop
-        # prepends, so the LAST cell ends up first). Confirmed real case:
-        # Best Buy's FY2023 cash-flow statement header row ("Fiscal Years
-        # Ended January 28, 2023 | January 29, 2022 | January 30, 2021")
-        # collapsed to a single garbled label "January 30, 2021 January
-        # 29, 2022 January 28, 2023 Fiscal Years Ended" — the subsequent
-        # year-header extraction then read the reversed text left-to-right
-        # and labeled the table's three columns "2021 | 2022 | 2023"
-        # instead of the real "2023 | 2022 | 2021", silently swapping
-        # FY2023's and FY2021's data on every row of the statement.
+        # If a label wraps across two PDF lines and a fragment from the prior line was
+        # pushed into the first value column as a non-numeric cell, reclaim at most one
+        # such leading non-numeric cell and prepend it back to the label.
+        # Limit to a single reclaim to avoid destructively popping entire multi-column
+        # header rows that legitimately contain non-numeric period strings.
         _numeric_cell_re = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.?\d*\)?%?$')
         if (
             merged
@@ -1384,37 +1122,11 @@ class FinancialFileParser:
         return [label] + merged
 
     def _inject_missing_year_header(self, rows: list, page, table_top: float) -> list:
-        """
-        pdfplumber's find_tables() draws its table's bounding box from the
-        ruled lines alone — on a real 10-K, a horizontal rule often sits
-        between the true "As of .../For the years ended ..." date line and
-        the section-label row below it (e.g. "Assets", "Net sales"), so
-        the date line falls OUTSIDE the detected box and the section-label
-        row is mistaken for the table's own header. Every value on the
-        table then silently fails downstream extraction, which requires a
-        recognisable year in the header to accept a row's value at all.
-
-        If rows[0] doesn't contain a year, look at the page text just
-        above this table's bounding box for the nearest line that does,
-        and synthesize a proper header from it — keeping rows[0] itself
-        as an ordinary data row (its label is usually still real, e.g.
-        "Assets"; it simply has no values of its own) rather than
-        discarding it. Expects rows already compacted by
-        _compact_row_cells() so "how many years" and "how many value
-        columns the widest data row has" agree without extra bookkeeping.
-
-        Some real 10-Ks split the header across TWO of pdfplumber's own
-        detected rows instead of one: a bare date-preposition line
-        ("December 31,") on its own, immediately followed by a
-        "(units caption)  2020  2019" row that carries the actual years
-        in its VALUE cells — confirmed real case: Corning's FY2020
-        balance sheet. rows[0] alone has no year, and nothing above the
-        table's bbox does either (the "December 31," line sits INSIDE
-        the detected table region, not above it), so the original
-        above-the-table search alone never finds it. Before giving up,
-        this also checks the next few rows for one whose own cells
-        contain a real year — if found, that row IS the header (not a
-        data row) and is consumed rather than kept.
+        """When the top detected table row lacks a year, search the page text above the
+        table bbox for the nearest date line and synthesize a header from it, keeping
+        the detected top row as a data row. Also handle headers split across detected
+        rows by checking the next rows for a year-containing row and consuming it as the
+        header if found. Expects rows compacted so value-column counts align.
         """
         if not rows:
             return rows
@@ -1437,24 +1149,9 @@ class FinancialFileParser:
             if not self._QUARTER_ORDINALS_RE.search(above_probe):
                 return rows  # already has a real year header — nothing to fix
 
-        # A comparative 10-K table is essentially never headed by a SINGLE
-        # year — even a one-column "current period only" table still pairs
-        # it with a caption, and every real header text this function has
-        # ever synthesized correctly (balance sheet, income highlights)
-        # carries 2+ years side by side. A lone year is much more likely to
-        # be incidental narrative prose a few lines above the table (a
-        # forward-looking "2023 Corporate Outlook" heading, a "for fiscal
-        # 2021" aside) than an actual column header, and accepting it
-        # anyway leaves every OTHER value column unlabeled ("Col2", "Col3",
-        # ...). Confirmed real case: Corning's page-24 "RESULTS OF
-        # OPERATIONS" table (headed by "2022 2021 22 vs. 21", 3 real value
-        # columns) sat right below a "2023 Corporate Outlook" paragraph —
-        # the nearest line above the table bearing ANY year was "For the
-        # first quarter 2023, we anticipate...", a single stray "2023"
-        # that got accepted as the whole header, mislabeling every column.
-        # Requiring 2+ years here makes the search keep climbing past that
-        # kind of noise to the genuine multi-year line (or the "next rows"
-        # fallback below, which finds it directly inside the table).
+        # Comparative multi-year tables almost always show at least two year columns.
+        # Treat a single isolated year above a table as likely prose, not a column
+        # header.
         n_value_cols = max((len(r) - 1 for r in rows[1:]), default=0)
         min_years_needed = min(2, n_value_cols) if n_value_cols else 2
 
@@ -1464,23 +1161,10 @@ class FinancialFileParser:
         except Exception:
             above_text = ""
 
-        # ── Quarter-ordinal header (a single-year quarterly breakdown,
-        # e.g. a 10-K's own "Quarterly Results" footnote) — checked
-        # BEFORE the "2+ years" search below, and returns immediately
-        # when found, so that search never gets a chance to keep
-        # climbing past this genuine header to an unrelated, more
-        # distant line that coincidentally mentions 2+ years. See
-        # _QUARTER_ORDINALS_RE's docstring for the confirmed real case.
-        # The LAST (closest-to-the-table) match, not .search()'s FIRST —
-        # `above_text` spans the entire page from y=0 down to this
-        # table's own top, so on a page with TWO quarterly blocks (e.g.
-        # 2016's then 2017's, one after another), the first match found
-        # would always be the EARLIER (2016) block's own "First...Fourth"
-        # line even when resolving the header for the LATER (2017)
-        # block's table — silently reusing 2016's own year for 2017's
-        # data. Confirmed real case: Amazon's own FY2017 quarterly
-        # results page did exactly this, mislabeling every one of
-        # 2017's four quarters as "Q1 2016".."Q4 2016".
+        # Detect quarter-ordinal headers (single-year quarterly breakdowns) before
+        # multi-year checks.
+        # Use the closest match above the table, not the first regex hit in the page
+        # span.
         quarter_matches = list(self._QUARTER_ORDINALS_RE.finditer(above_text))
         quarter_match = quarter_matches[-1] if quarter_matches else None
         if quarter_match:
@@ -1524,14 +1208,9 @@ class FinancialFileParser:
                 if n_value_cols else []
             )
             if period_headers:
-                # A real 10-K commonly page-wraps the LAST column's own
-                # 2-line header ("After" over "2023") across two separate
-                # physical text lines even though it's logically one
-                # column label — this line only ever sees the bottom half
-                # ("2023"), duplicating the previous column's own year.
-                # Confirmed real case: 3M's FY2018 "Contractual
-                # Obligations" table, where "After" sits alone on the line
-                # immediately above "(Millions) Total 2019 ... 2023 2023".
+                # Handle headers that wrap across physical lines where the last header's
+                # top line is separate.
+                # Avoid treating the wrapped bottom line alone as a distinct year label.
                 if idx > 0 and period_headers[-1].isdigit():
                     prev_line = above_lines[idx - 1].strip()
                     if prev_line.lower() == "after":
@@ -1546,19 +1225,9 @@ class FinancialFileParser:
         if years:
             n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
             n_value_cols = max(n_value_cols, len(years))
-            # The synthesized header's own first cell is always the
-            # generic "Line Item" column label — matching the fallback
-            # branch below (line ~1348) that already does this — NOT
-            # rows[0][0]'s own data value. rows[0] is kept as an ordinary
-            # DATA row right after this header (see docstring), so using
-            # its label here duplicated it into the header too, making a
-            # row's own line-item text look like a column concept name.
-            # Confirmed real case: 3M's FY2018 "Business Segment
-            # Information" page produced a header reading "| Industrial |
-            # 2018 | 2017 | 2016 | ... |" over a table whose first DATA
-            # row's label is ALSO "Industrial" (the segment name) — every
-            # other segment row (Health Care, Consumer, ...) then sat
-            # under a header cell naming an unrelated segment.
+            # Synthesized header first cell must be the generic Line Item label, not the
+            # first data row's value.
+            # Keep rows[0] as a data row to avoid duplicating its text into the header.
             synthesized = ["Line Item"] + [
                 years[i] if i < len(years) else f"Col{i + 1}" for i in range(n_value_cols)
             ]
@@ -1571,26 +1240,10 @@ class FinancialFileParser:
             candidate_years = self._extract_year_headers(" ".join(c or "" for c in row_i))
             if not candidate_years:
                 continue
-            # A row with only ONE cell (no value columns of its own) is
-            # far more likely a standalone year/section DIVIDER label
-            # sitting between repeated year-blocks of the SAME table than
-            # a genuine multi-column header row. Confirmed real case:
-            # American Express's FY2022 geographic-operations table is
-            # laid out as "2022" (its own lone row) / 2 data rows / "2021"
-            # (lone row) / 2 data rows / "2020" (lone row) / 2 data rows,
-            # with the REAL column header ("United States | EMEA | APAC |
-            # LACC | Other Unallocated | Consolidated") sitting just
-            # above the ruled-line table's own detected bbox and never
-            # reaching `rows` at all. Without this check, the lone "2021"
-            # divider row got accepted here as if it were the real
-            # header, mislabeling the FIRST two rows (actually 2022's own
-            # data) under "2021" and leaving a stray, unconsumed "2020"
-            # row sitting mid-table later on -- real values, completely
-            # wrong column semantics. Require either a genuine multi-cell
-            # row (this fallback's originally intended shape, e.g.
-            # Corning's own "(units caption) 2020 2019" row, still
-            # accepted below) or 2+ years packed into the single cell
-            # (unambiguous even alone, e.g. "2018 2017 2016").
+            # A row with a single cell is more likely a section/divider label than a
+            # multi-column header.
+            # Require either multiple header cells or multiple years in that single cell
+            # before accepting it.
             if len(row_i) <= 1 and len(candidate_years) < 2:
                 continue
             n_value_cols = max((len(r) - 1 for r in rows[i + 1:]), default=len(candidate_years))
@@ -1601,19 +1254,10 @@ class FinancialFileParser:
             ]
             return [synthesized] + rows[:i] + rows[i + 1:]
 
-        # Still nothing — for a small table recovered separately by Tier
-        # 2 (see _reinject_year_header_if_missing()), `table_top` is the
-        # PAGE's first ruled-line group's own top, not this fragment's
-        # position, and its own rows never contain the year at all (a
-        # genuine data-only orphan, e.g. Corning's "Cost of sales" /
-        # "Gross margin" pair, split out from the real statement purely
-        # by an unrelated pdfplumber row-detection artifact — see
-        # _ruled_line_tables_and_prose()). The real year header for a
-        # page's first/topmost table is reliably close by, just a little
-        # further down than "above the table" covers (it's often split
-        # across its own two or three short lines, per
-        # _inject_missing_year_header()'s main docstring) — so make one
-        # more attempt over a small window starting right at table_top.
+        # If no header is found above a table fragment, try a small search window
+        # starting at the table top.
+        # This captures page-top tables whose header text sits slightly outside the
+        # initial 'above' span.
         try:
             nearby = page.within_bbox(
                 (0, max(0, table_top), page.width, table_top + 60), relative=False
@@ -1623,23 +1267,10 @@ class FinancialFileParser:
             nearby_text = ""
         for line in nearby_text.split("\n"):
             years = self._extract_year_headers(line)
-            # Same "genuine multi-year header, not a single-year block
-            # divider" safety requirement as the "above the table" search
-            # earlier in this function (min_years_needed) -- without it,
-            # this window (which overlaps DOWN into the table's own top
-            # rows, per this branch's own docstring) can just as easily
-            # catch a lone year-block divider physically positioned a
-            # couple of rows into the table as the genuine split header
-            # this branch was written for. Confirmed real case: American
-            # Express's geography table (rows shaped "2022" (own row) / 2
-            # data rows / "2021" (own row) / 2 data rows / "2020" (own
-            # row) / 2 data rows, real header living OUTSIDE the detected
-            # bbox entirely) -- the earlier "next few rows" check now
-            # correctly rejects the lone "2021" row (see its own comment),
-            # but without this same guard here, THIS window's text-based
-            # scan still independently re-discovered "2021" a few lines
-            # into the table and used it as the header, reproducing the
-            # exact same mislabeling this function exists to prevent.
+            # Enforce the same multi-year header guard used earlier: require a genuine
+            # multi-row year header, not a single in-table year divider. Without this, a
+            # lone year cell inside the table can be mistaken for the actual header;
+            # keep the minimum-years check to avoid that mislabeling.
             if len(years) < 2:
                 continue
             n_value_cols = max((len(r) - 1 for r in rows[1:]), default=len(years))
@@ -1649,27 +1280,10 @@ class FinancialFileParser:
             ]
             return [synthesized] + rows
 
-        # No year/quarter/period signal found anywhere near this table.
-        # rows[0] is still about to be handed to _table_to_markdown(),
-        # which unconditionally treats row 0 as the header — fine when
-        # rows[0] genuinely IS a text header (e.g. a vote-tally table's
-        # real "Votes For | Votes Against | Abstentions | Broker
-        # Non-Votes" row), but when the table has no such row at all and
-        # rows[0] is actually the FIRST DATA ROW (e.g. the first board
-        # nominee's own name + vote counts), that row's raw numbers get
-        # used as the "header", and every OTHER row's real values end up
-        # paired against those numbers instead of a real column label —
-        # e.g. "Line Item: <2nd nominee> | 59,657,810: <value>" instead
-        # of "Votes For: <value>". Confirmed real case: Foot Locker's
-        # board-of-directors vote table and JPMorgan/American Express's
-        # wide comparison tables, none of which have any year column at
-        # all. Distinguish the two by checking whether rows[0]'s own
-        # value cells (excluding its label column) themselves look like
-        # numeric values, the same shape every other data row has — a
-        # real text header never does. When they do, synthesize the same
-        # generic "Line Item | Col1 | Col2 | ..." fallback Tier 2/Tier 3
-        # already use in this situation, and keep rows[0] as an ordinary
-        # data row instead of letting it masquerade as the header.
+        # If no period signal is near the table, rows[0] may be data not a header.
+        # Detect when rows[0]’s non-label cells look like numeric data matching other
+        # rows; in that case synthesize a generic "Line Item | Col1 | Col2 | ..." header
+        # and treat rows[0] as data to avoid using numbers as column labels.
         value_cells = [c for c in rows[0][1:] if c and str(c).strip()]
         if value_cells:
             value_like = sum(
@@ -1682,42 +1296,12 @@ class FinancialFileParser:
         return rows  # rows[0] already looks like a real text header — leave as-is
 
     def _reinject_year_header_if_missing(self, md: str, page, table_top: float) -> str:
-        """
-        Post-process an ALREADY-BUILT Markdown table string with
-        _inject_missing_year_header()'s "look at the page text just above
-        this table for a nearby year" logic — table-format-agnostic,
-        since it works on Markdown text rather than raw pdfplumber cells.
-
-        Needed because _inject_missing_year_header() only runs inside the
-        Tier 1 ruled-line loop above; Tier 2's word-coordinate recovery
-        (used for whatever rows have NO ruled lines at all — see
-        _ruled_line_tables_and_prose()'s own docstring) builds its own
-        Markdown tables independently and has no equivalent step, so a
-        real row recovered that way (confirmed real case: Activision
-        Blizzard's "Property and equipment, net" balance sheet row) can
-        still end up under a generic "Col1 | Col2" header instead of the
-        real "2019 | 2018" — which then fails downstream extraction the
-        exact same way a missing Tier 1 header would.
-
-        An existing year-looking header (lines[0]) is normally trusted
-        outright and left alone — EXCEPT when a quarter-ordinal header
-        (see _QUARTER_ORDINALS_RE) sits nearby just above this table.
-        Tier 2's own internal header_candidate tracking (see
-        _reconstruct_table_from_word_positions's _flush()) only ever
-        looks at the single most recent text-only line it happened to
-        scan, with no page-bbox awareness at all, so it can latch onto
-        an entirely unrelated multi-year sentence (e.g. a page's own
-        intro paragraph, several lines above the real table) well before
-        this bbox-aware check ever gets a chance to run — and that guess
-        LOOKS like a valid year header on its own, so the check below
-        would otherwise trust it and stop. Confirmed real case: Amazon's
-        FY2017 quarterly-results page recovered an "Operating income"
-        table via Tier 2 and labeled it "2016 | 2017 | Col3 | Col4" from
-        the page's own intro sentence ("...for each quarter of 2016 and
-        2017...") — a real quarter-ordinal header ("First Second Third
-        Fourth") sits much closer, right above the table, and correctly
-        identifies these four columns as one single year's four quarters
-        instead.
+        """Post-process a Markdown table string to inject a missing year header by looking
+        at nearby page text.
+        Operates on Markdown text so it is format-agnostic; used when an independently-
+        built table lacks the correct header.
+        Avoids trusting a nearby multi-year sentence when a closer quarter-ordinal
+        header is present.
         """
         lines = md.split("\n")
         if len(lines) < 2:
@@ -1810,47 +1394,13 @@ class FinancialFileParser:
     def _recover_ruled_row_cells(
         self, page, table
     ) -> List[List[Optional[str]]]:
-        """
-        pdfplumber's ruled-line cell detector sometimes finds no bounded
-        cell at all for MOST of a sub-item row — the ruled grid only has
-        lines drawn around "total"/header rows, leaving sub-item rows in
-        between with just ONE bounded cell (usually only the latest
-        year's value) instead of the full label + every year's value.
-        table.extract() then returns None for every other cell in that
-        row even though the real text is genuinely printed on the page
-        at that row's own y-position, because extract() only ever reads
-        text from WITHIN a cell it could actually bound. Confirmed real
-        case: Nike's FY2018 income statement — "Cost of sales",
-        "Demand creation expense", "Total selling and administrative
-        expense", "Other expense (income), net", "Income tax expense",
-        and "Basic" (EPS) each kept only their FY2018 value and lost
-        both their own label AND their FY2017/FY2016 values, because
-        none of those cells were ever bounded by a ruled line for that
-        particular row — every ALTERNATING row in the whole statement,
-        even though the numbers on rows that DID get fully ruled are
-        perfectly correct.
-
-        Recovering by raw pdfplumber cell INDEX doesn't work: a real
-        10-K's own ruled grid places a blank '$'-sign gutter cell at a
-        DIFFERENT column index on different rows (the same reason
-        _compact_row_cells() exists at all), so "column index 2" on one
-        row is a real value while on another it's just a '$' gutter —
-        naively filling every row's missing index-N cell from whichever
-        OTHER row happens to have a real bbox there silently duplicates
-        one column's value into an unrelated neighboring column.
-
-        Instead clusters every genuinely NUMERIC bounded cell across
-        the WHOLE table by x1 (right edge) position — right-aligned
-        numbers in the same real column line up almost exactly there
-        regardless of which raw index pdfplumber happened to assign
-        them, the same coordinate-based approach Tier 2's own
-        _cluster_value_column_anchors() uses. For a row with only one
-        (or zero) bounded cells, this recovers the label (crop from the
-        table's own left edge out to the leftmost value cluster) and
-        each value column (crop to that cluster's own x-range and this
-        row's own y-range, taken from whichever cell the row DOES have)
-        directly from the page, independent of pdfplumber's own
-        unreliable per-row column count.
+        """Recover missing cells in ruled-line tables when many rows lack bounded cells but
+        their text exists on the page.
+        Cluster numeric cells across the whole table by right-edge x coordinate and crop
+        label/value text from page coordinates rather than relying on per-row cell
+        indices.
+        This prevents misplacing values when pdfplumber returns inconsistent column
+        counts; use coordinate-based clusters only for numeric-aligned columns.
         """
         pdf_rows = table.rows
         extracted = table.extract()
@@ -1932,17 +1482,12 @@ class FinancialFileParser:
     _STRIP_NUMBER_CELL_RE = re.compile(r'^\(?-?\$?\s*[\d,]+\.?\d*\)?\s*%?$')
 
     def _is_wide_header_strip(self, rows: list) -> bool:
-        """
-        True when a ruled-line group holds ONLY a multi-group column header
-        and no data: at most 3 rows, at least 4 bare-year cells (e.g. "2021
-        2020 Change" repeated once per segment), and no cell that is a real
-        number other than a year. Confirmed real case: JPMorgan's 10-Q
-        "Segment results -- managed basis" page draws ruled bands around
-        only the two header strips (segment names + "2021 2020 Change" x3),
-        so Tier 1 turned each into a junk table and excluded those words
-        from the page -- the unruled data rows below then reached the chunk
-        text (as prose) with no segment names or period labels above them,
-        making it impossible to tell which number belongs to which segment.
+        """Detect ruled-line groups that contain only multi-group column headers and no
+        actual data rows.
+        Such groups typically have a few short rows and multiple bare-year cells but no
+        real numeric values, indicating they are header bands rather than data.
+        Used to avoid treating header-only ruled bands as tables and losing those labels
+        from nearby prose.
         """
         if not rows or len(rows) > 3:
             return False
@@ -2004,22 +1549,11 @@ class FinancialFileParser:
                     except Exception:
                         recovered_rows = t.extract()
                     rows.extend(self._compact_row_cells(r) for r in recovered_rows)
-                # pdfplumber's own grid detection can find a table's OUTER
-                # boundary via ruled/shaded lines while finding NO internal
-                # vertical separators at all — every row then comes back
-                # as ONE glued cell (e.g. "Total revenue 17,606 15,785
-                # 12,868" as a single string, confirmed real case: Adobe's
-                # borderless FY2022 income statement page). Downstream,
-                # _inject_missing_year_header() still happily synthesizes
-                # a real "2022 | 2021 | 2020" header from nearby text,
-                # producing a convincing-looking table whose every value
-                # cell is actually blank — the numbers never left the
-                # label. Requiring most rows to already have a REAL 2nd
-                # cell (a genuine column split, before any header
-                # synthesis) catches this before it's masked; when it
-                # isn't met, this group is left for Tier 2's word-
-                # coordinate reconstruction below instead, which doesn't
-                # depend on pdfplumber's own column detection at all.
+                # pdf layout tools can yield rows merged into a single cell when
+                # internal vertical separators are missing, producing label-only cells.
+                # Require most rows to have a real second cell before synthesizing a
+                # period header; otherwise defer to a reconstruction method that doesn't
+                # rely on the tool's column detection.
                 real_rows = [r for r in rows if r and r[0] and str(r[0]).strip()]
                 split_rows = [r for r in real_rows if len(r) >= 2]
                 well_split = bool(real_rows) and len(split_rows) >= max(1, len(real_rows) // 2)
@@ -2041,24 +1575,11 @@ class FinancialFileParser:
                 md_tables.append(md)
             for t in group:
                 try:
-                    # outside_bbox() only keeps objects FULLY outside the
-                    # given box — a word whose bbox bleeds even a fraction
-                    # of a point into an adjacent detected table's edge
-                    # (ordinary line-height/descender spacing, not a real
-                    # overlap) gets treated as "inside" and silently
-                    # dropped, even though it belongs to a completely
-                    # different row. Confirmed real case: Corning's income
-                    # statement "Cost of sales" row sits in the ~12pt gap
-                    # between two adjacent detected table fragments, but
-                    # its own text bbox bottom edge (151.68) crept 0.3pt
-                    # past the next fragment's top edge (151.39) — enough
-                    # for outside_bbox() to discard the word entirely, and
-                    # neither Tier 1 (it was never inside any detected
-                    # table) nor Tier 2 (excluded here) ever recovered it.
-                    # Shrinking the excluded box inward by a small margin
-                    # keeps genuine table content safely excluded while
-                    # no longer eating a neighboring row over sub-point
-                    # bleed.
+                    # A strict outside_bbox test can exclude words whose bboxes slightly
+                    # bleed into an adjacent box due to line-height/descender spacing.
+                    # Shrink the exclusion box inward by a small margin so nearby
+                    # genuine content isn't dropped while still excluding truly
+                    # overlapping items.
                     x0, top, x1, bottom = t.bbox
                     pad = 1.0
                     shrunk_bbox = (x0, min(top + pad, bottom), x1, max(bottom - pad, top))
@@ -2241,10 +1762,13 @@ class FinancialFileParser:
     _GROUP_CODE = {"three": "3M", "six": "6M", "nine": "9M", "twelve": "12M"}
 
     def _merge_tail_artifact_column(self, headers: list, data_rows: list):
-        """A last column that only ever holds the tail of the previous column's
-        text (")%" after "(10.9") is an extraction artifact: merge it back.
-        Best Buy p17 "Revenue % change (7.1)% ... (10.9 | )%" produced a 5th value
-        column, so no period-group header could match the 4 real columns."""
+        """Merge a trailing one-cell column that only contains the tail fragment of the
+        prior column's text back into that prior column.
+        This addresses extraction artifacts where a stray fragment (e.g., closing
+        punctuation or percent sign) becomes its own column.
+        Apply when the last column consistently appears to be a suffix to the preceding
+        value.
+        """
         if len(headers) < 5 or not data_rows:
             return headers, data_rows
         last = [r[-1].strip() for r in data_rows if len(r) == len(headers) and r[-1].strip()]
@@ -2296,29 +1820,23 @@ class FinancialFileParser:
         return True
 
     def _is_date_header_row(self, row: list) -> bool:
-        """A data row whose label AND every filled cell is a calendar date
-        ("July 29, 2023 | January 28, 2023 | July 30, 2022") is really the
-        column header of the table that follows it, not data. Confirmed real
-        case: Best Buy's 10-Q liquidity table (p20) came out as the row
-        `Line Item: July 29, 2023 | 2023: January 28, 2023 | 2022: July 30,
-        2022` and its cash row was labeled `2023: 1,093 | 2022: 1,874`
-        (1,874 is January 2023, not 2022)."""
+        """Identify a row where the label and every filled cell are calendar dates as
+        actually being the column header for the following table.
+        Such rows typically represent period labels (dates) rather than data and should
+        be promoted to header status.
+        Promote only when all cells are date-like to avoid misclassifying genuine data
+        rows.
+        """
         cells = [c.strip() for c in row if c and c.strip()]
         return len(cells) >= 2 and all(self._DATE_CELL_RE.match(c) for c in cells)
 
     def _refine_value_headers(self, value_headers: list, header_prose: str) -> list:
-        """Give ambiguous value-column labels ("Col3", or the same year twice)
-        a real meaning from the header lines printed above the table.
-
-        Two shapes, both from real filings:
-        * "Amount / Percent to Sales" pairs (JnJ statement of earnings:
-          Amount 2023 | % to sales 2023 | Amount 2022 | % to sales 2022 |
-          % change): amounts keep the bare year (the sandbox reads that),
-          the percent columns get a year-less label so they can never be
-          mistaken for that year's dollar figure.
-        * period groups ("Three months ended | Twelve months ended" x
-          two years, MGM/Amcor earnings releases): "2022 (3M)", "2022 (12M)".
-        Anything that does not match exactly is returned unchanged."""
+        """Disambiguate generic or duplicated value-column labels (e.g., "Col3" or repeated
+        year) using header lines printed above the table.
+        Handle common shapes like amount/percent column pairs and period-grouped year
+        labels by composing meaningful column labels from header context.
+        Leave labels unchanged if they do not match the expected header patterns.
+        """
         n = len(value_headers)
         if n < 3:
             return value_headers
@@ -2380,26 +1898,10 @@ class FinancialFileParser:
                     return [f"{q}Q 20{yy}" for q, yy in first]
         return value_headers
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Grouped-column tables (segment blocks / multi-period blocks)
-    # ──────────────────────────────────────────────────────────────────────
-    # Some filings print ONE table as several side-by-side column groups, each
-    # group headed by a name and made of the same few sub-columns, e.g.
-    #
-    #   Three months ended March 31, Consumer & Community Banking  Corporate & Investment Bank  Commercial Banking
-    #   (in millions, except ratios)  2021  2020  Change            2021  2020  Change           2021  2020  Change
-    #   Total net revenue           $ 12,517 $ 13,287 (6)%       $ 14,605 $ 10,003 46%      $ 2,393 $ 2,165 11%
-    #
-    # (JPMorgan's segment results), or a VaR table whose groups are the
-    # periods ("June 30, 2023 | March 31, 2023 | June 30, 2022") each with
-    # "Avg. Min Max". None of the other table tiers recognises this shape, so
-    # the page stayed one raw text block (the "lowest net revenue segment" /
-    # "highest net income segment" / VaR questions then depended on the LLM
-    # reading a wall of numbers, and the sandbox showed an unrelated firm
-    # total). The sub-header line is the anchor: its tokens repeat as a
-    # whole unit (2021 2020 Change x3, Avg. Min Max x3) and the unit contains
-    # a word, so plain repeated-year headers (already handled elsewhere) do
-    # not match.
+    # Handle grouped-column tables made of repeated column groups (same sub-columns
+    # repeated side-by-side). Detect the repeated sub-header token sequence (the sub-
+    # header repeats as a unit and contains words) and split the block into group
+    # columns so downstream logic can interpret each segment independently.
     _GC_BAD_UNIT_RE = re.compile(
         r"^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?$|.*[,:]$|^\d{1,2}$|^(?:of|to|and|the|in|at|for|by|on|per|as)$",
         re.IGNORECASE,
@@ -2450,10 +1952,10 @@ class FinancialFileParser:
                     continue
                 if not any(re.search(r"[A-Za-z]", t) for t in unit):
                     continue
-                # a run of dates ("July 2, July 3,"), connectors ("Amount to Sales"
-                # split into 3 tokens) or bare day numbers is not a set of column
-                # captions -- it made JnJ/Pfizer/3M/Amcor date headers and equity
-                # statements come out as mislabeled sparse tables
+                # Do not treat runs of dates, connector words, or bare day numbers as
+                # column captions. Such sequences can mimic headers and cause
+                # mislabeling; require stronger header signals before accepting them as
+                # column labels.
                 if any(self._GC_BAD_UNIT_RE.match(t) for t in unit):
                     continue
                 if best is None or m * g > best[0]:
@@ -2464,12 +1966,12 @@ class FinancialFileParser:
         return best[1], best[2], best[3]
 
     def _stacked_subheader(self, lines: list, i: int, run_words: list):
-        """Sub-column captions printed over several lines ("Rigid" above
-        "Packaging", Amcor p10): rebuild the captions from the numeric columns
-        themselves. Column anchors come from the first data rows, every non-
-        numeric word in the caption band is assigned to its nearest anchor and
-        the captions are read top-to-bottom. Returns (unit, groups, words) like
-        _periodic_subheader, or None when the captions do not repeat."""
+        """Reconstruct multi-line sub-column captions that were printed above numeric
+        columns by assigning each non-numeric caption word to the nearest column anchor
+        derived from the first data rows.
+        Returns (unit, groups, words) like _periodic_subheader, or None when captions do
+        not form a repeating pattern.
+        """
         data = None
         for k in range(i + 1, min(len(lines), i + 6)):
             if sum(1 for w in lines[k]["words"] if self._GC_NUM_RE.match(w["text"])) >= 3:
@@ -2701,18 +2203,15 @@ class FinancialFileParser:
                 cand = _names_from(lines[i - back]["words"])
                 if any(not c for c in cand) or len(set(cand)) < ngroups:
                     continue
-                # a group name is a short caption ("Consumer & Community Banking",
-                # "Twelve Months Ended June 30, 2022"); a whole prose line above the
-                # table split by x-position is not (Adobe/Amazon/Microsoft/Ulta
-                # pages came out with sentences as column labels)
+                # Define a group name as a short caption that labels a table section.
+                # Do not treat a full prose line above a table split by x-position as a
+                # group name.
                 if any(len(c) > 60 or len(c.split()) > 8 for c in cand):
                     continue
-                # ... and it is not a data row of the table above split by
-                # x-position ("Provision for credit losses 761 (1,868) NM",
-                # "Return on equity 24 % 44 % 14 %"): such a line used to override
-                # the real names (JPM p21: three of four stacked segment tables came
-                # out with data rows as group names, labels shifted by one table).
-                # Dates ("June 30, 2022") and bare years are not figures.
+                # Do not treat a data row from the table above (split by x-position) as
+                # a group name.
+                # Exclude standalone dates or bare years from being considered numeric
+                # figures.
                 if any(
                     sum(
                         1 for t in c.split()
@@ -2729,10 +2228,8 @@ class FinancialFileParser:
             if names is None:
                 i += 1
                 continue
-            # keep the labels short: BM25 row length normalisation ranked the JPM/Pfizer
-            # rows with long "Three Months Ended '23: ..." labels below their old
-            # short-labelled versions and pushed them out of the LLM's 16 chunks
-            # (Pfizer "which region had the biggest drop" lost its p38 rows)
+            # Keep group labels short to avoid harming retrieval ranking and chunking.
+            # Long verbose labels may push important rows out of model context.
             def _short(nm: str) -> str:
                 nm = re.sub(
                     r"(?i)\b(three|six|nine|twelve)\s+months?\s+ended\b",
@@ -2741,10 +2238,9 @@ class FinancialFileParser:
                 return nm.strip()
             names = [_short(nm) for nm in names]
 
-            # a period heading printed alone above the names line ("Three months
-            # ended June 30," / "Six months ended June 30,") tells stacked tables
-            # apart; without it the 3-month and 6-month CCB/CIB/CB tables of JPM
-            # p21 carried identical labels
+            # A standalone period heading above the names line distinguishes stacked
+            # tables.
+            # If missing, different period tables can appear identical and be conflated.
             _lead_period = ""
             for k in range(names_idx, max(-1, names_idx - 3), -1):
                 mp = re.match(
@@ -2766,12 +2262,10 @@ class FinancialFileParser:
                     return f"{name} '{sub_tok[-2:]}"  # year-less: never read as that year's figure by the sandbox
                 return f"{name} {sub_tok}"
 
-            # caption: the nearest sentence/heading above the group-name line ("The
-            # following summarizes revenues by geographic area:"). Stored in the first
-            # header cell and written into every row, so a query about "geographic
-            # region" can find rows whose own label ("Developed Rest of World") never
-            # says it (Pfizer's three-month region table ranked ~30th and dropped out
-            # of the LLM's evidence).
+            # Define caption as the nearest sentence or heading above the group-name
+            # line.
+            # Store it in the first header cell and copy into each row so queries on
+            # context (e.g., region) can find relevant rows.
             caption = ""
             for k in range(names_idx - 1, max(-1, names_idx - 7), -1):
                 ws_k = lines[k]["words"]
@@ -2866,10 +2360,11 @@ class FinancialFileParser:
     )
 
     def _page_unit(self, page_text: str) -> str:
-        """The single monetary unit a page states in its captions ("($ million)",
-        "(in millions, except per share)", "(dollars in millions)"), or "" when
-        the page states none or several. Table rows do not carry it, so an answer
-        built from a row alone said "EBITDA 2,018" with the unit unknown (Amcor)."""
+        """Extract the single monetary unit declared on a page's captions (e.g. unit
+        indicator phrases), or "" when none or multiple units appear.
+        This is necessary because table rows lack unit markers and answers built from
+        rows alone would have an unknown unit.
+        """
         units = {m.group(1).lower().rstrip("s") for m in self._UNIT_MENTION_RE.finditer(page_text or "")}
         if len(units) != 1:
             return ""
@@ -2902,24 +2397,11 @@ class FinancialFileParser:
         unit_note = self._page_unit(page_text)
         report_label = f"{table_name} [{unit_note}]" if unit_note else table_name
 
-        # The section heading/title text immediately BEFORE the first
-        # table block (e.g. "Amcor plc and Subsidiaries / Consolidated
-        # Statements of Income", or — critically — "Deed of Cross
-        # Guarantee / Consolidated Statements of Income" for a
-        # supplementary guarantor schedule that otherwise reuses the
-        # exact same line-item labels as the real consolidated
-        # statements). Without this, parent_content contained ONLY the
-        # bare table blocks with no surrounding context at all, so
-        # nothing downstream — not a human reading the Source Evidence
-        # panel, not pot_reasoner's _is_supplementary_schedule() check —
-        # could tell a guarantor schedule's table apart from the real
-        # one; confirmed real case: Amcor's page 105 guarantor schedule's
-        # $58M gross profit silently passed every check meant to exclude
-        # it, purely because the words "Deed of Cross Guarantee" were
-        # never actually part of the evidence text being checked. Only
-        # the last few lines are kept — the line(s) right above the
-        # table are almost always its own title, not earlier boilerplate
-        # further up the page.
+        # Capture the section heading/title immediately before the first table block as
+        # parent context.
+        # Keep only the last few lines immediately above the table, since they typically
+        # contain the table's actual title and distinguish supplementary schedules from
+        # primary statements.
         first_block_pos = page_text.find(table_blocks[0])
         leading_context = page_text[:first_block_pos].strip() if first_block_pos > 0 else ""
         if leading_context:
@@ -3001,10 +2483,11 @@ class FinancialFileParser:
                 passages.append({
                     "id": f"pdf_tbl_{company_name}_p{page_num}r{row_idx}",
                     "company": company_name,
-                    # the page's unit rides on the display name only (shown to the
-                    # LLM); inside `content` it changed BM25 length normalisation
-                    # for every unit-annotated row and reshuffled retrieval (Verizon
-                    # debt lost its "Total debt" row from the top 10)
+                    # Retrieval weight for a unit was applied using the display name
+                    # only; internal content altered BM25 length normalisation per unit-
+                    # annotated row and changed retrieval rankings. Use caution: this
+                    # can demote rows that should rank highly if their unit label
+                    # differs between display and content.
                     "table_name": report_label,
                     "period": "-".join(value_headers) if value_headers else "N/A",
                     "page_number": page_num,
@@ -3021,12 +2504,10 @@ class FinancialFileParser:
                     "is_child": True,
                 })
 
-            # The parent markdown (what the Source Evidence panel and the LLM's
-            # parent context show) still carried the generic "2023 | 2022 | Col3 ..."
-            # / "Col1 .. Col5" header, and date/label header lines as data rows,
-            # while only the per-row chunks used the refined labels (JnJ p10
-            # "2022" over the % to Sales column; JPM p3 "Col1..Col5" for 1Q21 ..
-            # 1Q20; Best Buy p8 "2023 | 2023 | 2022"). Rewrite the block's header.
+            # Parent markdown header shown to the LLM retained generic column headers
+            # while per-row chunks used refined labels; header block should be rewritten
+            # to use consistent, clear column labels so parent context matches per-row
+            # labels.
             if len(md_value_headers) == len(block_headers_raw) - 1 and (
                 md_value_headers != block_headers_raw[1:] or md_header_rows
             ):
@@ -3048,32 +2529,12 @@ class FinancialFileParser:
 
         return passages, prose_only_text
 
-    #: A 10-K's own front-matter Table of Contents page lists section/Item
-    #: names next to a bare page number (e.g. "PART II 21", "Item 3. Legal
-    #: Proceedings. 20") — structurally IDENTICAL to a real two-column
-    #: financial table (a short label immediately followed by one small
-    #: integer), so table detection routinely mistakes it for one.
-    #: Confirmed real case: Best Buy's own TOC produced a corpus row
-    #: reading "Line Item: PART II | 2023: 21" — the section's STARTING
-    #: PAGE NUMBER (21) got labeled as if it were a $21 million dollar
-    #: figure for fiscal year 2023.
-    #:
-    #: The bare phrase "Table of Contents" alone is NOT a reliable signal
-    #: on its own — many EDGAR-formatted 10-Ks print it as a small
-    #: running/navigation header at the very top of EVERY page throughout
-    #: the ENTIRE filing (a "back to contents" convention), not just the
-    #: one real listing page. Confirmed real case, a severe regression:
-    #: Netflix's FY2017 10-K balance sheet page itself starts with
-    #: "Table of Contents\nNETFLIX, INC.\nCONSOLIDATED BALANCE SHEETS\n..."
-    #: — an earlier version of this check keyed on the bare phrase alone
-    #: and misclassified the balance sheet (and most other content pages
-    #: across the corpus) as the TOC, routing them to plain-text chunking
-    #: and silently losing the vast majority of structured table_row
-    #: passages corpus-wide (confirmed: total passage count dropped from
-    #: ~74,600 to ~59,200 across all 48 PDFs from this alone). The REAL
-    #: listing page is reliably distinguished by ALSO containing at least
-    #: one "PART I"/"PART II" section marker within the same opening
-    #: window — a running header on an ordinary content page never does.
+    #: A document Table of Contents often appears as short labels followed by a small
+    #: integer, which can be mistaken for a two-column financial table. The reliable
+    #: signal for a real TOC page is the presence of a section marker like PART I or PART
+    #: II near the start; do not treat the phrase Table of Contents alone as sufficient
+    #: evidence. Use this combined check to avoid misclassifying content pages as TOC and
+    #: losing structured table rows.
     _TABLE_OF_CONTENTS_RE = re.compile(r'\btable\s+of\s+contents\b', re.IGNORECASE)
     _TOC_PART_MARKER_RE = re.compile(r'\bpart\s+(?:i|ii|iii|iv)\b', re.IGNORECASE)
 
@@ -3154,26 +2615,12 @@ class FinancialFileParser:
     )
 
     def _extract_period_headers(self, text: str, n_cols: int) -> list:
-        """
-        Detect a header mixing bare years with the two non-year period
-        labels standard in a 10-K's "Contractual Obligations" table:
-        "Total" (a lifetime/summary column) and "After <year>" or
-        "Thereafter" (a catch-all bucket for everything past the named
-        years) -- e.g. "(Millions) Total 2019 2020 2021 2022 2023 After
-        2023". Plain _extract_year_headers only recognises bare years, so
-        it silently DROPS "Total" and "After 2023" from the header and
-        shifts every following column's label left by one: the row's
-        first value (its lifetime Total) ends up mislabeled as if it were
-        the first year, that year's real value sits under the NEXT year's
-        label, and so on, with the final "After 2023" bucket falling off
-        the end into a generic "Col6"/"Col7" placeholder. Confirmed real
-        case: 3M's FY2018 "Contractual Obligations" table.
-
-        Returns exactly n_cols period-label strings (each a bare year,
-        "Total", "Thereafter", or "After <year>") when the header's own
-        period-token count matches n_cols exactly, else []. Requiring an
-        exact count match keeps this from firing on an unrelated line that
-        merely happens to contain the word "Total" once.
+        """Detect headers that mix bare years with summary period labels such as "Total"
+        and "After <year>/Thereafter" so column labels align with values.
+        Returns exactly n_cols period-label strings when the header's token count
+        matches n_cols, else [].
+        The exact-count requirement prevents misapplying this to unrelated lines
+        containing the word "Total".
         """
         if n_cols <= 0:
             return []
@@ -3270,50 +2717,18 @@ class FinancialFileParser:
         section: str,
         parent_source_text: Optional[str] = None,
     ) -> list:
-        """
-        Chunk free text into 'text_note' passages. `parent_source_text` lets
-        the parent record keep the full original page text (e.g. including a
-        table that was linearised separately) even when only the prose part
-        of the page is being chunked here.
-
-        parent_content deliberately carries the FULL source_text, not a
-        truncated preview — this used to be hardcoded to source_text[:1000],
-        silently dropping anything on the page past character 1000. A real
-        10-K note routinely runs well past that on a single page (e.g. a
-        multi-item acquisitions/divestitures note, a legal-proceedings
-        section): every downstream consumer of parent_content (the frontend
-        Source Evidence panel, and — once fixed the same way —
-        llm_client.py's evidence formatting) exists specifically to show
-        "the whole page this chunk came from", so truncating it here defeats
-        that purpose for exactly the pages where it matters most. Confirmed
-        real case: Amcor's FY2023 "Note 5 - Acquisitions and Divestitures"
-        page names three separate acquisitions (Czech Republic, Shanghai,
-        New Zealand) — the third one sits past character 1000, so it was
-        silently missing from parent_content even though every one of the
-        note's OWN child chunks (built from the same page text via
-        chunk_text() below, which has no such cap) still covered it.
-        Downstream truncation for a specific consumer's own budget (e.g. an
-        LLM prompt's token limit) belongs at that consumer, not baked into
-        the shared corpus record here.
+        """Chunk free text into prose passages while preserving the full page text in
+        parent_content so downstream consumers can access the complete source.
+        Args: parent_source_text carries the full source page (not a truncated preview).
+        Returns: created text_note chunks; parent_content must not be truncated here
+        because consumer-specific limits belong at the consumer layer.
         """
         source_text = parent_source_text if parent_source_text is not None else text
-        # 3000 chars (not 800) -- matches FinanceBench's own reference
-        # chunk size. A page's per-chunk boosts (the year-match multiplier
-        # in hybrid_retriever.search(), in particular) only ever look at
-        # the CANDIDATE chunk's own text, not the full page -- an 800-char
-        # split routinely separates a page's own date/year line from the
-        # actual data the question needs several sentences later, so the
-        # chunk that actually answers the question misses a boost that a
-        # neighboring, less relevant chunk (which happens to still contain
-        # the date line) gets instead. Confirmed real case: 3M's own
-        # 10-Q cover page splits "For the quarterly period ended June 30,
-        # 2023" into one 800-char chunk and the "Securities registered...
-        # 1.500% Notes due 2026 (MMM26)..." table into a DIFFERENT chunk
-        # with no "2023" of its own -- at 3000 chars both land in the same
-        # chunk. parent_content already gives the LLM the full page
-        # regardless of chunk size (see this function's own docstring
-        # above), so this only affects which chunk WINS RETRIEVAL, not
-        # what the LLM ultimately sees once it's retrieved.
+        # Use a chunk size of 3000 characters to keep date/year lines and related data
+        # together; per-chunk retrieval boosts examine only the candidate chunk's text,
+        # so too-small splits can separate date context from answer text and misdirect
+        # boosts. parent_content still provides the full page to the LLM, so this change
+        # affects which chunk is retrieved, not what the model ultimately sees.
         chunks = chunk_text(text, chunk_size=3000, overlap=120, min_chunk_size=100)
         if not chunks and text.strip():
             chunks = [text.strip()]
@@ -3467,14 +2882,15 @@ class FinancialFileParser:
                         else:
                             grouped_tables = []
                     if md_tables and not grouped_tables and self._multi_number_cell_fraction(md_tables) >= 0.2:
-                        # ruled cells that each hold several numbers (JPM p3: "66.56 66.11
-                        # 63.93") mean the column split failed -- read the page another way
+                        # If consecutive numeric values appear in a single ruled cell
+                        # (e.g., "66.56 66.11 63.93"), the column split likely failed —
+                        # reparse the page using a different layout interpretation.
                         md_tables = []
                     if md_tables and not grouped_tables:
-                        # Ruled-line detection can catch only a fragment of a page's
-                        # table (JnJ p10: 4 of ~17 statement rows). When the plain
-                        # layout-text reading recovers clearly more data rows, drop
-                        # the fragment and let Tier 2/3 handle the page.
+                        # Ruled-line detection may capture only part of a table. If the
+                        # plain layout-text extraction yields clearly more rows, discard
+                        # the ruled fragment and escalate the page to higher-tier
+                        # processing.
                         try:
                             _lt = page.extract_text(layout=True) or ""
                             _l_tabs, _ = self._layout_text_to_markdown_and_prose(_lt) if _lt else ([], "")
@@ -3566,11 +2982,10 @@ class FinancialFileParser:
                             # cell, e.g. "Col1: 66.56 66.11 63.93"); let Tier 3 read the page
                             word_tables = []
                         if word_tables:
-                            # Tier 2 sometimes recovers only a few rows of a page
-                            # whose layout-text (Tier 3) reading is complete: JnJ's
-                            # Q2 statement of earnings (p10) kept 4 of ~17 rows via
-                            # Tier 2 and lost "Sales to customers" / "Net earnings".
-                            # Prefer Tier 3 when it recovers clearly more data rows.
+                            # Tier 2 extraction can recover only a subset of a table's
+                            # rows while a more layout-aware Tier 3 read recovers more;
+                            # prefer the more complete Tier 3 result when it clearly
+                            # yields more data rows.
                             _lt = layout_text_by_page.get(page_idx, "")
                             if _lt:
                                 _l_tabs, _ = self._layout_text_to_markdown_and_prose(_lt)

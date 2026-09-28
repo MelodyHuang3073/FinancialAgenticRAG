@@ -11,20 +11,20 @@ from app.agent.pot_reasoner import _no_calculation_path, _RATIO_DIRECTION_QUERY_
 
 
 def test_no_calculation_path_shapes():
-    assert _no_calculation_path("which of jpm's business segments had the lowest net revenue in 2021 q1?")
-    assert _no_calculation_path("by how many percentage points did pepsico raise full year guidance in respect of core eps growth?")
-    assert _no_calculation_path("how did jnj's us sales growth compare to international sales growth in fy2022?")
-    assert _no_calculation_path("were there any potential events that increased net income in 2019?")
+    assert _no_calculation_path("which unit of acme corp reported the smallest net revenue for the first quarter?")
+    assert _no_calculation_path("by how many percentage points did acme corp lift its annual guidance for adjusted eps growth?")
+    assert _no_calculation_path("how did acme corp's domestic sales growth compare to its overseas sales growth last year?")
+    assert _no_calculation_path("were there any potential events that lifted acme corp's net income in the prior year?")
     # ordinary numeric questions keep their PoT path
-    assert not _no_calculation_path("what is the fy2019 cash conversion cycle for general mills?")
-    assert not _no_calculation_path("was there any drop in cash & cash equivalents between fy 2023 and q2 of fy2024?")
+    assert not _no_calculation_path("what is the cash conversion cycle of acme corp for the latest fiscal year?")
+    assert not _no_calculation_path("did cash balances decline between the prior year end and the second quarter of the current year?")
 
 
 def test_ratio_direction_question_has_no_calculation_path():
-    q1 = "Did Ulta Beauty's wages expense as a percent of net sales increase or decrease in FY2023?".lower()
-    q2 = "Did JnJ's net earnings as a percent of sales increase in Q2 of FY2023 compared to Q2 of FY2022?".lower()
+    q1 = "Did Acme Corp's payroll cost as a percent of net sales rise or fall this year?".lower()
+    q2 = "Did Acme Corp's net earnings, as a percent of sales, rise in the second quarter versus a year ago?".lower()
     assert _RATIO_DIRECTION_QUERY_RE.search(q1)
     assert _RATIO_DIRECTION_QUERY_RE.search(q2)
     # a computed 3-year average must keep its calculation path
-    q3 = "What is the FY2017 - FY2019 3 year average of capex as a % of revenue for Activision Blizzard?".lower()
+    q3 = "What is the three-year average of capital spending as a share of revenue for Acme Corp?".lower()
     assert not _RATIO_DIRECTION_QUERY_RE.search(q3)

@@ -82,9 +82,9 @@ def linearize_financial_table(
     statement_type: str = "unknown",
 ) -> List[Dict[str, Any]]:
     """
-    Linearizes financial tables using Header-Prepended Row strategy (FinAgent-RAG Stage 2).
+    Linearizes financial tables by prepending company, statement and year context to each row.
     Example Output passage:
-    "Company: TSMC | Statement: Income Statement | Year: 2024 | Line Item: Revenue | 2023: 2,161.7B | 2024: 2,894.3B | Unit: TWD"
+    "Company: ExampleCo | Statement: Income Statement | Year: 2024 | Line Item: Revenue | 2023: 2,161.7B | 2024: 2,894.3B | Unit: TWD"
 
     Args:
         company        : Company name

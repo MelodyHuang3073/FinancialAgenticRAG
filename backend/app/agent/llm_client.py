@@ -25,37 +25,16 @@ if load_dotenv is not None and os.path.exists(ENV_PATH):
 # calls as caller="answer"; the decomposer reports as caller="decomposer".
 from app.agent.usage_tracker import record_usage, DAILY_FREE_TOKEN_CAP  # noqa: E402,F401
 
-# How many of the retrieved evidence items (sorted by relevance_score)
-# actually get formatted into the prompt text the LLM sees -- see
-# generate_answer()'s own use of this below for the full history/
-# reasoning. Exposed as a named module constant (not just a literal
-# slice index) so orchestrator.py can import it and report to the
-# frontend EXACTLY this same subset as "evidence_sources", instead of
-# the full unfiltered evidence_buffer (which can hold up to
-# retrieved items) -- the frontend's own Source Evidence
-# panel was showing candidates the LLM never actually saw, making it
-# impossible to tell from the UI alone whether an answer's evidence
-# panel and its actual grounding agreed.
-# 16, not 12: a real-LLM run showed the one correct page sitting just past
-# the 12-item cut -- Amcor's Q2 FY2023 restructuring note (score-rank 15,
-# holds the "87% employee liabilities" fact) and Verizon's FY2021
-# expected-benefit-payments page (score-rank 14, holds the 2024 figures)
-# were both retrieved but never reached the prompt.
+# How many retrieved evidence items (sorted by relevance_score) are formatted into the
+# prompt the LLM actually sees.
+# Expose as a named module constant so other components can report the same subset as
+# the LLM-facing evidence rather than the full retrieval buffer.
 EVIDENCE_PROMPT_CAP = 16
 
-# Every one of the real cases that justified raising EVIDENCE_PROMPT_CAP
-# above (12->16, and originally 4->6->12, see the trail of comments below
-# where it's sliced) was a NARRATIVE/EXPLANATION question -- legal
-# proceedings, customer concentration, gross-margin drivers -- never a
-# NUMERIC question where the PoT sandbox already produced a verified,
-# non-degraded result_value. For THAT narrow case the LLM's job is mostly
-# to phrase pot_summary's own number in prose, not to search a wide
-# evidence pool for a fact PoT never found -- so a much smaller window is
-# a reasonable token-saving trim there specifically, without touching any
-# of the documented narrative cases above. Off by default (0 = disabled,
-# same as leaving EVIDENCE_PROMPT_CAP alone) until verified on real
-# metrics-style questions; set RELIABLE_POT_EVIDENCE_CAP in the
-# environment (e.g. "6") to enable.
+# Higher evidence cap was raised to support narrative/explanation questions where the
+# LLM must see more context; numeric questions that rely on a verified sandbox result do
+# not require the same window.
+# This feature is off by default and enabled via an environment override.
 RELIABLE_POT_EVIDENCE_CAP = int(os.getenv("RELIABLE_POT_EVIDENCE_CAP", "0") or "0")
 
 
@@ -98,52 +77,86 @@ def _is_reasoning_model(model_name: str) -> bool:
     return m.startswith(("gpt-5", "o1", "o3", "o4"))
 
 
-#: A spin-off/separation/divestiture STATUS question ("is X still spinning
-#: off/separating Y") vs. an AMOUNT question ("how much does X expect to
-#: pay ... in the future") need different handling -- only the status shape
-#: gets the "answer YES" override below, since rule 28 already covers the
-#: amount derivation via the generic "quote this exact PoT number" path
-#: once retrieval actually finds the right evidence (see
-#: question_classifier._NARRATIVE_TOPIC_QUERIES's "spin off"/"separation
-#: cost" bridge entry for that half of the fix).
+#: A spin-off/separation STATUS question ("is X still separating Y") and an
+#: AMOUNT question ("how much is still expected") need different handling:
+#: only the status shape gets the "answer YES" directive below.
 _SEPARATION_STATUS_QUERY_RE = re.compile(
     r'\bspin(?:ning)?[\s-]?off\w*|\bseparat\w+\b', re.IGNORECASE
 )
 _HOW_MUCH_QUERY_RE = re.compile(r'\bhow\s+much\b', re.IGNORECASE)
 
-#: General (not Pfizer-specific) detector for the accounting-convention
-#: sentence rule 28 already describes in words: "we expect to incur costs
-#: of approximately $X million ..., of which approximately Y% has been
-#: incurred ... through <period>". When THIS exact sentence shape is
-#: present in the evidence actually sent to the model, the status verdict
-#: is no longer a judgment call -- it is directly stated by the filing
-#: itself (ongoing costs still being incurred = still in progress).
-#: Confirmed real case: Pfizer Q2'2023 Upjohn separation -- the model
-#: correctly QUOTED this exact evidence (700M / ~90% / Q2'23) in its
-#: answer text, then still concluded "No", reproduced 2/2 live runs even
-#: after rule 28 and a final-checklist reminder were both already in the
-#: prompt -- a plain reminder to "check rule 28" was not enough to
-#: override the model's own strong prior that a spin-off completed years
-#: earlier is not "still" happening; a directive stated as a fact about
-#: THIS evidence, not a rule to recall, is more likely to be followed
-#: (mirrors the same pattern already proven to work for the numeric
-#: "MUST quote this PoT result" instruction below). Captures the $X amount
-#: and Y% so the AMOUNT-question branch below can compute the derivation
-#: directly instead of asking the model to do the arithmetic itself --
-#: confirmed real case: even after retrieval found the right evidence
-#: (the earlier bare-recognition fix), the model still read $X as the
-#: TOTAL and answered "$70 million remaining" (700 * (1 - 90%)) instead of
-#: treating $X as the already-incurred 90% and computing implied total =
-#: 700/0.9 ≈ 777.8, remaining ≈ 77.8 -- rule 28's prose description of
-#: this convention was not enough on its own to prevent the more
-#: intuitive (but wrong, per the teacher-confirmed accounting reading)
-#: interpretation.
+#: Detector for the disclosure shape "we expect to incur costs of approximately
+#: $X million ..., of which approximately Y% has been incurred ... through
+#: <period>". Accounting convention applied here: "incur" means the cost has
+#: already occurred, so $X is the already-incurred Y% portion (implied total =
+#: X / (Y/100), remaining = implied total - X), and costs still being incurred
+#: in the current period mean the initiative is still in progress. Captures $X
+#: and Y so the derivation is computed in code, and is injected as a directive
+#: about THIS evidence because a numbered prose rule alone was not followed.
 _SEPARATION_COST_SENTENCE_RE = re.compile(
     r'expects?\s+to\s+incur\s+costs?\s+of\s+approximately\s+\$?\s*([\d,]+(?:\.\d+)?)\s*'
     r'(million|billion)\b[^.]{0,120}?of\s+which\s+approximately\s+(\d+(?:\.\d+)?)\s*%\s+'
     r'has\s+been\s+incurred',
     re.IGNORECASE | re.DOTALL,
 )
+
+#: Detector for a filer's own dividend-increase streak ("the Nth consecutive
+#: year of dividend increases"). The prompt asks for it in prose, but a numbered
+#: rule among many is not followed reliably, so when the phrase is in the
+#: evidence it is also injected as a directive about that specific text.
+_DIVIDEND_STREAK_RE = re.compile(
+    r'(\d+(?:st|nd|rd|th))\s+consecutive\s+year\s+of\s+dividend\s+increases?',
+    re.IGNORECASE,
+)
+
+#: Detector for a filer's own customer-concentration disclosure ("Revenues from
+#: <entity> ... represented N% ... of consolidated revenues"). Injected as a
+#: directive only when this shape is present, so it cannot affect unrelated
+#: questions. (A static prose rule for the same purpose was tried and removed:
+#: it was visible on every question and interfered with unrelated ones.)
+_CUSTOMER_CONCENTRATION_RE = re.compile(
+    r'[Rr]evenues?\s+from\s+(?:the\s+)?([^,()\n]{2,80}?)\s*'
+    r'(?:\([^)]{0,120}\)\s*)?,?\s*'
+    r'(?:primarily\s+recorded\s+at\s+[^,\n]{0,60},?\s*)?'
+    r'represented\s+(\d+(?:\.\d+)?)\s*%[^.\n]{0,80}?consolidated\s+revenues?',
+    re.IGNORECASE,
+)
+
+#: Extractor for a filing's own "Acquisitions" note structure: an "Acquisitions"
+#: heading followed by company-name sub-headings, each followed by "On <date>,
+#: we acquired ...". Used to hand the model the filing's own list of acquired
+#: companies, so that "which companies were acquired" is answered from the
+#: filing's structure rather than from the model's memory of the filer's
+#: acquisition history (a grounding failure seen when the note was retrieved
+#: correctly).
+_ACQUISITION_SECTION_RE = re.compile(
+    r'\n\s*[A-Z]?\.?\s*Acquisitions\s*\n(.*?)(?=\n\s*[A-Z]\.\s*[A-Z][a-z]|\Z)',
+    re.DOTALL,
+)
+_ACQUISITION_SUBHEADING_RE = re.compile(
+    r'\n([A-Z][A-Za-z0-9&.,\' \-]{1,40})\n\s*On\s+\w+\s+\d{1,2},\s*\d{4},\s*we\s+'
+    r'(?:acquired|completed\s+the\s+acquisition\s+of)',
+)
+
+
+def _extract_acquisition_note_companies(evidence_text: str) -> list:
+    """Returns the company names named as their own sub-heading inside a
+    filing's own "Acquisitions" note section, in the order the filing lists
+    them, or [] if no such structured note is found in the evidence."""
+    section_match = _ACQUISITION_SECTION_RE.search("\n" + evidence_text)
+    if not section_match:
+        return []
+    names = _ACQUISITION_SUBHEADING_RE.findall("\n" + section_match.group(1))
+    # De-dupe while preserving order (a company can recur, e.g. a
+    # measurement-period-adjustment paragraph naming it again).
+    seen = set()
+    ordered = []
+    for n in names:
+        n = n.strip()
+        if n and n not in seen:
+            seen.add(n)
+            ordered.append(n)
+    return ordered
 
 
 def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_rows: int = 10) -> str:
@@ -172,15 +185,9 @@ def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_row
     if sep_idx is None:
         return content[:max_chars]
 
-    # ALL table blocks are kept (each row-truncated), not just the first:
-    # a real statement page routinely splits one statement into several
-    # blank-line-separated blocks, and keeping only the first silently hid
-    # everything after it. Confirmed real case: Adobe FY2022's cash-flow
-    # page has five blocks; only the first (depreciation/stock comp) reached
-    # the LLM, so "Net cash provided by operating activities" and "Purchases
-    # of property and equipment" (capex) were invisible and the model said
-    # capex was not disclosed. A total budget stops extra blocks once the
-    # item is already large; the first block is always kept.
+    # When keeping table content, retain all table blocks (each row truncated) rather
+    # than only the first block, to avoid omitting later rows from the LLM's view.
+    # A total budget still applies once the item is large.
     table_budget = max_chars * 2
     out: List[str] = list(lines[:sep_idx - 1])
     cur: Optional[int] = sep_idx
@@ -263,95 +270,15 @@ class LLMAnswerGenerator:
         if not client:
             return None
 
-        # parent_content (the FULL page/table this chunk came from), not
-        # content (just the one matched row/paragraph fragment) — mirrors
-        # what the frontend's own Source Evidence panel already does (see
-        # orchestrator._build_evidence_info's docstring) and what
-        # pot_reasoner's extraction already relies on. Confirmed real case:
-        # a narrative note spanning several child chunks on one page (e.g.
-        # Amcor's FY2023 "Note 5" listing three separate acquisitions, each
-        # named in a different chunk) had the LLM see only whichever single
-        # ~150-char fragment happened to be evidence[0] — usually just the
-        # first item named — even though the full page (now available via
-        # parent_content, see parser._chunk_text_to_passages) already
-        # covers all of them. max_chars raised from the function's 600
-        # default to comfortably fit a full single-page note/table rather
-        # than just a fragment of one -- and raised AGAIN from 2000 to
-        # 4000 once parser.py's own chunk_size grew from 800 to 3000 (see
-        # that constant's own docstring): a single retrieved chunk can now
-        # be up to 3000 chars on its own, and parent_content (the whole
-        # page) is routinely longer still, so 2000 chars often cut off
-        # BEFORE reaching content the retrieval step deliberately
-        # surfaced. Confirmed real case: AMD's FY2022 "What drove revenue
-        # change" question retrieved the correct page (containing "driven
-        # by a 64% increase in Data Center segment revenue... EPYC...")
-        # but that sentence sat past character 2000 of the page's own
-        # parent_content, so the LLM's answer cited the OTHER two drivers
-        # it could still see (Gaming, Xilinx/Embedded) while silently
-        # omitting the one that got truncated away.
-        # Sorted by the retriever's own relevance_score, NOT the order
-        # items happen to sit in `evidence` -- for a non-numeric question
-        # with multiple retrieval sub-queries (see orchestrator.py's
-        # non-numeric loop), `evidence` is several sub-queries' hit lists
-        # concatenated in whichever order those sub-queries happened to
-        # run, so a plain evidence[:4] slice is really "the first
-        # sub-query's own top few candidates", not "the 4 most relevant
-        # items across every sub-query". Confirmed real case: AMD's FY2022
-        # "What drove revenue change" question's OWN keyword sub-query
-        # ("AMD Revenue Net Revenue...") ran first and doesn't mention a
-        # year at all, so AMD's unrelated FY2015 filing content filled its
-        # own top slots on equal footing with the real FY2022 content --
-        # the one passage that actually named the Data Center/EPYC driver
-        # ranked 5th within THAT sub-query alone and never reached the
-        # unsorted evidence[:4] cut, even though it clearly outranks the
-        # FY2015 content by score once every sub-query's results are
-        # considered together. A local copy -- `evidence` itself is left
-        # untouched for any other consumer (e.g. the Source Evidence
-        # panel) that may rely on its original order.
-        # Score-sorted, with each sub-query keeping its own top passages
-        # (BM25 scores of different queries are not comparable) -- see
-        # evidence_selection.select_with_quota.
+        # Pass parent_content (the full page/table) to the LLM, not just the matched
+        # fragment, so multi-chunk notes/tables are seen in context.
+        # Sort selected items by retriever relevance_score across sub-queries; do not
+        # rely on the concatenated retrieval order.
         sorted_evidence = select_with_quota(evidence, EVIDENCE_PROMPT_CAP)
-        # 12, not 6 -- a genuinely multi-page narrative topic (e.g. a
-        # litigation/legal-proceedings discussion, or a list of several
-        # acquisitions each described on its own page) routinely has its
-        # relevant content spread across MORE than 4 distinct pages, each
-        # scoring close to the others. Confirmed real case (the ORIGINAL
-        # reason this was already raised from 4 to 6): Boeing's FY2022
-        # "materially important ongoing legal battles" question has
-        # relevant evidence on pages 4, 19, 113, 128, 146, 148, and 149 --
-        # the one page naming the Lion Air/Ethiopian Airlines litigation
-        # specifically (page 113) ranked 5th by score, just outside a
-        # 4-item cut.
-        #
-        # Raised again from 6 to 12 for the SAME reason, a rank further
-        # out: two more confirmed real cases where the one genuinely
-        # correct passage scored close to, but just past, a 6-item cut --
-        # Boeing's OWN "who are Boeing's primary customers" question (the
-        # sentence stating "Revenues from the U.S. government... 40%...
-        # of consolidated revenues" ranked #9, edged out by several
-        # higher-scoring but topically-adjacent passages -- e.g. a
-        # DIFFERENT true statistic, "non-U.S. customers = 41% of
-        # revenues", answering a related but distinct question); and
-        # Johnson & Johnson's "what drove gross margin change" question
-        # (the passage listing the actual named drivers -- "One-time
-        # COVID-19 vaccine manufacturing exit related costs...", "driven
-        # by:" -- shares no literal "gross margin" wording at all, so it
-        # depends entirely on OTHER matched terms to rank, landing well
-        # outside a 6-item window even after a companion retrieval-layer
-        # fix (see orchestrator.py's RETRIEVAL_TOP_K_NARRATIVE) got it
-        # into the evidence buffer in the first place -- raising THIS cap
-        # too was still needed since a passage present in the buffer but
-        # cut from the prompt here is exactly as invisible to the LLM as
-        # one retrieval never found. Each item can be up to 4000 chars
-        # (see max_chars above), so 12 items is a still-reasonable ~48K-
-        # char evidence budget for a single LLM call on a modern context
-        # window.
-        #
-        # See RELIABLE_POT_EVIDENCE_CAP's own docstring above: a NUMERIC
-        # question whose PoT sandbox already produced a verified result
-        # doesn't need the full narrative-sized window -- none of the
-        # documented cases above are this shape. Off (0) by default.
+        # Use a larger per-query evidence item count for multi-page narrative topics
+        # since relevant content can be spread across many pages that score similarly.
+        # Numeric questions validated by the sandbox do not need this wider window; that
+        # behavior is configurable.
         effective_cap = EVIDENCE_PROMPT_CAP
         if (
             RELIABLE_POT_EVIDENCE_CAP > 0
@@ -365,6 +292,69 @@ class LLMAnswerGenerator:
             for item in sorted_evidence[:effective_cap]
         )
 
+        # These detectors scan the FULL pre-cap `evidence` list, not just the
+        # EVIDENCE_PROMPT_CAP window shown in the prompt: a fact that ranked just
+        # outside the cap is as invisible to the model as one never retrieved.
+        full_evidence_text = "\n".join(
+            item.get("parent_content") or item.get("content", "")
+            for item in evidence
+        )
+
+        dividend_streak_summary = ""
+        streak_match = _DIVIDEND_STREAK_RE.search(full_evidence_text)
+        if streak_match and "dividend" in query.lower():
+            dividend_streak_summary = (
+                f"\n⚠️ CRITICAL: the evidence above explicitly states the "
+                f"\"{streak_match.group(0)}\" -- an official, filer-disclosed "
+                "streak of consecutive annual dividend increases. This is the "
+                "single strongest piece of evidence for any question about "
+                "whether the dividend trend is stable/growing/consistent. You "
+                "MUST state this streak explicitly in your answer (not only a "
+                "computed multi-year per-share trend from other evidence) -- "
+                "an official streak claim is more authoritative than an "
+                "independently recomputed trend."
+            )
+
+        customer_concentration_summary = ""
+        cust_match = _CUSTOMER_CONCENTRATION_RE.search(full_evidence_text)
+        if cust_match and "customer" in query.lower():
+            cust_entity = cust_match.group(1).strip()
+            cust_pct = cust_match.group(2)
+            customer_concentration_summary = (
+                f"\n⚠️ CRITICAL: the evidence above explicitly states "
+                f"\"Revenue from {cust_entity} represented {cust_pct}% of "
+                "consolidated revenues\" -- this is a direct customer-"
+                "concentration disclosure and the definitive answer to a "
+                "\"who are the customers\" question. You MUST cite this "
+                f"entity ({cust_entity}) and this exact percentage "
+                f"({cust_pct}%) as a headline fact. Do NOT substitute a "
+                "different-shaped percentage describing how revenue splits "
+                "across the company's OWN business segments or product "
+                "lines (e.g. \"Segment X represented Y% of revenue\") -- "
+                "that answers a different question (what the company "
+                "sells), not who buys it."
+            )
+
+        acquisition_note_summary = ""
+        if "acqui" in query.lower():
+            acq_companies = _extract_acquisition_note_companies(full_evidence_text)
+            if acq_companies:
+                names_str = ", ".join(acq_companies)
+                acquisition_note_summary = (
+                    f"\n⚠️ CRITICAL: the evidence above contains the filing's "
+                    f"OWN dedicated \"Acquisitions\" note, which names exactly "
+                    f"these compan{'y' if len(acq_companies)==1 else 'ies'} as "
+                    f"their own sub-heading with transaction details: "
+                    f"{names_str}. If asked which/how many companies were "
+                    f"acquired, your answer MUST be drawn ONLY from this list "
+                    f"-- do NOT add any other company, even one you recognize "
+                    f"as a real acquisition this filer made in some OTHER "
+                    f"year, unless it also appears as its own sub-heading "
+                    f"here. This filing's own note is the authoritative "
+                    f"source, not your general knowledge of this company's "
+                    f"acquisition history."
+                )
+
         separation_status_summary = ""
         sep_cost_match = (
             _SEPARATION_COST_SENTENCE_RE.search(evidence_text)
@@ -373,29 +363,21 @@ class LLMAnswerGenerator:
         if sep_cost_match and not _HOW_MUCH_QUERY_RE.search(query):
             separation_status_summary = (
                 "\n⚠️ CRITICAL: the evidence above contains a sentence disclosing "
-                "ONGOING, unfinished separation/spin-off costs still being incurred "
-                "as of the current reporting period (an \"we expect to incur costs "
-                "of approximately $X million ..., of which approximately Y% has "
-                "been incurred ... through <period>\" sentence). This means the "
-                "separation is STILL IN PROGRESS as of that period -- your VERDICT "
-                "on any question asking whether the company is still spinning off/"
-                "separating that business MUST be YES, even when another sentence "
-                "says the legal transaction (the entity split itself) closed on an "
-                "earlier date. The completed legal transaction and the still-"
-                "ongoing cost of finishing it are two different facts; do not "
-                "answer No solely because the transaction closed earlier."
+                "separation/spin-off costs that are still being incurred as of the "
+                "current reporting period (an \"we expect to incur costs of approximately "
+                "$X million ..., of which approximately Y% has been incurred ... through "
+                "<period>\" sentence). In accounting, \"incurred\" means the cost has "
+                "already occurred; costs still being incurred in this period mean the "
+                "separation is STILL IN PROGRESS. Your VERDICT on any question asking "
+                "whether the company is still separating/spinning off that business MUST "
+                "be YES, even when another sentence says the legal transaction closed "
+                "earlier: the completed transaction and the ongoing cost of finishing it "
+                "are two different facts."
             )
         elif sep_cost_match and _HOW_MUCH_QUERY_RE.search(query):
-            # Retrieval now finds this sentence (see the "spin off"/
-            # "separation cost" narrative-topic bridge in
-            # question_classifier.py), but even with the right evidence in
-            # hand the model read $X as the TOTAL and answered "$70
-            # million remaining" (700 * (1 - 90%)) instead of the correct
-            # accounting reading -- $X is the amount ALREADY incurred (the
-            # Y% portion), so implied total = X / (Y/100) and remaining =
-            # implied total - X. Computing it here removes the arithmetic
-            # from the model's hands entirely, the same way a PoT result
-            # does for a registered formula.
+            # In accounting "incur" means already occurred: $X is the already-incurred
+            # Y% portion, so implied total = X / (Y/100) and remaining = implied total - X.
+            # Computed here so the arithmetic direction is not left to the model.
             amount_str, unit, pct_str = sep_cost_match.group(1), sep_cost_match.group(2), sep_cost_match.group(3)
             amount = float(amount_str.replace(",", ""))
             pct = float(pct_str)
@@ -405,55 +387,33 @@ class LLMAnswerGenerator:
                 separation_status_summary = (
                     f"\n⚠️ CRITICAL: the evidence above states an already-incurred "
                     f"separation/spin-off cost of approximately {amount_str} {unit} "
-                    f"({pct_str}% of the total, NOT the total itself). Per the "
-                    f"accounting convention: implied total = {amount_str} / "
-                    f"({pct_str}/100) ≈ {implied_total:,.2f} {unit}; remaining "
-                    f"(future) amount = implied total - {amount_str} ≈ "
-                    f"{remaining:,.2f} {unit}. You MUST use these exact computed "
-                    f"figures (implied total ≈ {implied_total:,.2f} {unit}, "
-                    f"remaining ≈ {remaining:,.2f} {unit}) -- do NOT read the "
-                    f"disclosed {amount_str} {unit} as the total with "
-                    f"{100 - pct:g}% remaining; that is the wrong direction."
+                    f"({pct_str}% of the total, NOT the total itself): in accounting, "
+                    f"\"incur\" means the cost has already occurred. Implied total = "
+                    f"{amount_str} / ({pct_str}/100) ≈ {implied_total:,.2f} {unit}; "
+                    f"remaining (future) amount = implied total - {amount_str} ≈ "
+                    f"{remaining:,.2f} {unit}. You MUST use these exact computed figures "
+                    f"(implied total ≈ {implied_total:,.2f} {unit}, remaining ≈ "
+                    f"{remaining:,.2f} {unit}) -- do NOT read the disclosed {amount_str} "
+                    f"{unit} as the total with {100 - pct:g}% remaining; that is the "
+                    f"wrong direction."
                 )
 
         pot_summary = ""
         if pot_res:
             result_value = pot_res.get("result_value")
-            # The sandbox's own variable assignments (e.g. "net_income =
-            # 1182.0  # table-partial <- evidence[9] Line Item ...") are
-            # the ONLY authoritative record of which specific number among
-            # several same-labeled candidates the calculation actually
-            # used. Without this, the model has no way to tell which
-            # figure was used when it writes supporting prose ("this
-            # figure is derived from net income of $X million") and ends
-            # up re-picking a plausible-looking but DIFFERENT number
-            # straight out of the raw evidence text below instead —
-            # confirmed real case: a ROA answer's headline result (1.35%)
-            # was correctly computed from net_income=1182 (quoted
-            # verbatim per the instruction below), but the SAME answer's
-            # supporting sentence separately cited "$1,248 million" as
-            # the net income, because only the final ratio, never the
-            # inputs that produced it, was ever shown to the model.
+            # Include the sandbox's own variable assignments as the authoritative record
+            # of which numeric inputs were used in calculations.
+            # Expose those assignments to the LLM so supporting prose cites the exact
+            # inputs the computation used, avoiding accidental reference to other raw
+            # figures.
             pot_code_text = pot_res.get("code", "") or ""
             output_log_text = pot_res.get("output_log", "") or ""
-            # The sandbox's own generic "no relevant structured data found"
-            # fallback (pot_reasoner.py's _build_calculation_code, both the
-            # extracted_table and free_text branches) always sets
-            # result_value to a bare 0.0 alongside this exact warning text
-            # -- a deliberately meaningless placeholder, not a genuine
-            # computed fact, printed so an honest "couldn't compute this"
-            # beats a confidently wrong number borrowed from an unrelated
-            # line item. Without this check, the unconditional "MUST quote
-            # this exact number in your HEADLINE" instruction below applied
-            # here too, making the model literally open its answer with
-            # "0.0 --" or "PoT result: 0.0" as if that were a real finding.
-            # Confirmed real case: American Express's own "Does AMEX have an
-            # improving operating margin profile...?" and "What drove gross
-            # margin change...for American Express?" questions (gold: the
-            # metric simply isn't measured for a financial institution) --
-            # the model's reasoning and conclusion were already correct, but
-            # the answer opened with an oddly out-of-place "0.0" because
-            # this instruction told it to.
+            # Explains why the sandbox fallback sets result_value to 0.0 with a generic
+            # "no relevant structured data found" message; this is a deliberate
+            # placeholder to avoid returning a confidently wrong numeric value when no
+            # computed fact exists.
+            # Avoid treating this placeholder as a real finding when generating
+            # headlines or leading answers.
             is_unreliable_fallback = "result is not reliable" in output_log_text
             pot_summary = (
                 f"\nPoT result: {result_value}\n"
@@ -495,19 +455,12 @@ class LLMAnswerGenerator:
                     "number) -- these were NOT the ones the sandbox used and must not replace "
                     "the PoT result."
                 )
-                # A non-zero PoT result directly answers a "Has company X
-                # done Y?" yes/no question (paid dividends, reported
-                # restructuring costs, etc.) -- spelled out explicitly so
-                # the model doesn't need to infer direction from a raw
-                # evidence row's own accounting notation (parentheses
-                # around a number mean a negative amount/cash outflow,
-                # NOT zero or "nothing happened", but that convention is
-                # easy to misread when several evidence rows are shown
-                # together). Confirmed real case: MGM Resorts' FY2022
-                # dividend question -- result_value correctly computed as
-                # 4048 (from a cash-flow-statement row reading "(4,048)"),
-                # yet the model's answer stated "MGM did not pay
-                # dividends", contradicting its own PoT result.
+                # Notes that a non-zero PoT result should be interpreted as a direct
+                # affirmative answer to a yes/no question (e.g., whether a filer did X),
+                # since numeric conventions in source rows (like parentheses for
+                # negatives) can be misread when shown together.
+                # Emphasize aligning the natural-language conclusion with the computed
+                # result_value to avoid contradictory statements.
                 if result_value not in (0, 0.0):
                     pot_summary += (
                         f"\nNote: a raw evidence row may show this figure in "
@@ -525,36 +478,21 @@ class LLMAnswerGenerator:
                     "You MUST explicitly state this limitation in your answer -- do not "
                     "present the shown number as the exact metric the question asked for."
                 )
-            # The generic "quote this exact number as your HEADLINE" instruction
-            # above is worded to make the PoT result THE answer -- for most
-            # formulas that is correct, but capital_intensity_ratio (total
-            # assets / revenue) is explicitly NOT the deciding signal for a
-            # "is X capital-intensive" verdict (rule 22 says ROA is). Without
-            # this override, the two instructions actively conflict and the
-            # more mechanically-worded "quote this number as your answer" one
-            # wins: confirmed real case, CVS Health FY2022 -- the model quoted
-            # capital_intensity_ratio 0.7079 as if it were the verdict driver
-            # and concluded "No", directly contradicting gold's ROA-based
-            # "Yes" even though the model's OWN answer also correctly stated
-            # ROA=1.82% (rule 22's number-citation requirement was followed,
-            # but the verdict itself still wasn't). Reproduced consistently
-            # (3+ times), not sampling variance -- the conflict is structural,
-            # not random. General, not CVS-specific: fires for every question
-            # that resolves to this one formula key.
-            if pot_res.get("formula_used") == "capital_intensity_ratio":
-                pot_summary += (
-                    "\n⚠️ CRITICAL OVERRIDE: the PoT result above (the capital-"
-                    "intensity RATIO, total assets / revenue) is supporting "
-                    "context only -- it is NOT the signal that decides a "
-                    "capital-intensive verdict, and must not be quoted as if it "
-                    "were the answer. Per rule 22 below: find or compute ROA "
-                    "(net income / average total assets) from the evidence, and "
-                    "let ROA's direction alone decide Yes/No -- a low ROA (well "
-                    "under ~10%) means capital-intensive (Yes), a healthy ROA "
-                    "(~10%+) means it is not (No). Do NOT let this ratio, or a "
-                    "low Fixed-Assets/Total-Assets %, override the ROA-based "
-                    "verdict."
-                )
+        # The generic "quote the PoT result as your headline" instruction conflicts
+        # with a verdict that must follow a different signal: the capital-intensity
+        # ratio (total assets / revenue) is context only for a "is X capital-
+        # intensive" verdict, which follows ROA.
+        if pot_res and pot_res.get("formula_used") == "capital_intensity_ratio":
+            pot_summary += (
+                "\n⚠️ CRITICAL OVERRIDE: the PoT result above (the capital-intensity "
+                "RATIO, total assets / revenue) is supporting context only -- it is NOT "
+                "the signal that decides a capital-intensive verdict, and must not be "
+                "quoted as if it were the answer. Find or compute ROA (net income / "
+                "average total assets) from the evidence and let ROA's direction decide "
+                "Yes/No: a low ROA (well under ~10%) means capital-intensive (Yes), a "
+                "healthy ROA (~10%+) means it is not (No). Do NOT let this ratio, or a "
+                "low fixed-assets share of total assets, override the ROA-based verdict."
+            )
 
         verification_summary = ""
         if verification_res:
@@ -591,6 +529,9 @@ Routing Reason: {route_res.get('reason', '')}
 Available Evidence:
 {evidence_text}
 {pot_summary}
+{dividend_streak_summary}
+{customer_concentration_summary}
+{acquisition_note_summary}
 {separation_status_summary}
 {verification_summary}
 
@@ -616,8 +557,7 @@ Available Evidence:
    "Long-Term Debt" footnote answers a different question (financing amount)
    and must never stand in for the exchange-registration answer.
 7. A company whose fiscal year ends in January/February is still often
-   labeled by the LATER calendar year (e.g. year ended Jan 28, 2023 = the
-   company's own "fiscal 2022" but commonly called "FY2023"). If the
+   labeled by the LATER calendar year. If the
    question names a year no evidence item is literally labeled with, but
    the evidence has data for that company's adjacent fiscal year, use it,
    state the assumption in one clause, and answer -- do not refuse. Never
@@ -633,8 +573,7 @@ Available Evidence:
    an item literally contains that fact.
 10. If asked WHICH region/segment had the biggest drop/highest growth/etc.,
     and the evidence lists both an aggregate row (e.g. "International") and
-    the finer rows making it up (e.g. "Developed Europe", "Emerging
-    Markets"), rank the FINEST rows -- an aggregate averages away the
+    the finer rows making it up, rank the FINEST rows -- an aggregate averages away the
     extreme sub-item. Compare every non-overlapping finest-level row for
     the same period.
 11. If asked how MANY of something a company has (stores, locations,
@@ -657,11 +596,9 @@ Available Evidence:
     block. A negative value is lower than any positive one. Never treat the
     firm-total column as a segment.
 15. If asked what GEOGRAPHIES/regions a company operates in: expand an
-    internal segment code that is itself defined as multiple places (e.g.
-    "AMESA" = "Africa, the Middle East and South Asia") into those actual
+    internal segment code that is itself defined as multiple places into those actual
     places -- an abbreviation is not itself a geography. When the filing
-    reports revenue by its OWN named geographic segments (e.g. "United
-    States", "EMEA", "APAC", "LACC"), use those names -- optionally with
+    reports revenue by its OWN named geographic segments, use those names -- optionally with
     the figures given -- as the answer's structure, not a flat unordered
     list of every place mentioned anywhere. Do NOT lead with employee/
     headcount geography -- the question is about where revenue/operations
@@ -740,18 +677,15 @@ Available Evidence:
     this isn't a useful metric" wording of its own -- START your answer by
     saying this metric isn't how such a company's performance is measured,
     and why, BEFORE any other computed verdict (e.g. net income margin).
-    Confirmed real case: American Express's own "Does AMEX have an
-    improving operating margin profile as of 2022?" -- the question never
-    says "if not useful, state that", but AmEx IS a card issuer with no
-    operating-margin line, so this rule still applies; leading with a
-    substitute net-income-margin verdict ("No -- margin fell from 19.0% to
-    14.2%") instead of the "not a useful metric for a card issuer" framing
-    is exactly the failure this rule exists to prevent -- do not require
-    the question to use this rule's own trigger wording before applying it.
+    This applies purely based on the COMPANY'S business type (no COGS/
+    gross-profit line in its own financials) -- do not require the
+    question to use this rule's own trigger wording ("if not a useful
+    metric") before applying it; a plain-phrased question about a
+    financial institution's margin still needs this framing led first.
 
 【FORWARD-LOOKING / GUIDANCE / ONE-TIME EVENTS】:
 25. If asked whether a dividend is STABLE/growing/consistent and the
-    evidence states an explicit streak ("the 65th consecutive year of
+    evidence states an explicit streak (e.g. "the Nth consecutive year of
     dividend increases"), state that streak -- it is the strongest evidence
     of a stable trend.
 26. If asked whether a growth rate is expected to accelerate/slow, and the
@@ -769,36 +703,30 @@ Available Evidence:
     percent of net sales increased/decreased and the evidence uses this
     wording for it, answer from it directly -- do not say the information
     is missing just because no explicit percentage figure is printed.
-28. If a spin-off/divestiture/separation question's evidence states that
-    separation-related costs are STILL being incurred as of (or through)
-    the reporting period (e.g. "we expect to incur costs of approximately
-    $X million ..., of which Y% has been incurred ... through <the current
-    quarter>"), answer YES -- the ongoing, unfinished cost of completing
-    the separation means it is still in progress, even when another
-    sentence says the legal transaction itself closed earlier. Only answer
-    NO when the evidence shows no such ongoing separation costs at all.
-    Relatedly, when evidence gives a separation/spin-off cost sentence
-    shaped "we expect to incur costs of approximately $X million ..., of
-    which approximately Y% has been incurred ... through <period>", read $X
-    as the amount ALREADY incurred (the Y% portion), not the total --
-    compute the implied total as $X / (Y/100), and the remaining (future)
-    amount as implied total minus $X. State the implied total, the amount
-    already incurred, and the remaining amount.
+28. If an initiative's cost disclosure says "we expect to incur costs of
+    approximately $X million ..., of which approximately Y% has been incurred
+    ... through <period>", apply the accounting meaning of "incur" (the cost
+    has already occurred): read $X as the amount ALREADY incurred (the Y%
+    portion), not the total. Implied total = $X / (Y/100); remaining
+    (future) amount = implied total minus $X. State the implied total, the
+    amount already incurred and the remaining amount. If costs are still
+    being incurred as of the reporting period, the initiative is still in
+    progress, even when the legal transaction itself closed earlier.
 29. When a question asks whether an unusual/non-recurring/one-time event
     affected a result, NAME the event using the filing's own line-item
-    wording, not only its amount (e.g. "the gain on completion of the
-    Consumer Healthcare JV transaction ($8,107 million)", not just "a
-    one-time gain of $8,107 million"). The same applies to a margin/income/
-    expense driver that comes from an acquisition, merger or divestiture --
-    name the other company or deal (e.g. "amortization of intangibles from
-    the Xilinx acquisition"), never just "acquisition-related".
+    wording, not only its amount (e.g. "the gain on completion of [named
+    transaction] ($X million)", not just "a one-time gain of $X million").
+    The same applies to a margin/income/expense driver that comes from an
+    acquisition, merger or divestiture -- name the other company or deal
+    (e.g. "amortization of intangibles from the [Company Y] acquisition"),
+    never just "acquisition-related".
 
 【NAMING AND NUMBER-FORMAT CONVENTIONS】:
 30. If asked whether the company paid/declared DIVIDENDS and the evidence
     has both a PER-SHARE rate and an aggregate dollar total, state BOTH --
     the per-share rate is usually the more specific fact being asked for.
 31. For a ratio/multiple result (turnover ratio, current ratio, quick
-    ratio), state the number alone (e.g. "17.98") -- do not append a
+    ratio), state the number alone -- do not append a
     trailing "x". Percentages still get a trailing "%".
 32. If asked what each shareholder could receive in a bankruptcy/
     liquidation, headline the TANGIBLE book value per share (goodwill and
@@ -806,11 +734,34 @@ Available Evidence:
     share only as context.
 33. If asked about the nature, composition or purpose of a liability or
     other total the evidence breaks into components, give each component's
-    amount AND its percentage of the total (e.g. "employee-related $81
-    million, about 87% of the $93 million liability").
+    amount AND its percentage of the total (e.g. "[component] $X million,
+    about Y% of the $Z million total"). Likewise, if asked which category/
+    type is the largest or smallest among items that add up to a total,
+    name it and state its share of that total.
+34. If asked what PERCENT/SHARE of a FULL-PERIOD total (e.g. a full fiscal
+    year) occurred during a SPECIFIC SHORTER SUB-PERIOD within it (e.g. one
+    quarter), and the evidence contains BOTH a full-period total AND a
+    separate sub-period disclosure for the SAME line item -- even if they
+    come from two different evidence items (e.g. a balance-sheet-note total
+    and a separate "Issuer Purchases of Equity Securities" quarterly
+    table) -- compute the ratio directly (sub-period ÷ full-period). Do not
+    say the breakdown "cannot be determined" just because the two numbers
+    were not printed next to each other in the same table; this is a
+    common failure mode confirmed live even when both numbers were plainly
+    present in the evidence actually provided.
 
 【FINAL CHECK before you answer -- these failure modes have been observed live, more than once, even when the rule above already covers them】:
-34. Did the question ask "best/worst/top performer" with no stated basis? If
+35. Does the evidence contain an explicit "Nth consecutive year of dividend
+    increases" streak claim? If so, and the question asks about dividend
+    stability/trend, did you state that streak explicitly rather than only
+    a self-computed multi-year trend (rule 25)? Did the question ask what
+    percent/share of a full-period total happened in a specific sub-period
+    (e.g. Q4 of the full year)? If so, did you check whether evidence
+    contains BOTH the full-period total and a separate sub-period
+    disclosure before concluding the breakdown "cannot be determined" --
+    the two numbers are often in different evidence items, not the same
+    table (rule 34).
+36. Did the question ask "best/worst/top performer" with no stated basis? If
     so, does your answer give BOTH the largest-amount reading AND the
     fastest-growth reading (rule 21)? Did the question ask about
     accelerating/decelerating growth with more than one guidance basis
@@ -823,12 +774,9 @@ Available Evidence:
     it is not -- rather than the bare CapEx/Revenue or Fixed-Assets/Total-
     Assets ratio (rule 22)? Does the evidence contain a sentence shaped "we
     expect to incur costs of approximately $X million ..., of which
-    approximately Y% has been incurred ... through <period>" about a spin-
-    off/separation/divestiture? If so: for a status question ("is it still
-    spinning off/separating"), did you answer YES (rule 28)? For an amount
-    question ("how much remains/is expected in the future"), did you
-    compute implied total = X / (Y/100) and remaining = implied total - X,
-    and state all three numbers (rule 28)?
+    approximately Y% has been incurred ... through <period>"? If so, did
+    you read $X as the amount already incurred and state the implied total
+    and the remaining amount (rule 28)?
 """
 
         try:

@@ -9,9 +9,8 @@ question list in this project covers this category at all.
 
 "novel-generated" questions are open-ended analytical/interpretive ones
 that require reasoning across multiple facts rather than reading a single
-line item (e.g. "If we exclude the impact of M&A, which segment has
-dragged down 3M's overall growth in 2022?", "Does 3M maintain a stable
-trend of dividend distribution?") — graded with the same fact-presence
+line item (e.g. which segment dragged down overall growth once acquisitions
+are excluded, or whether a dividend trend is stable) — graded with the same fact-presence
 check (_check_contains_facts) used for domain-relevant questions, since
 these gold answers are also prose/reasoning, not a single bare number.
 

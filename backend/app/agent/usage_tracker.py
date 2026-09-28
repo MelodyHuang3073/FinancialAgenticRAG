@@ -172,7 +172,7 @@ def format_report() -> str:
     ]
     for caller, v in sorted(d["by_caller"].items()):
         out.append(f"  {caller:<12} {v['calls']:>6} calls  {v['tokens']:>12,} tokens")
-    for model, t in sorted(d["by_model"].items()):
+    for model, t in sorted(d["by_model"].items(), key=lambda kv: str(kv[0])):
         out.append(f"  model {model}: {t:,}")
     # one line per process: a long-lived server process with sparse calls is a manual
     # session in the app; a burst of calls from a short-lived pid is a script/regression
