@@ -146,6 +146,20 @@ DOC_TO_FILE = {
 #: correctly extracted as -1561.0 — an entirely spurious sign mismatch
 #: between two answers that actually agreed, not a real numeric
 #: disagreement.
+#: A model answer routinely renders a negative number with the Unicode
+#: "minus sign" (U+2212, "−") rather than the ASCII hyphen-minus (U+002D,
+#: "-") that _NUM_RE's sign group actually matches -- both are visually a
+#: minus sign, but only one is in the regex, so a genuinely correct
+#: negative-number match (e.g. "$473 million" vs "-$473 million") was
+#: silently missed, reading the model's number as a false positive
+#: (unsigned) that then failed to match the gold's signed one. Normalized
+#: once, at every public entry point below, so every downstream _NUM_RE /
+#: _PERCENT_NUM_RE match site benefits without having to special-case the
+#: character itself.
+def _normalize_minus(text: str) -> str:
+    return (text or "").replace("−", "-")
+
+
 _NUM_RE = re.compile(r"-?\$?-?\d[\d,]*\.?\d*")
 
 #: A 2-digit fiscal-year shorthand ("FY22") extracts as the bare number
@@ -275,7 +289,7 @@ def _percent_numbers_in(text: str) -> list:
     """Numbers in `text` immediately followed by '%' (the model's own
     percent-formatted figures), as their bare (unscaled) values."""
     out = []
-    for m in _PERCENT_NUM_RE.finditer(text or ""):
+    for m in _PERCENT_NUM_RE.finditer(_normalize_minus(text)):
         try:
             out.append(float(m.group(1).replace(",", "").replace("$", "")))
         except ValueError:
@@ -362,7 +376,7 @@ def _numbers_in(text: str):
     preceded by whitespace/start at the '-' itself, not a letter.
     """
     out = []
-    cleaned = _split_bullet_dash(_strip_list_markers(_strip_3m_company_name(_expand_fy_shorthand(text))))
+    cleaned = _split_bullet_dash(_strip_list_markers(_strip_3m_company_name(_expand_fy_shorthand(_normalize_minus(text)))))
     for m in _NUM_RE.finditer(cleaned):
         s = m.group(0)
         if "-" in s:
@@ -529,7 +543,7 @@ def _implies_decrease(text: str) -> bool:
 def _decimals_of(value: float, text: str) -> int:
     """Number of decimal digits the gold text itself printed for `value`
     ("66.56" -> 2, "1.7%" -> 1, "$0.40" -> 2, "3,017" -> 0)."""
-    for m in _NUM_RE.finditer(text or ""):
+    for m in _NUM_RE.finditer(_normalize_minus(text)):
         tok = m.group(0).replace(",", "").replace("$", "")
         try:
             if abs(abs(float(tok)) - abs(value)) < 1e-9:
@@ -544,7 +558,7 @@ def _is_percent_marked(value: float, text: str) -> bool:
     by '%' ("1.7%" -> True, "$1.7 million" -> False). Used to tell a gold
     ratio already stated as a percent apart from one stated as a bare
     decimal -- see _percent_numbers_in's docstring."""
-    for m in _PERCENT_NUM_RE.finditer(text or ""):
+    for m in _PERCENT_NUM_RE.finditer(_normalize_minus(text)):
         tok = m.group(1).replace(",", "").replace("$", "")
         try:
             if abs(abs(float(tok)) - abs(value)) < 1e-9:

@@ -122,17 +122,24 @@ _CUSTOMER_CONCENTRATION_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Extractor for a filing's own "Acquisitions" note structure: an "Acquisitions"
-#: heading followed by company-name sub-headings, each followed by "On <date>,
-#: we acquired ...". Used to hand the model the filing's own list of acquired
-#: companies, so that "which companies were acquired" is answered from the
-#: filing's structure rather than from the model's memory of the filer's
-#: acquisition history (a grounding failure seen when the note was retrieved
-#: correctly).
-_ACQUISITION_SECTION_RE = re.compile(
-    r'\n\s*[A-Z]?\.?\s*Acquisitions\s*\n(.*?)(?=\n\s*[A-Z]\.\s*[A-Z][a-z]|\Z)',
-    re.DOTALL,
-)
+#: Extractor for a filing's own acquisitions-note company sub-headings, each
+#: followed by "On <date>, we acquired ...". Used to hand the model the
+#: filing's own list of acquired companies, so that "which companies were
+#: acquired" is answered from the filing's structure rather than from the
+#: model's memory of the filer's acquisition history (a grounding failure
+#: seen when the note was retrieved correctly). Matched directly against the
+#: full evidence text, WITHOUT first locating an enclosing "Acquisitions"
+#: section: retrieved passages for one filing's note can land in the
+#: evidence out of page order (sorted by relevance, not position), which
+#: broke an earlier version that required the section heading and its
+#: sub-headings to be contiguous in the right order. The verb itself
+#: ("acquired" / "completed the acquisition of") already excludes a
+#: differently-worded neighboring disclosure (e.g. a divestiture's "completed
+#: the sale of ..."), so no section boundary is needed to avoid picking those
+#: up. No separate topic gate is needed: the sub-heading pattern itself
+#: (a short title-case line immediately followed by a dated "we acquired /
+#: completed the acquisition of" sentence) is already specific enough on its
+#: own not to fire on unrelated evidence.
 _ACQUISITION_SUBHEADING_RE = re.compile(
     r'\n([A-Z][A-Za-z0-9&.,\' \-]{1,40})\n\s*On\s+\w+\s+\d{1,2},\s*\d{4},\s*we\s+'
     r'(?:acquired|completed\s+the\s+acquisition\s+of)',
@@ -140,13 +147,11 @@ _ACQUISITION_SUBHEADING_RE = re.compile(
 
 
 def _extract_acquisition_note_companies(evidence_text: str) -> list:
-    """Returns the company names named as their own sub-heading inside a
-    filing's own "Acquisitions" note section, in the order the filing lists
-    them, or [] if no such structured note is found in the evidence."""
-    section_match = _ACQUISITION_SECTION_RE.search("\n" + evidence_text)
-    if not section_match:
-        return []
-    names = _ACQUISITION_SUBHEADING_RE.findall("\n" + section_match.group(1))
+    """Returns the company names named as their own sub-heading immediately
+    before an "On <date>, we acquired/completed the acquisition of ..."
+    sentence anywhere in the evidence, in the order they first appear, or
+    [] if no such structured disclosure is found."""
+    names = _ACQUISITION_SUBHEADING_RE.findall("\n" + evidence_text)
     # De-dupe while preserving order (a company can recur, e.g. a
     # measurement-period-adjustment paragraph naming it again).
     seen = set()
