@@ -24,7 +24,8 @@ from app.agent.llm_client import (
 from app.agent.evidence_selection import select_with_quota
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
 from app.tools.hybrid_retriever import (
-    is_attribution_query, is_geography_query, is_legal_query, is_segment_comparison_query,
+    is_attribution_query, is_geography_query, is_legal_query, is_acquisition_query,
+    is_segment_comparison_query,
 )
 
 
@@ -544,22 +545,28 @@ class FinAgentRAGOrchestrator:
             # names.
             non_numeric_formula = detect_formula(query)
             # Evaluated against the ORIGINAL question, not each individual
-            # sub-query below (a keyword-stuffed sub-query like "AMD
-            # Revenue Net Revenue" never repeats "what drove" phrasing even
-            # when the overall question plainly is an attribution question)
-            # -- see hybrid_retriever.is_attribution_query's docstring.
+            # sub-query below (a keyword-stuffed sub-query that just
+            # concatenates the entity name with metric keywords never
+            # repeats "what drove" phrasing even when the overall question
+            # plainly is an attribution question) -- see
+            # hybrid_retriever.is_attribution_query's docstring.
             is_attribution = is_attribution_query(query)
+            # Single combined signal, computed once up front: do we need prose/
+            # narrative evidence at all for this question? True whenever there's no
+            # registered formula to search structured values with, OR the question
+            # asks WHY/WHAT DROVE something (causal narrative, never captured by a
+            # formula's own numeric-variable aliases even when a formula DID match).
+            # Drives both decisions below (whether to widen scoring toward prose,
+            # and whether the raw question itself needs to be one of the search
+            # queries) from the same boolean, rather than two separately-reasoned
+            # conditions that happened to overlap.
+            prefer_narrative = (non_numeric_formula is None or is_attribution)
             if non_numeric_formula:
                 formula_query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
                 search_queries = [
                     step["query"] for step in
                     self._build_formula_subquestions(non_numeric_formula, formula_query_entity, classification["years"])
                 ]
-                # _build_formula_subquestions() emits one query per placeholder only.
-                # Attribution questions for a formula-derived metric must also search
-                # for causal narrative, not just the numeric inputs.
-                if is_attribution:
-                    search_queries.append(query)
             else:
                 search_queries = classification["retrieval_queries"]
                 # Additive: one extra query from the LLM suggester (which filing
@@ -572,13 +579,18 @@ class FinAgentRAGOrchestrator:
                     search_queries = search_queries + [
                         f"{classification['entity']} {llm_topic_terms}".strip()
                     ]
-            # This branch runs when no registered formula matches, so it biases ranking
-            # toward prose content.
-            # Also widen retrieval for attribution questions so narrative boosts can
-            # surface causal explanations.
-            prefer_narrative = (non_numeric_formula is None or is_attribution)
+            # _build_formula_subquestions() emits one query per placeholder only, and
+            # never the raw question itself -- a formula-matched question that also
+            # needs prose (prefer_narrative) must get it added explicitly. The
+            # template branch above already includes the raw question in
+            # classification["retrieval_queries"] (its own built-in fallback), so
+            # this is a no-op there -- one rule, applied uniformly after query
+            # construction, instead of two separately-triggered insertions.
+            if prefer_narrative and query not in search_queries:
+                search_queries.append(query)
             is_geography = is_geography_query(query)
             is_legal = is_legal_query(query)
+            is_acquisition = is_acquisition_query(query)
             new_hits = []
             for sq_idx, sq in enumerate(search_queries):
                 new_hits.extend(self._tag_subquery(sq_idx, self.vector_store.search(
@@ -594,6 +606,7 @@ class FinAgentRAGOrchestrator:
                     is_attribution=is_attribution,
                     is_geography=is_geography,
                     is_legal=is_legal,
+                    is_acquisition=is_acquisition,
                     query_years=classification.get("years"),
                 )))
             new_hits = self._deduplicate_hits(new_hits, entity=classification.get("entity"))
@@ -775,7 +788,9 @@ class FinAgentRAGOrchestrator:
     def _match_entity_to_corpus(self, classifier_entity: str, query: str) -> str:
         """
         Always align the classifier's entity name to the actual company string
-        stored in the corpus (e.g. '3M' → '3M_2022_10K').
+        stored in the corpus (e.g. a bare ticker/short-name guess to the full
+        uploaded filing's filename stem, which also carries the fiscal year
+        and filing type).
         Also handles the case where the classifier returned generic 'company'.
         """
         import re as _re

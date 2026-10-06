@@ -1,7 +1,7 @@
 """
-Regression test using the exact AMCOR Income Statement fixture from
-diag_pdf_deep.py (fitz page.insert_text() with a single manually
-space-padded multi-line string, rendered in a PROPORTIONAL font).
+Regression test using an Income Statement fixture rendered with
+fitz page.insert_text() from a single manually space-padded multi-line
+string, in a PROPORTIONAL font.
 
 This is a harder case than the ruled-line / real-glyph-position fixtures in
 test_borderless_table_extraction.py: because Helvetica is proportional, the
@@ -30,9 +30,8 @@ from app.rag.parser import FinancialFileParser
 from app.rag.chunker import _is_table_line, chunk_text
 
 
-# Verbatim from diag_pdf_deep.py's page 1 (Income Statement).
 INCOME_STATEMENT_TEXT = (
-    "AMCOR PLC  Annual Report on Form 10-K  Fiscal Year Ended June 30, 2023\n\n"
+    "ACME CORP  Annual Report on Form 10-K  Fiscal Year Ended June 30, 2023\n\n"
     "CONSOLIDATED STATEMENTS OF INCOME\n"
     "($ millions, except per share data)               FY2023    FY2022\n"
     "Net sales                                         14,694    14,544\n"
@@ -46,11 +45,11 @@ INCOME_STATEMENT_TEXT = (
     "Income before income taxes and equity              2,138     2,134\n"
     "Income tax expense                                 (393)     (403)\n"
     "Net income                                         1,048       878\n"
-    "Net income attributable to Amcor plc shareholders    993       845\n"
+    "Net income attributable to Acme Corp shareholders    993       845\n"
 )
 
 
-def _build_amcor_income_statement_pdf() -> bytes:
+def _build_income_statement_pdf() -> bytes:
     doc = fitz.open()
     page = doc.new_page(width=595, height=842)
     page.insert_text((40, 40), INCOME_STATEMENT_TEXT, fontsize=9)
@@ -71,13 +70,13 @@ def _build_blank_scanned_style_pdf() -> bytes:
     return pdf_bytes
 
 
-def test_amcor_income_statement_all_rows_captured():
+def test_income_statement_all_rows_captured():
     parser = FinancialFileParser()
-    with pdfplumber.open(io.BytesIO(_build_amcor_income_statement_pdf())) as pdf:
+    with pdfplumber.open(io.BytesIO(_build_income_statement_pdf())) as pdf:
         page = pdf.pages[0]
         md_tables, prose = parser._extract_page_tables_and_prose(page)
 
-    assert md_tables, "layout fallback failed to detect the AMCOR income statement"
+    assert md_tables, "layout fallback failed to detect the income statement"
     assert len(md_tables) == 1, "all 12 line items should merge into a single table block"
     joined = md_tables[0]
 
@@ -87,7 +86,7 @@ def test_amcor_income_statement_all_rows_captured():
         "Research and development expenses", "Other income, net",
         "Earnings before interest and taxes", "Interest expense, net",
         "Income before income taxes and equity", "Income tax expense",
-        "Net income", "Net income attributable to Amcor plc shareholders",
+        "Net income", "Net income attributable to Acme Corp shareholders",
     ]:
         assert label in joined, f"missing line item: {label}"
 
@@ -95,9 +94,9 @@ def test_amcor_income_statement_all_rows_captured():
         assert _is_table_line(line)
 
 
-def test_amcor_net_sales_values_correct_and_not_mixed_up():
+def test_net_sales_values_correct_and_not_mixed_up():
     parser = FinancialFileParser()
-    with pdfplumber.open(io.BytesIO(_build_amcor_income_statement_pdf())) as pdf:
+    with pdfplumber.open(io.BytesIO(_build_income_statement_pdf())) as pdf:
         md_tables, _ = parser._extract_page_tables_and_prose(pdf.pages[0])
 
     net_sales_row = next(
@@ -111,9 +110,9 @@ def test_amcor_net_sales_values_correct_and_not_mixed_up():
     assert "11,328" not in net_sales_row and "11,229" not in net_sales_row
 
 
-def test_amcor_table_survives_chunking_intact():
+def test_table_survives_chunking_intact():
     parser = FinancialFileParser()
-    result = parser._parse_pdf("amcor_10k.pdf", _build_amcor_income_statement_pdf(), "AMCOR")
+    result = parser._parse_pdf("acme_10k.pdf", _build_income_statement_pdf(), "ACME")
     table_passages = [p for p in result["passages"] if p["type"] == "table_row"]
     assert len(table_passages) == 12, f"expected 12 table_row passages, got {len(table_passages)}"
 
@@ -126,7 +125,7 @@ def test_amcor_table_survives_chunking_intact():
 
 def test_pure_narrative_page_not_misdetected_as_table():
     """A page of ordinary MD&A prose (no financial table at all) must
-    produce zero tables — this is the AMCOR fixture's negative control."""
+    produce zero tables — this is the income-statement fixture's negative control."""
     mda_text = (
         "Item 7. Management's Discussion and Analysis of Financial Condition "
         "and Results of Operations. During fiscal year 2023, the Company "

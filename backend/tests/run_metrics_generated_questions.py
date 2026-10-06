@@ -3,9 +3,7 @@ Runs every FinanceBench question tagged question_type="metrics-generated" —
 one of the three official categories the benchmark itself splits all 150
 questions into (the other two are "domain-relevant" and "novel-generated",
 see run_domain_relevant_questions.py / run_novel_generated_questions.py).
-This is a full-dataset regression by FinanceBench's own category, distinct
-from run_calc_questions.py's separate hand-picked "計算題" set (which draws
-from all three categories and tracks a different, curated question list).
+This is a full-dataset regression by FinanceBench's own category.
 
 "metrics-generated" questions ask for one specific computed/extracted
 number (a ratio, a line-item figure, a period-over-period change) — graded
@@ -25,8 +23,7 @@ with full per-question detail; prints a pass/fail table to stdout.
 """
 import sys, os, json, time
 
-# See run_extraction_questions.py's own copy of this comment for why this
-# is needed: FinanceBench gold answers routinely contain non-ASCII
+# Needed because FinanceBench gold answers routinely contain non-ASCII
 # characters that crash a plain print() under Windows' default console
 # codepage.
 for _stream in (sys.stdout, sys.stderr):

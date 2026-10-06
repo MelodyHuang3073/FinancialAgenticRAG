@@ -530,8 +530,8 @@ class FinancialFileParser:
 
     #: Maximum numeric value columns a Tier 2-recovered row may have and
     #: still be labeled as a simple year/period comparison — see the
-    #: real CVS Health segment-breakdown case in _flush()'s docstring
-    #: comment for why a wider row must be left as prose instead.
+    #: multi-segment-breakdown case in _flush()'s docstring comment for
+    #: why a wider row must be left as prose instead.
     _WORD_TABLE_MAX_VALUE_COLS = 4
 
     #: Minimum fraction of numeric-token-bearing rows that must share the
@@ -639,8 +639,8 @@ class FinancialFileParser:
         but x1 doesn't); numbers in DIFFERENT columns are much farther
         apart — the real column-to-column spacing, which varies a lot by
         company/font/layout and can be smaller than any fixed hardcoded
-        threshold (e.g. 26.4pt on a real 3M filing, which a fixed 30pt gap
-        misses entirely).
+        threshold (a real filing's observed gap can be well under 30pt,
+        which a fixed 30pt threshold misses entirely).
 
         So the gaps between sorted x1 values (kept WITH duplicates — two
         tokens sharing (near-)identical x1 contribute a genuine ~0 gap,
@@ -945,8 +945,8 @@ class FinancialFileParser:
             # _extract_period_headers) is the OTHER legitimate reason a
             # row can carry more value columns than _WORD_TABLE_MAX_VALUE_COLS
             # expects -- a standard 10-K "Contractual Obligations" table,
-            # not a single-period segment breakdown like CVS's. Same exact-
-            # count-match safety property as repeating_years.
+            # not a single-period segment breakdown. Same exact-count-match
+            # safety property as repeating_years.
             period_headers = (
                 self._extract_period_headers(header_candidate[0], n_cols)
                 if header_candidate[0] and n_cols is not None else []
@@ -1888,8 +1888,8 @@ class FinancialFileParser:
             if years_block == block * len(groups) and len(set(block)) == per_group:
                 return [f"{y} ({g})" for g in groups for y in block]
 
-        # (c) quarter headers "1Q21 4Q20 3Q20 2Q20 1Q20" (JPM's financial highlights):
-        # label the columns "1Q 2021" ... so the sandbox sees the year
+        # (c) quarter headers "1Q21 4Q20 3Q20 2Q20 1Q20" (a quarterly financial-
+        # highlights table): label the columns "1Q 2021" ... so the sandbox sees the year
         if all(re.fullmatch(r"Col\d+", h) for h in value_headers):
             qs = re.findall(r"(?<![A-Za-z0-9])([1-4])Q(\d{2})(?![A-Za-z0-9])", zone)
             if len(qs) >= n:
@@ -2031,12 +2031,13 @@ class FinancialFileParser:
         columns back under the columns they were printed under.
 
         Ruled-line cell compaction (`_compact_row_cells`) drops blank cells so
-        every row has the same shape, which left-shifts a sparse row: MGM's
-        "Adjusted EBITDAR $957,307 ... $3,497,254" total row (printed under the
-        three-month-2022 and twelve-month-2022 columns) came out under the first
-        TWO columns, i.e. the full-year figure labelled as the 2021 quarter. The
-        column positions come from the table's own full rows (right edges of
-        their numbers); a sparse row's numbers are assigned to the nearest one."""
+        every row has the same shape, which left-shifts a sparse row: a total
+        row with only two numbers (printed under non-adjacent three-month-2022
+        and twelve-month-2022 columns, skipping the quarter-2021 column between
+        them) came out under the first TWO columns instead, i.e. the full-year
+        figure labelled as the 2021 quarter. The column positions come from the
+        table's own full rows (right edges of their numbers); a sparse row's
+        numbers are assigned to the nearest one."""
         # cheap pre-check first: pdfplumber word extraction is the expensive part, so
         # only pages that actually contain a table with a sparse row pay for it
         def _has_sparse(md: str) -> bool:
@@ -2583,9 +2584,9 @@ class FinancialFileParser:
         the header line exactly equals n_cols and is a clean whole-number
         repetition of its own unique prefix. A wide row whose header does
         NOT show this (e.g. a single "2018" next to a genuinely one-period,
-        multi-segment breakdown -- CVS Health's segment table, where 6
-        value columns are 6 different segments for ONE year, not repeated
-        year groups) must fall through unrecognised, so it still gets
+        multi-segment breakdown table, where several value columns are
+        several different segments for ONE year, not repeated year
+        groups) must fall through unrecognised, so it still gets
         caught by _WORD_TABLE_MAX_VALUE_COLS's width cap in the caller
         rather than being mislabeled as a multi-year table.
         """
@@ -2872,8 +2873,9 @@ class FinancialFileParser:
                         grouped_tables = []
                     if grouped_tables and md_tables:
                         # A ruled-line detection that only caught a caption/header
-                        # strip (JPM's VaR page: "Three months ended | 2023: | 2022:")
-                        # must not hide the real grouped table; keep the ruled
+                        # strip (e.g. a bare "Three months ended | 2023: | 2022:"
+                        # banner above the real data) must not hide the real
+                        # grouped table; keep the ruled
                         # tables only when they carry more data rows.
                         def _md_rows(tabs):
                             return sum(max(0, len([l for l in t.splitlines() if l.startswith("|")]) - 2) for t in tabs)
@@ -2883,7 +2885,7 @@ class FinancialFileParser:
                             grouped_tables = []
                     if md_tables and not grouped_tables and self._multi_number_cell_fraction(md_tables) >= 0.2:
                         # If consecutive numeric values appear in a single ruled cell
-                        # (e.g., "66.56 66.11 63.93"), the column split likely failed —
+                        # (e.g., "12.34 12.01 11.87"), the column split likely failed —
                         # reparse the page using a different layout interpretation.
                         md_tables = []
                     if md_tables and not grouped_tables:
@@ -2979,7 +2981,7 @@ class FinancialFileParser:
                         word_tables = [md for md, _top in word_tables_with_pos]
                         if word_tables and self._multi_number_cell_fraction(word_tables) >= 0.2:
                             # column clustering failed (several values packed into one
-                            # cell, e.g. "Col1: 66.56 66.11 63.93"); let Tier 3 read the page
+                            # cell, e.g. "Col1: 12.34 12.01 11.87"); let Tier 3 read the page
                             word_tables = []
                         if word_tables:
                             # Tier 2 extraction can recover only a subset of a table's

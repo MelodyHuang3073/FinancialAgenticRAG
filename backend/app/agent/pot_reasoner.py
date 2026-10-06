@@ -172,7 +172,7 @@ for _canonical, _aliases in _ITEM_TAXONOMY:
 
 _NEGATION_PREFIX_RE = re.compile(
     r'\b(non[- ]?|not\s+|deferred\s+|unearned\s+|change(?:s|d)?\s+in\s+|'
-    r'(?:reportable\s+)?segment\s+)$'
+    r'(?:reportable\s+)?segment\s+|adjusted\s+)$'
 )
 
 # Disambiguate "X attributable to" matches by checking the text after the match to
@@ -303,7 +303,7 @@ def _no_calculation_path(q_lower: str) -> bool:
 
 
 #: Not every filer states its dividend rate as a clean standalone
-#: "Dividends declared per share" table row the way CVS does — many
+#: "Dividends declared per share" table row — many
 #: only ever state it in a narrative sentence (e.g. "we paid dividends
 #: of $0.0025 per share [in each of several months], totaling $X
 #: million for <year>"), which the dividends_per_share canonical above
@@ -349,10 +349,9 @@ _DIVIDEND_PER_SHARE_SENTENCE_RE = re.compile(
 #: requires a dollar amount immediately adjacent to "per share" --
 #: here only the LAST amount in the list sits next to that phrase, so
 #: that regex alone would silently grab an EARLIER year's now-
-#: superseded rate instead of the target year's own. Not specific to
-#: CVS -- stating N years' rates in one sentence via "respectively" is
-#: a routine, generic SEC drafting convention for any recurring metric,
-#: not just dividends.
+#: superseded rate instead of the target year's own. Stating N years'
+#: rates in one sentence via "respectively" is a routine, generic SEC
+#: drafting convention for any recurring metric, not just dividends.
 _DIVIDEND_RESPECTIVELY_SENTENCE_RE = re.compile(
     rf'({_NOT_SENTENCE_END}*?\bdividends?\b{_NOT_SENTENCE_END}*?\brespectively\b{_NOT_SENTENCE_END}*\.)', re.IGNORECASE
 )
@@ -487,10 +486,14 @@ def _extract_narrative_dividend_per_share(
 def _is_negated_match(item_lower: str, match_start: int) -> bool:
     """Return True when an alias match is immediately preceded by a prefix that changes its
     accounting meaning: negations (non-, not), recognition-timing modifiers (deferred,
-    unearned), or period-delta qualifiers (change in, changes in).
+    unearned), period-delta qualifiers (change in, changes in), or a non-GAAP
+    reconciliation qualifier (adjusted).
 
     This prevents mapping stock-balance labels to flow/delta or unrelated liability
-    concepts.
+    concepts, and prevents an "Adjusted <metric>" non-GAAP reconciliation row (a
+    materially different figure a filer reports alongside its plain GAAP line item)
+    from being treated as interchangeable with the plain metric when the question
+    itself never asked for an adjusted figure.
     """
     return bool(_NEGATION_PREFIX_RE.search(item_lower[:match_start]))
 
@@ -1207,8 +1210,9 @@ def _entity_words(name: str) -> set:
     return {w for w in n.lower().split() if len(w) >= 2 and w != "10k"}
 
 
-#: Year, optionally with an adjacent "Q1"-"Q4" suffix (e.g. "2022Q4" in
-#: "MGMRESORTS_2022Q4_EARNINGS"). Same pattern as orchestrator.py's own
+#: Year, optionally with an adjacent "Q1"-"Q4" suffix embedded directly in
+#: a doc_name (e.g. a "..._2022Q4_EARNINGS"-style filename stem). Same
+#: pattern as orchestrator.py's own
 #: _match_entity_to_corpus fix for the identical underlying issue in a
 #: different function.
 _ENTITY_PERIOD_RE = re.compile(r'(?<!\d)((?:20|19)\d{2})(q[1-4])?(?!\d)', re.IGNORECASE)
@@ -1232,8 +1236,8 @@ def _entity_period_conflicts(entity: str, doc_company: str) -> bool:
 
 def _entity_collapsed(name: str) -> str:
     """Same normalization as the word-set version but return a space-stripped single string
-    (e.g. "mgmresorts") so multi-word human names can be matched via substring against
-    the mashed doc_name convention.
+    so multi-word company names can be matched via substring against the
+    mashed (no-space) doc_name convention.
     """
     n = re.sub(r'(?<!\d)(?:20|19)\d{2}(?!\d)', '', name)
     n = re.sub(r'[_\-]+', ' ', n)
@@ -2831,6 +2835,23 @@ def _gen_formula_code(
                 lines.append(f"result = {direct_pct}")
                 lines.append(f"print(f'{label} ({yoy_old_yr}->{yoy_new_yr}) [filing-reported]: {{result}}%')")
                 return lines
+
+    # A formula_expr that floors a numerator to zero (e.g. "max(0, ebit)") is a
+    # deliberate convention for when that value is negative (e.g. a negative
+    # EBIT makes a coverage ratio meaningless, so the ratio is conventionally
+    # reported as 0 rather than negative). When the floor actually triggers,
+    # the bare numeric result alone loses that reasoning -- surface it as an
+    # explicit printed line so it reaches the model's evidence instead of
+    # only being implicit in the arithmetic.
+    _floor_match = re.search(r'max\(0,\s*(\w+)\)', expr)
+    if _floor_match:
+        _floored_var = _floor_match.group(1)
+        _floored_val = resolved.get(_floored_var)
+        if _floored_val is not None and _floored_val < 0:
+            lines.append(
+                f"print(f'Note: {_floored_var} is negative "
+                f"({_floored_val}), floored to 0 for this ratio per convention')"
+            )
 
     lines.append(f"# Formula: {fk}")
     if unit == "%":
