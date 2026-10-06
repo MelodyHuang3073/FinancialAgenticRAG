@@ -4,10 +4,7 @@ one of the three official categories the benchmark itself splits all 150
 questions into (the other two are "metrics-generated" and
 "novel-generated", see run_metrics_generated_questions.py /
 run_novel_generated_questions.py). This is a full-dataset regression by
-FinanceBench's own category, distinct from run_extraction_questions.py's
-separate hand-picked "抽取題" set (which was assembled from FinanceBench's
-own question_reasoning="Information extraction" tag, a different axis than
-question_type, and tracks a different, curated question list).
+FinanceBench's own category.
 
 "domain-relevant" questions are the qualitative/narrative ones (legal
 proceedings, geographies, acquisitions, dividends-paid yes/no, industry
@@ -28,8 +25,7 @@ with full per-question detail; prints a pass/fail table to stdout.
 """
 import sys, os, json, time
 
-# See run_extraction_questions.py's own copy of this comment for why this
-# is needed: FinanceBench gold answers routinely contain non-ASCII
+# Needed because FinanceBench gold answers routinely contain non-ASCII
 # characters that crash a plain print() under Windows' default console
 # codepage.
 for _stream in (sys.stdout, sys.stderr):

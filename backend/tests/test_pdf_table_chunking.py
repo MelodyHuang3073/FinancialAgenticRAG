@@ -30,7 +30,7 @@ from app.rag.parser import FinancialFileParser
 from app.rag.chunker import chunk_text, _is_table_line
 
 
-TITLE = "AMCOR PLC Annual Report FY2023"
+TITLE = "ACME CORP Annual Report FY2023"
 
 TABLE_ROWS = [
     ["Line Item", "FY2023", "FY2022"],
@@ -112,7 +112,7 @@ def _build_fixture_pdf_bytes() -> bytes:
 @pytest.fixture(scope="module")
 def parsed_page_text():
     parser = FinancialFileParser()
-    result = parser._parse_pdf("amcor_fy2023.pdf", _build_fixture_pdf_bytes(), "AMCOR")
+    result = parser._parse_pdf("acme_fy2023.pdf", _build_fixture_pdf_bytes(), "ACME")
     assert result["passages"], "parser produced no passages at all"
 
     # Reconstruct the raw page_text the way _parse_pdf built it, by pulling

@@ -113,6 +113,39 @@ def is_legal_query(text: str) -> bool:
     return bool(_LEGAL_QUERY_RE.search(text))
 
 
+#: Identifies questions asking which companies a filer acquired. Used to boost a
+#: filing's own acquisitions-note company sub-headings over other passages that
+#: merely mention "acquisition" in passing -- see _ACQUISITION_SUBHEADING_RE.
+_ACQUISITION_QUERY_RE = re.compile(
+    r'\bacqui(?:sition|red)\b|\bcompanies\s+acquired\b|\bbusiness\s+combinations?\b',
+    re.IGNORECASE,
+)
+#: A filing's own acquisitions note names each acquired company as a short
+#: sub-heading immediately followed by a dated "we acquired / completed the
+#: acquisition of ..." sentence -- the same structural shape
+#: decomposer.suggest_narrative_topic_query's answer-synthesis counterpart
+#: (llm_client._ACQUISITION_SUBHEADING_RE) already extracts a company list
+#: from, duplicated here as a RETRIEVAL-time ranking signal: a chunk matching
+#: this shape is close to certainly part of the acquisitions note itself, not
+#: a passing mention, and multi-chunk pages (an acquisitions note spanning
+#: several thousand characters splits into several overlapping chunks) can
+#: otherwise leave one acquired company's own chunk just outside the
+#: retrieval top-k while a neighboring chunk from the same note makes it in --
+#: confirmed real case: a filing's note split so that only ONE of two
+#: adjacent chunks (each naming a different acquired company) ranked inside
+#: the top 15 for every query actually used, so the company named in the
+#: other chunk was never shown to the model at all, even though both chunks
+#: are equally part of the same note.
+_ACQUISITION_SUBHEADING_RE = re.compile(
+    r'\n[A-Z][A-Za-z0-9&.,\' \-]{1,40}\n\s*On\s+\w+\s+\d{1,2},\s*\d{4},\s*we\s+'
+    r'(?:acquired|completed\s+the\s+acquisition\s+of)',
+)
+
+
+def is_acquisition_query(text: str) -> bool:
+    return bool(_ACQUISITION_QUERY_RE.search(text))
+
+
 #: "Which segment/division/business unit had the highest/lowest ..." is a
 #: NUMERIC-mode question (the classifier still routes it as such --
 #: pot_reasoner.py's own _SELECTION_QUERY_RE recognizes the identical
@@ -557,6 +590,7 @@ class HybridFinancialRetriever:
         is_attribution: bool = False,
         is_geography: bool = False,
         is_legal: bool = False,
+        is_acquisition: bool = False,
         is_segment_comparison: bool = False,
         query_years: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
@@ -572,6 +606,7 @@ class HybridFinancialRetriever:
             prefer_narrative: True for qualitative/narrative questions (defaults False); when True, apply behaviors that favor paragraph narrative over short table rows
             is_attribution: True when the original question asks what caused a change; caller must set this explicitly
             is_geography: True when the original question asks about geographies/regions
+            is_acquisition: True when the original question asks which companies were acquired
             query_years: years extracted from the original question; used to disambiguate among multiple filings for the same company
 
         Behavior notes:
@@ -598,6 +633,7 @@ class HybridFinancialRetriever:
         attribution_active = is_attribution or is_attribution_query(query)
         geography_active = is_geography or is_geography_query(query)
         legal_active = is_legal or is_legal_query(query)
+        acquisition_active = is_acquisition or is_acquisition_query(query)
         segment_comparison_active = is_segment_comparison or is_segment_comparison_query(query)
         # No caller flag for this one -- "Finished Goods" appearing in the
         # query text IS the signal (see _INVENTORY_COMPOSITION_QUERY_RE's
@@ -680,10 +716,10 @@ class HybridFinancialRetriever:
 
             # ── Geographic-section boost (geography questions only) ───────────
             # Only ever active alongside prefer_narrative -- see
-            # _GEOGRAPHIC_SECTION_RE's docstring for the confirmed AmEx real
-            # case (the sibling "Reportable Operating Segments" sub-section
-            # scores close enough on plain BM25 to edge out the real
-            # "Geographic Operations" table otherwise).
+            # _GEOGRAPHIC_SECTION_RE's docstring: a sibling "Reportable
+            # Operating Segments" sub-section can score close enough on
+            # plain BM25 to edge out the real "Geographic Operations"
+            # table otherwise, since both share most of their vocabulary.
             if prefer_narrative and geography_active and _GEOGRAPHIC_SECTION_RE.search(content):
                 multiplier *= 1.4
             # Boost passages that enumerate distinct geographic regions when the passage
@@ -700,6 +736,15 @@ class HybridFinancialRetriever:
             # Use this boost for legal questions to prefer section-heading matches over
             # bag-of-words topic matches.
             if prefer_narrative and legal_active and _LEGAL_PROCEEDINGS_SECTION_RE.search(content):
+                multiplier *= 1.5
+
+            # Boost chunks matching a filing's own acquisitions-note sub-heading shape
+            # (see _ACQUISITION_SUBHEADING_RE) for acquisition questions. An acquisitions
+            # note spanning several thousand characters splits into multiple overlapping
+            # chunks, and without this boost one acquired company's own chunk can rank
+            # just outside the retrieval cutoff while a neighboring chunk from the same
+            # note (naming a different acquired company) ranks comfortably inside it.
+            if prefer_narrative and acquisition_active and _ACQUISITION_SUBHEADING_RE.search(content):
                 multiplier *= 1.5
 
             # Boost documents that contain side-by-side segment results for segment-

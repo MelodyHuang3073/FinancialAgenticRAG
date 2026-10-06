@@ -26,8 +26,7 @@ with full per-question detail; prints a pass/fail table to stdout.
 """
 import sys, os, json, time
 
-# See run_extraction_questions.py's own copy of this comment for why this
-# is needed: FinanceBench gold answers routinely contain non-ASCII
+# Needed because FinanceBench gold answers routinely contain non-ASCII
 # characters that crash a plain print() under Windows' default console
 # codepage.
 for _stream in (sys.stdout, sys.stderr):

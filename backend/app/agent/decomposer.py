@@ -174,7 +174,7 @@ class QueryDecomposer:
         years: List[str],
     ) -> Optional[List[Dict[str, Any]]]:
         """
-        Call the LLM to generate structured sub-queries aligned with SKILL.md Stage 3.
+        Call the LLM to generate structured sub-queries for the decomposition step.
         Returns None if LLM is unavailable or output cannot be parsed.
         """
         client = self._get_llm_client()

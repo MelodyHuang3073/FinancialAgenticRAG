@@ -210,25 +210,24 @@ def _strip_3m_company_name(text: str) -> str:
 
 #: Gold and model answers routinely state the exact same dollar figure at
 #: DIFFERENT magnitudes -- one side spells out the full raw number, the
-#: other uses a "<number> <magnitude word>" shorthand -- and which side
-#: does which is not consistent across questions. Confirmed real cases:
-#: PepsiCo's "$400,000,000 increase" (gold, full digits) vs "$400 million"
-#: (model, shorthand); Best Buy's "$1.8 bn" (gold, shorthand) vs
-#: "$1,824.0 million" (model, full-digit-with-shorthand-suffix). A plain
-#: digit-for-digit comparison treats these as unrelated numbers 1,000,000x
-#: apart even though they're the identical fact.
+#: other uses a "<number> <magnitude word>" shorthand (e.g. a full-digit
+#: "$400,000,000" on one side against a "$400 million" shorthand on the
+#: other, or a shorthand-on-both-sides mismatch like "$1.8 bn" against
+#: "$1,824.0 million") -- and which side does which is not consistent
+#: across questions. A plain digit-for-digit comparison treats these as
+#: unrelated numbers 1,000,000x apart even though they're the identical
+#: fact.
 #: Returns ADDITIONAL scaled candidate values for every "<number>
 #: <magnitude word>" occurrence found in text -- e.g. "$400 million" also
 #: yields 400000000.0 -- to be checked ALONGSIDE (never instead of) the
 #: plain unscaled values _numbers_in already extracts. Only ever adds
 #: candidates, on BOTH the gold and model side, and only for numbers that
 #: actually have a magnitude word attached in their own source text --
-#: never invents a scale for a bare, unit-less number like AWW's gold
-#: answer "$0.40" (which relies on the QUESTION's own "in USD billions"
-#: framing, with no magnitude word in the answer text itself to scale
-#: from), so a case like that is left completely unaffected: neither side
-#: gains a new candidate, and the existing (near-miss) comparison is
-#: unchanged either way.
+#: never invents a scale for a bare, unit-less gold figure that instead
+#: relies on the QUESTION's own "in USD billions"-style framing, with no
+#: magnitude word in the answer text itself to scale from, so a case like
+#: that is left completely unaffected: neither side gains a new candidate,
+#: and the existing (near-miss) comparison is unchanged either way.
 _MAGNITUDE_SCALE = {
     "thousand": 1e3, "million": 1e6, "mm": 1e6,
     "billion": 1e9, "bn": 1e9, "trillion": 1e12,
@@ -297,9 +296,9 @@ def _percent_numbers_in(text: str) -> list:
     return out
 
 
-#: A gold answer that enumerates a short list inline ("...during FY 2022:
-#: (1) Current Health Ltd and (2) Two Peaks, LLC...") uses "(1)"/"(2)" as
-#: pure list-item numbering, not a financial fact -- but _NUM_RE has no
+#: A gold answer that enumerates a short list inline ("...during the year:
+#: (1) Acme Widgets Ltd and (2) Beta Components, LLC...") uses "(1)"/"(2)"
+#: as pure list-item numbering, not a financial fact -- but _NUM_RE has no
 #: way to tell that apart from a real parenthesized figure. Left in, this
 #: silently makes "1" and "2" part of the gold "facts to check", and a
 #: model answer that correctly lists BOTH companies with their real
@@ -308,12 +307,12 @@ def _percent_numbers_in(text: str) -> list:
 #: place. Distinguished from a genuine footnote/citation marker (e.g.
 #: "$147 million(1)") by requiring a space then a capital letter right
 #: after the closing paren -- the shape of "(N) <New List Item>", which a
-#: footnote reference attached directly to a number never has. Confirmed
-#: real case: Best Buy's acquisitions gold answer ("(1) Current Health
-#: Ltd and (2) Two Peaks, LLC...") reduced check_nums to exactly [1, 2]
-#: after year-stripping, so a fully correct, evidence-grounded model
-#: answer (both companies + correct $389M/$79M amounts) still failed
-#: because it had no reason to ever produce a bare standalone "1" or "2".
+#: footnote reference attached directly to a number never has. This
+#: reduces check_nums to exactly the list-item numbers after year-
+#: stripping unless handled, so a fully correct, evidence-grounded model
+#: answer (naming every item + its correct dollar amount) would otherwise
+#: fail because it had no reason to ever produce a bare standalone list
+#: index of its own.
 _LIST_MARKER_RE = re.compile(
     r"\(\d{1,2}\)(?=\s+[A-Z])"
     # a lowercase item introduced by ":" ";" "," or "and" ("... are: (1) usual and
@@ -330,23 +329,21 @@ def _strip_list_markers(text: str) -> str:
 
 #: A gold answer formatted as a bullet list sometimes uses a bare "-" as
 #: the bullet marker with NO space before the item's own text ("-100%
-#: equity interest of a flexibles manufacturing company..."), which
-#: _NUM_RE cannot tell apart from a genuine negative number -- it reads
-#: "-100" as literally negative one hundred, when the "-" is pure list
-#: punctuation and the real fact is a plain positive "100%". Requires a
-#: SPACE then a LETTER right after the number (the shape of "-100%
-#: equity...", i.e. a bullet item with descriptive text following it) --
-#: NOT just "dash at line start before a digit", which would also
-#: (wrongly) rewrite a gold answer that is ITSELF just a single bare
-#: negative number with nothing else on the line, e.g. AES's ROA answer
-#: "-0.02" or General Mills' CCC answer "-3.7" -- both entire strings,
-#: not bullet items, where the leading "-" is a genuine minus sign that
-#: must be left alone. Confirmed real case: Amcor's acquisitions gold
-#: answer ("-100% equity interest...\n- 100% equity interest...\n
-#: -acquisition of a New Zealand-based...") extracted as check_nums
-#: [-100, 100] instead of [100, 100], and no model answer was ever going
-#: to coincidentally state a negative -100 for what are actually two
-#: 100%-owned acquisitions.
+#: equity interest of a manufacturing company..."), which _NUM_RE cannot
+#: tell apart from a genuine negative number -- it reads "-100" as
+#: literally negative one hundred, when the "-" is pure list punctuation
+#: and the real fact is a plain positive "100%". Requires a SPACE then a
+#: LETTER right after the number (the shape of "-100% equity...", i.e. a
+#: bullet item with descriptive text following it) -- NOT just "dash at
+#: line start before a digit", which would also (wrongly) rewrite a gold
+#: answer that is ITSELF just a single bare negative number with nothing
+#: else on the line (e.g. a ratio answer like "-0.02" or "-3.7" as the
+#: entire string, not a bullet item, where the leading "-" is a genuine
+#: minus sign that must be left alone). Without this, a bullet list of
+#: several 100%-owned acquisitions can extract as check_nums like
+#: [-100, 100] instead of [100, 100], and no model answer would ever
+#: coincidentally state a negative -100 for what are actually fully-owned
+#: acquisitions.
 _LEADING_BULLET_DASH_RE = re.compile(r"(?m)^-(?=\d[\d,]*\.?\d*%?\s+[A-Za-z])")
 
 
@@ -447,17 +444,11 @@ def _check_numeric(gold_answer: str, model_answer: str, rel_tol: float = 0.02) -
 #: somewhere in both the gold text and any model answer about the same
 #: filing, correct or not. Counting it as a matchable "fact" lets a
 #: substantively WRONG answer register as a match purely because both
-#: texts mention the same fiscal year. Confirmed real cases (all
-#: gold-says-Yes/model-says-No or vice versa, yet PASSed on this check
-#: alone before this exclusion): CVS Health's Q2 FY2022 dividend
-#: question (gold "$0.55/share", model "no dividend, 0.0" — matched only
-#: on both texts saying "2022"), MGM Resorts' FY2022 dividend question
-#: (same pattern, gold "$0.01/share"), PepsiCo's FY2022 restructuring
-#: costs (gold "$411 million", model "no restructuring costs, 0" —
-#: matched only on "2022"), Boeing's FY2022 gross margin trend (gold
-#: 4.8%->5.3%, model 84.70%->65.43%, matched only on "2022"), and
-#: Boeing's primary-customers question (gold "the US government
-#: accounted for 40%", model "140 aircraft" — matched only on "2022").
+#: texts mention the same fiscal year -- confirmed across several
+#: gold-says-Yes/model-says-No (or vice versa) cases that PASSed on this
+#: check alone before this exclusion, each time matching on nothing but
+#: both texts stating the same fiscal year while every substantive
+#: number or stance differed.
 def _is_bare_year(n: float) -> bool:
     return 1900 <= n <= 2099 and n == int(n)
 
@@ -480,9 +471,8 @@ def _is_bare_year(n: float) -> bool:
 #: check completely unchanged, so it can never fabricate a PASS out of a
 #: previously-None (informational-only) result. Verified against every
 #: currently-passing Yes/No-shaped gold answer in both the calc and
-#: extraction suites (Boeing legal battles, Adobe operating margin,
-#: American Water Works working capital) -- all have a model stance that
-#: either matches or is undetermined, so none of them flip.
+#: extraction suites -- all have a model stance that either matches or
+#: is undetermined, so none of them flip.
 _NEGATION_PHRASES = [
     "did not", "does not", "doesn't", "didn't", "has not", "hasn't",
     "have not", "haven't", "is not", "isn't", "are not", "aren't",
@@ -499,9 +489,9 @@ def _leading_yn_stance(text: str) -> Optional[bool]:
     Only looks at the OPENING of the text: an explicit "Yes"/"No" token
     first, else one of _NEGATION_PHRASES within the first ~200
     characters -- this covers the common model phrasing for a "No"
-    answer that doesn't literally start with the word "No" (e.g. "CVS
-    Health did not pay dividends...", "Boeing does not have an
-    improving gross margin..."). Deliberately does NOT try to infer an
+    answer that doesn't literally start with the word "No" (e.g. "The
+    Company did not pay dividends...", "There is no improving gross
+    margin trend..."). Deliberately does NOT try to infer an
     affirmative "Yes" stance from the mere absence of a negation phrase
     (that would be guessing, not detecting) -- an affirmative stance is
     only ever an explicit leading "Yes".
