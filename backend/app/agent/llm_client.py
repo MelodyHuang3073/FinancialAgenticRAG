@@ -164,6 +164,89 @@ def _extract_acquisition_note_companies(evidence_text: str) -> list:
     return ordered
 
 
+#: Detector for a filing's own "completed the acquisition of N% equity/
+#: ownership/membership interest in <target>" or "acquired N% of the
+#: outstanding shares of <target>" disclosure -- the common variants a 10-K's
+#: acquisitions note uses to state the ownership stake obtained (confirmed
+#: across several unrelated filers' own wording: "100% of the outstanding
+#: shares of" / "100% of the outstanding equity interests in" / "85% of the
+#: equity interests in" / "the remaining 50% ownership interest in" / "100%
+#: of the membership interests of"). A numbered prose rule already instructs
+#: the model to state the ownership stake when listing acquisitions, but a
+#: rule among 30+ others is not followed reliably when the model's own
+#: narrative focuses on dollar figures instead -- surfacing each actually-
+#: matched percentage/target pair as a directive (like the dividend-streak
+#: and customer-concentration detectors above) makes the omission far less
+#: likely regardless of which company or how many acquisitions are listed.
+_ACQUISITION_EQUITY_INTEREST_RE = re.compile(
+    r'(?:completed\s+(?:the|its)\s+acquisition\s+of|acquired)\s+'
+    r'(?:an?\s+)?(?:additional\s+|the\s+remaining\s+)?(\d+(?:\.\d+)?)%\s+'
+    r'(?:'
+    r'(?:of\s+(?:the\s+)?)?(?:outstanding\s+)?(?:equity|ownership|membership)\s+interests?'
+    r'|'
+    r'of\s+the\s+outstanding\s+shares(?:\s+and\s+voting\s+interests)?'
+    r')\s+'
+    r'(?:in|of)\s+'
+    r'([^.,\n]{3,100})',
+    re.IGNORECASE,
+)
+
+
+def _extract_acquisition_equity_interests(evidence_text: str) -> list:
+    """Returns (percent, target_description) pairs for every "acquisition of
+    N% equity interest in <target>" disclosure found anywhere in the
+    evidence, in order of first appearance, deduplicated."""
+    matches = _ACQUISITION_EQUITY_INTEREST_RE.findall(evidence_text)
+    seen = set()
+    ordered = []
+    for pct, target in matches:
+        target = " ".join(target.split())
+        key = (pct, target)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(key)
+    return ordered
+
+
+#: Detector for the earnings-release idiom "leverage of X" / "deleverage of
+#: X" (also "X leveraged" is covered by the general prose rule, not this
+#: regex). This is standard SEC earnings-release vocabulary for describing a
+#: cost line's change as a percent of net sales WITHOUT printing an explicit
+#: number for that line alone: "leverage" means the cost FELL as a percent of
+#: sales, "deleverage" means it ROSE. A numbered prose rule already explains
+#: this convention, but a rule among 30+ others is not followed reliably --
+#: confirmed case: a filer's own SG&A paragraph named several contributing
+#: sub-items this way with no percentage printed for any single one of them,
+#: and the model concluded the direction "cannot be determined" for a
+#: sub-item asked about individually, even though the evidence states its
+#: direction explicitly via this idiom. Surfacing each actually-matched
+#: item/direction pair as a directive (like the other detectors above) makes
+#: that omission far less likely regardless of which cost item or filer.
+_LEVERAGE_ITEM_RE = re.compile(
+    r'\b(de)?leverage\s+(?:of|in)\s+([^,.;]+?)'
+    r'(?=\s+due\s+to\s+|[,.;]|\s+and\s+deleverage\b|\s+and\s+leverage\b|$)',
+    re.IGNORECASE,
+)
+
+
+def _extract_leverage_items(evidence_text: str) -> list:
+    """Returns (direction, item_description) pairs -- direction is "increased"
+    (deleverage) or "decreased" (leverage) -- for every "leverage/deleverage
+    of <item>" disclosure found anywhere in the evidence, in order of first
+    appearance, deduplicated."""
+    matches = _LEVERAGE_ITEM_RE.findall(evidence_text)
+    seen = set()
+    ordered = []
+    for de_prefix, item in matches:
+        item = " ".join(item.split())
+        direction = "increased" if de_prefix else "decreased"
+        key = (direction, item)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(key)
+    return ordered
+
+
 def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_rows: int = 10) -> str:
     """
     Truncate one evidence item's content for the LLM prompt.
@@ -337,7 +420,13 @@ class LLMAnswerGenerator:
                 "across the company's OWN business segments or product "
                 "lines (e.g. \"Segment X represented Y% of revenue\") -- "
                 "that answers a different question (what the company "
-                "sells), not who buys it."
+                "sells), not who buys it. Also do NOT substitute a "
+                f"different percentage for {cust_entity} found elsewhere in "
+                "the evidence (e.g. a segment/customer-type breakdown table) "
+                "even if it names the same entity -- a different table can "
+                "use a narrower or different scope definition for the same-"
+                "looking label, and this explicit sentence is the one "
+                "directly answering the question asked."
             )
 
         acquisition_note_summary = ""
@@ -359,6 +448,38 @@ class LLMAnswerGenerator:
                     f"source, not your general knowledge of this company's "
                     f"acquisition history."
                 )
+
+        acquisition_equity_interest_summary = ""
+        if "acqui" in query.lower():
+            equity_interests = _extract_acquisition_equity_interests(full_evidence_text)
+            if equity_interests:
+                pairs_str = "; ".join(f"{pct}% equity interest in {target}" for pct, target in equity_interests)
+                acquisition_equity_interest_summary = (
+                    f"\n⚠️ CRITICAL: the evidence above explicitly states the ownership "
+                    f"stake acquired in each of these transactions: {pairs_str}. When "
+                    f"describing or listing these acquisitions, you MUST state this "
+                    f"percentage for each one, not only the dollar amount -- the "
+                    f"ownership stake (full vs. partial) is a materially different fact "
+                    f"from the purchase price, and a description that gives only the "
+                    f"price is incomplete."
+                )
+
+        leverage_item_summary = ""
+        leverage_items = _extract_leverage_items(full_evidence_text)
+        if leverage_items:
+            pairs_str = "; ".join(f'"{item}" {direction}' for direction, item in leverage_items)
+            leverage_item_summary = (
+                f"\n⚠️ CRITICAL: the evidence above states, using the standard "
+                f"earnings-release idiom \"leverage\"/\"deleverage\" of a cost line "
+                f"(leverage = that cost FELL as a percent of net sales; deleverage = "
+                f"that cost ROSE as a percent of net sales), that the following items "
+                f"moved this way: {pairs_str}. If the question asks whether one of "
+                f"these items (or a close match, e.g. \"wages\"/\"payroll\" for "
+                f"\"store payroll and benefits\") increased or decreased as a percent "
+                f"of net sales, you MUST answer from this stated direction -- do NOT "
+                f"say the direction cannot be determined just because no explicit "
+                f"percentage is printed for that item alone."
+            )
 
         separation_status_summary = ""
         sep_cost_match = (
@@ -537,6 +658,8 @@ Available Evidence:
 {dividend_streak_summary}
 {customer_concentration_summary}
 {acquisition_note_summary}
+{acquisition_equity_interest_summary}
+{leverage_item_summary}
 {separation_status_summary}
 {verification_summary}
 

@@ -262,9 +262,14 @@ class FinAgentRAGOrchestrator:
         # but not a filing's plain-English sentence stating the same fact in
         # different words. For direct-amount/lookup questions (calc_type empty)
         # one extra, additive query built by the LLM suggester covers that
-        # prose. Skipped for computed-ratio questions (calc_type set): their
+        # prose. Skipped for computed-ratio questions that matched a real
+        # target_metric (both calc_type and target_metrics set): their
         # alias-matched multi-row retrieval already targets the exact line items,
         # and an extra generic query there displaced correct evidence rows.
+        # A ratio question that matched NO target_metric (calc_type set but
+        # target_metrics empty) has no alias-matched retrieval to protect --
+        # its components are as likely to be plain-English sentences as a
+        # direct-lookup question's, so it still gets the narrative bonus query.
         # LLM-decomposed sub-queries vary run to run and can drop the user's own
         # key terms; the original question is always kept as one extra query so
         # retrieval never depends on the decomposition alone (standard
@@ -279,7 +284,9 @@ class FinAgentRAGOrchestrator:
                 "source": "original_question",
             })
 
-        if answer_mode == "NUMERIC" and not classification.get("calc_type"):
+        if answer_mode == "NUMERIC" and not (
+            classification.get("calc_type") and classification.get("target_metrics")
+        ):
             topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
             if topic_terms:
                 sub_questions.append({
@@ -523,7 +530,11 @@ class FinAgentRAGOrchestrator:
                     break
 
                 # Reject → refine and re-search
-                current_query = self.refiner.refine(query, verification_res, iteration_count)
+                current_query = self.refiner.refine(
+                    query, verification_res, iteration_count,
+                    target_metrics=classification.get("target_metrics"),
+                    evidence_so_far=evidence_buffer,
+                )
                 trace_steps.append({
                     "step_name": f"Query Refinement #{iteration_count}",
                     "type": "refinement",
