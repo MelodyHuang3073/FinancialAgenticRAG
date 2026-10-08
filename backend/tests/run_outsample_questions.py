@@ -16,7 +16,7 @@ Usage:
 Writes outsample_results.json (backend/outsample_results.json) with full
 per-question detail; prints a pass/fail table to stdout.
 """
-import sys, os, json, time
+import sys, os, json, time, pickle
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -33,6 +33,7 @@ from app.agent.orchestrator import FinAgentRAGOrchestrator
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "financebench_outsample_pdfs")
 QA_PATH = os.path.join(os.path.dirname(__file__), "financebench_outsample_qa.json")
 RESULTS_FILENAME = "outsample_results.json"
+CACHE_PATH = os.path.join(os.path.dirname(__file__), "outsample_corpus_cache.pkl")
 
 CHECK_FNS = {
     "metrics-generated": _check_numeric,
@@ -41,8 +42,34 @@ CHECK_FNS = {
 }
 
 
+def _cache_is_fresh() -> bool:
+    """False if the cache is missing or any PDF in the fixtures dir was
+    modified after the cache was built (e.g. a source PDF got swapped out)."""
+    if not os.path.exists(CACHE_PATH):
+        return False
+    cache_mtime = os.path.getmtime(CACHE_PATH)
+    for filename in os.listdir(FIXTURES_DIR):
+        if filename.lower().endswith(".pdf"):
+            if os.path.getmtime(os.path.join(FIXTURES_DIR, filename)) > cache_mtime:
+                return False
+    return True
+
+
 def _build_indexed_store() -> FinancialVectorStoreManager:
     vs = FinancialVectorStoreManager()
+    if _cache_is_fresh():
+        print(f"  loading cached corpus from {CACHE_PATH}")
+        with open(CACHE_PATH, "rb") as f:
+            cached = pickle.load(f)
+        vs.corpus = cached["corpus"]
+        vs.parent_map = cached["parent_map"]
+        vs.uploaded_files = cached["uploaded_files"]
+        from app.tools.hybrid_retriever import HybridFinancialRetriever
+        vs.retriever = HybridFinancialRetriever(vs.corpus)
+        for uf in vs.uploaded_files:
+            print(f"  loaded {uf['filename']} ({uf['company']}): {uf['passage_count']} passages")
+        return vs
+
     parser = FinancialFileParser()
     for filename in sorted(os.listdir(FIXTURES_DIR)):
         if not filename.lower().endswith(".pdf"):
