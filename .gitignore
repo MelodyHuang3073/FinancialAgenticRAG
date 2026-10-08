@@ -47,3 +47,6 @@ backend/uploaded_files/
 
 .llm_usage/
 .llm_usage_notified_*
+
+# Local-only corpus caches (large binaries, rebuildable from PDFs — not pushed)
+backend/tests/*_corpus_cache.pkl
