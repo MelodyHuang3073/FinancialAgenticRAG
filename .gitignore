@@ -50,3 +50,5 @@ backend/uploaded_files/
 
 # Local-only corpus caches (large binaries, rebuildable from PDFs — not pushed)
 backend/tests/*_corpus_cache.pkl
+backend/build_original_cache_log.txt
+backend/outsample_run_log.txt

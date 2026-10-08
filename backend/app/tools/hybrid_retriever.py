@@ -98,14 +98,26 @@ _LEGAL_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 _LEGAL_PROCEEDINGS_SECTION_RE = re.compile(
-    r'item\s*3\.?\s*legal\s+proceedings|'
+    r'(?i:item\s*3\.?\s*legal\s+proceedings)|'
     # Handles multi-part legal proceedings sections where relevant content
-    # appears under later sub-headings within the same Item 3 block.
-    # Boost standard category sub-headings too, since useful content can reside beyond
-    # the first page.
-    r'usual\s+and\s+customary\s+pricing\s+litigation|pbm\s+litigation|'
-    r'controlled\s+substances\s+litigation|opioid\s+litigation',
-    re.IGNORECASE,
+    # appears under later sub-headings within the same Item 3 block: a
+    # filer's own named litigation category ("PBM Litigation and
+    # Investigations", "Antitrust Litigation", "Controlled Substances
+    # Litigation, Audits and Subpoenas", ...) renders as a short,
+    # title-cased, standalone heading line -- the same structural shape
+    # _ACQUISITION_SUBHEADING_RE below matches for acquisition sub-headings
+    # -- so detect that SHAPE (a trigger word inside a short standalone
+    # heading line, with up to a few leading/trailing words of its own
+    # category name) rather than any one filer's own category names, which
+    # vary filer to filer and would otherwise only ever match the specific
+    # filing(s) a particular wording was copied from. Verified against a
+    # real filing's extracted text: matches every one of its actual
+    # litigation sub-headings (including ones with trailing continuations
+    # like ", Audits and Subpoenas") with no false positives on unrelated
+    # headings.
+    r'\n[A-Z][A-Za-z,/\'\-]*(?:\s+[A-Za-z,/\'\-]+){0,10}?\s+'
+    r'(?:Litigation|Lawsuits?|Proceedings?|Investigations?)\b'
+    r'[A-Za-z,/\'\- ]{0,40}\n'
 )
 
 
