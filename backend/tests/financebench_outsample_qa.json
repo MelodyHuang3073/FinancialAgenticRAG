@@ -1,0 +1,902 @@
+[
+  {
+    "doc_name": "3M_2025_10K",
+    "question": "What is 3M's FY2025 net profit margin (net income / net sales)? Round to one decimal place.",
+    "answer": "13.0%. Net income of $3,250 million divided by net sales of $24,948 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "3M_2025_10K",
+    "question": "What is 3M's FY2025 current ratio (total current assets / total current liabilities)? Round to two decimal places.",
+    "answer": "1.71. Total current assets of $16,387 million divided by total current liabilities of $9,595 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "3M_2025_10K",
+    "question": "Did 3M's net income grow at the same rate as its net sales in FY2025? What does this imply about the company's profitability trend?",
+    "answer": "No. Net sales grew only about 1.5% (from $24,575 million to $24,948 million), while net income declined approximately 22.1% (from $4,173 million to $3,250 million). This implies profitability compressed significantly in FY2025 even as the top line grew slightly -- costs and/or other charges grew faster than revenue.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "AMD_2025_10K",
+    "question": "What is AMD's FY2025 gross margin (gross profit / net revenue)? Round to one decimal place.",
+    "answer": "49.5%. Gross profit of $17,152 million divided by net revenue of $34,639 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMD_2025_10K",
+    "question": "What was AMD's research and development expense as a percent of net revenue in FY2025? Round to one decimal place.",
+    "answer": "23.4%. R&D expense of $8,091 million divided by net revenue of $34,639 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMD_2025_10K",
+    "question": "Which AMD reporting segment was the only one to decline in FY2025, and by how much?",
+    "answer": "The Embedded segment was the only one to decline, falling approximately 3% from $3,557 million (FY2024) to $3,454 million (FY2025), amid mixed demand in certain end markets -- while Data Center (+32%), Client (+51%), and Gaming (+51%) all grew.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "MICROSOFT_2025_10K",
+    "question": "What is Microsoft's FY2025 operating margin (operating income / revenue)? Round to one decimal place.",
+    "answer": "45.6%. Operating income of $128,528 million divided by revenue of $281,724 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "MICROSOFT_2025_10K",
+    "question": "What is Microsoft's FY2025 return on equity (net income / average total stockholders' equity between FY2024 and FY2025)? Round to two decimal places.",
+    "answer": "33.28%. Net income of $101,832 million divided by average stockholders' equity of $305,978 million (average of $343,479 million in FY2025 and $268,477 million in FY2024).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "MICROSOFT_2025_10K",
+    "question": "Which grew faster for Microsoft in FY2025: Product revenue or Service and other revenue? What does this suggest about Microsoft's business mix?",
+    "answer": "Service and other revenue grew much faster, up about 20.8% (from $180,349 million to $217,778 million), while Product revenue actually declined about 1.3% (from $64,773 million to $63,946 million). This suggests Microsoft's revenue mix continues to shift away from traditional packaged/licensed products toward services (e.g. cloud, subscriptions).",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "PEPSICO_2025_10K",
+    "question": "What is PepsiCo's FY2025 gross margin (gross profit / net revenue)? Round to one decimal place.",
+    "answer": "54.1%. Gross profit of $50,859 million divided by net revenue of $93,925 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PEPSICO_2025_10K",
+    "question": "Did PepsiCo's net income increase or decrease in FY2025 despite revenue growth, and what primarily drove this?",
+    "answer": "Net income decreased by approximately 13.8%, from $9,626 million (FY2024) to $8,295 million (FY2025), despite revenue growth of about 2.3% -- primarily driven by a sharp increase in intangible asset impairment charges, which jumped to $1,993 million in FY2025 from just $33 million in FY2024.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "PEPSICO_2025_10K",
+    "question": "What was PepsiCo's impairment of intangible assets in FY2025 compared to FY2024?",
+    "answer": "$1,993 million in FY2025, dramatically up from just $33 million in FY2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "AMCOR_2025_10K",
+    "question": "What is Amcor's FY2025 gross margin (gross profit / net sales)? Round to one decimal place.",
+    "answer": "18.9%. Gross profit of $2,834 million divided by net sales of $15,009 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMCOR_2025_10K",
+    "question": "Amcor's net sales grew in FY2025 but net income declined sharply -- what happened?",
+    "answer": "Net sales grew about 10.0% (from $13,640 million to $15,009 million) but net income declined about 30.0% (from $740 million to $518 million), primarily due to restructuring and transaction costs related to the Berry Global merger jumping from $97 million to $307 million, along with higher interest expense.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "AMCOR_2025_10K",
+    "question": "What major corporate transaction did Amcor complete in FY2025?",
+    "answer": "Amcor completed its merger with Berry Global Group in April 2025, significantly expanding its portfolio and global manufacturing footprint.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "AMCOR_2025_10K",
+    "question": "What was Amcor's restructuring and transaction costs in FY2025 compared to FY2024?",
+    "answer": "$307 million in FY2025, up from $97 million in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AES_2025_10K",
+    "question": "What is AES's FY2025 gross margin (Operating Margin / Revenues, as presented in the income statement)? Round to one decimal place.",
+    "answer": "18.1%. Operating Margin of $2,211 million divided by Revenues of $12,233 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AES_2025_10K",
+    "question": "What were AES's FY2025 revenues compared to FY2024?",
+    "answer": "$12,233 million in FY2025, essentially flat compared to $12,278 million in FY2024 (a decrease of about 0.4%).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AES_2025_10K",
+    "question": "What was AES's asset impairment expense in FY2025 compared to FY2024?",
+    "answer": "$224 million in FY2025, down from $374 million in FY2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "AES_2025_10K",
+    "question": "What was AES's net income attributable to the parent company in FY2025 compared to FY2024?",
+    "answer": "$910 million in FY2025, down from $1,679 million in FY2024, a decline of approximately 45.8%.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "AMAZON_2025_10K",
+    "question": "What is Amazon's FY2025 operating margin (operating income / total net sales)? Round to one decimal place.",
+    "answer": "11.2%. Operating income of $79,975 million divided by total net sales of $716,924 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMAZON_2025_10K",
+    "question": "What was Amazon's net income in FY2025 compared to FY2024?",
+    "answer": "$77,670 million in FY2025, up from $59,248 million in FY2024, an increase of approximately 31.1%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMAZON_2025_10K",
+    "question": "What was Amazon's total net sales growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 12.4%, from $637,959 million in FY2024 to $716,924 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMAZON_2025_10K",
+    "question": "Which grew faster for Amazon in FY2025: net product sales or net service sales?",
+    "answer": "Net service sales grew faster, up about 15.0% (from $365,648 million to $420,658 million), compared to net product sales which grew about 8.8% (from $272,311 million to $296,266 million).",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "AMAZON_2025_10K",
+    "question": "What drove the large increase in Amazon's \"Other income (expense), net\" in FY2025?",
+    "answer": "The large swing (from an expense of $2,250 million in FY2024 to income of $15,229 million in FY2025) was primarily related to Amazon's investment in Anthropic, including gains recognized from the conversion of convertible notes into nonvoting preferred stock.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "BOEING_2025_10K",
+    "question": "Did Boeing return to profitability in FY2025?",
+    "answer": "Yes. Boeing reported net earnings of $2,238 million in FY2025, compared to a net loss of $(11,829) million in FY2024.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "BOEING_2025_10K",
+    "question": "What was Boeing's total revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 34.5%, from $66,517 million in FY2024 to $89,463 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BOEING_2025_10K",
+    "question": "What is Boeing's FY2025 gross margin (gross profit / total revenues)? Round to one decimal place.",
+    "answer": "4.8%. Gross profit of $4,289 million divided by total revenues of $89,463 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BOEING_2025_10K",
+    "question": "What was Boeing's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$2.48 in FY2025, compared to a diluted loss per share of $(18.36) in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BOEING_2025_10K",
+    "question": "What were Boeing's sales of products compared to sales of services in FY2025?",
+    "answer": "Sales of products were $75,356 million and sales of services were $14,107 million in FY2025.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "JOHNSON_JOHNSON_2025_10K",
+    "question": "What is Johnson & Johnson's FY2025 gross margin (gross profit / sales to customers)? Round to one decimal place.",
+    "answer": "67.9%. Gross profit of $63,937 million divided by sales to customers of $94,193 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "JOHNSON_JOHNSON_2025_10K",
+    "question": "What was Johnson & Johnson's sales growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 6.0%, from $88,821 million in FY2024 to $94,193 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "JOHNSON_JOHNSON_2025_10K",
+    "question": "Johnson & Johnson's net earnings nearly doubled in FY2025 compared to FY2024, far outpacing sales growth -- what primarily drove this?",
+    "answer": "Net earnings grew about 90.6% (from $14,066 million to $26,804 million) versus sales growth of only about 6.0%. This was primarily driven by \"Other (income) expense, net\" swinging from a $4,694 million expense in FY2024 to $7,209 million of income in FY2025, a favorable swing of roughly $11.9 billion.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "JOHNSON_JOHNSON_2025_10K",
+    "question": "What was Johnson & Johnson's total debt (short-term borrowings + long-term debt) in FY2025 compared to FY2024?",
+    "answer": "$47,933 million in FY2025 ($8,495M + $39,438M), up from $36,634 million in FY2024 ($5,983M + $30,651M), an increase of approximately 30.8%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "JOHNSON_JOHNSON_2025_10K",
+    "question": "What was Johnson & Johnson's research and development expense in FY2025 compared to FY2024?",
+    "answer": "$14,665 million in FY2025, down from $17,232 million in FY2024, a decrease of approximately 14.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ADOBE_2025_10K",
+    "question": "What is Adobe's FY2025 gross margin (gross profit / revenue)? Round to one decimal place.",
+    "answer": "89.3%. Gross profit of $21,218 million divided by revenue of $23,769 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ADOBE_2025_10K",
+    "question": "What was Adobe's revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 10.5%, from $21,505 million in FY2024 to $23,769 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ADOBE_2025_10K",
+    "question": "What was Adobe's net income in FY2025 compared to FY2024?",
+    "answer": "$7,130 million in FY2025, up from $5,560 million in FY2024, an increase of approximately 28.2%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ADOBE_2025_10K",
+    "question": "Adobe's operating income grew much faster than revenue in FY2025 (about 29% vs about 11%) -- what primarily explains this gap?",
+    "answer": "FY2024 included a one-time $1,000 million acquisition termination fee (related to the terminated Figma acquisition) in operating expenses that did not recur in FY2025, which significantly boosted the year-over-year operating income comparison beyond underlying revenue growth.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "ADOBE_2025_10K",
+    "question": "What portion of Adobe's FY2025 revenue came from subscription revenue versus product and services revenue?",
+    "answer": "Subscription revenue was $22,904 million (about 96.4% of total revenue of $23,769 million), while product revenue was $325 million and services & other revenue was $540 million.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2025_10K",
+    "question": "What was American Express's net income in FY2025 compared to FY2024?",
+    "answer": "$10,833 million in FY2025, up from $10,129 million in FY2024, an increase of approximately 6.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2025_10K",
+    "question": "What were American Express's total revenues net of interest expense (non-interest revenues + net interest income) in FY2025 compared to FY2024?",
+    "answer": "$72,229 million in FY2025 ($54,865M non-interest revenues + $17,364M net interest income), up from $65,949 million in FY2024 ($50,406M + $15,543M), an increase of approximately 9.5%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2025_10K",
+    "question": "What was American Express's Card Member rewards expense in FY2025 compared to FY2024?",
+    "answer": "$18,409 million in FY2025, up from $16,599 million in FY2024, an increase of approximately 10.9%.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2025_10K",
+    "question": "What was American Express's provision for credit losses in FY2025 compared to FY2024?",
+    "answer": "$5,256 million in FY2025, up slightly from $5,185 million in FY2024, an increase of approximately 1.4%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2025_10K",
+    "question": "American Express's diluted EPS grew faster than net income in FY2025 (about 9.8% vs about 6.9%) -- what explains the gap?",
+    "answer": "Average diluted shares outstanding decreased from 713 million in FY2024 to 696 million in FY2025, due to share buybacks, which boosted EPS growth beyond net income growth alone.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "JPMORGAN_2025_10K",
+    "question": "What was JPMorgan Chase's total net revenue in FY2025 compared to FY2024?",
+    "answer": "$182,447 million in FY2025, up from $177,556 million in FY2024, an increase of approximately 2.75%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "JPMORGAN_2025_10K",
+    "question": "JPMorgan Chase's net income declined slightly in FY2025 despite revenue growth -- what primarily drove this?",
+    "answer": "Net income fell about 2.4% (from $58,471 million to $57,048 million) despite total net revenue growing about 2.75%, primarily driven by provision for credit losses jumping about 33.1% (from $10,678 million to $14,212 million), along with higher noninterest expense.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "JPMORGAN_2025_10K",
+    "question": "What was JPMorgan Chase's provision for credit losses in FY2025 compared to FY2024?",
+    "answer": "$14,212 million in FY2025, up from $10,678 million in FY2024, an increase of approximately 33.1%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "JPMORGAN_2025_10K",
+    "question": "JPMorgan Chase's diluted EPS increased in FY2025 even though net income declined -- what explains this?",
+    "answer": "Diluted EPS rose from $19.75 to $20.02 (about +1.4%) even as net income declined, because weighted-average diluted shares outstanding fell from 2,879.0 million to 2,781.5 million due to share buybacks.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "JPMORGAN_2025_10K",
+    "question": "What were JPMorgan Chase's investment banking fees in FY2025 compared to FY2024?",
+    "answer": "$9,615 million in FY2025, up from $8,910 million in FY2024, an increase of approximately 7.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NIKE_2025_10K",
+    "question": "What was Nike's revenue in FY2025 compared to FY2024?",
+    "answer": "$46,309 million in FY2025, down from $51,362 million in FY2024, a decline of approximately 9.8%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NIKE_2025_10K",
+    "question": "What was Nike's net income in FY2025 compared to FY2024?",
+    "answer": "$3,219 million in FY2025, down from $5,700 million in FY2024, a decline of approximately 43.5%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NIKE_2025_10K",
+    "question": "What is Nike's FY2025 gross margin (gross profit / revenues)? Round to one decimal place.",
+    "answer": "42.7%. Gross profit of $19,790 million divided by revenues of $46,309 million (versus 44.6% in FY2024).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NIKE_2025_10K",
+    "question": "Nike's net income declined much faster than its revenue in FY2025 (about 43.5% vs about 9.8%) -- what does this imply?",
+    "answer": "This implies significant margin compression beyond just the revenue decline: gross margin fell from 44.6% to 42.7%, and expenses did not shrink proportionally with the lower revenue, so profitability was squeezed more heavily than the top line alone would suggest.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "NIKE_2025_10K",
+    "question": "What was Nike's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$2.16 in FY2025, down from $3.73 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "WALMART_2025_10K",
+    "question": "What was Walmart's total revenue growth rate in fiscal year 2025 (ended January 31, 2025) compared to fiscal year 2024?",
+    "answer": "Approximately 5.1%, from $648,125 million to $680,985 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "WALMART_2025_10K",
+    "question": "What is Walmart's fiscal 2025 operating margin (operating income / total revenues)? Round to one decimal place.",
+    "answer": "4.3%. Operating income of $29,348 million divided by total revenues of $680,985 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "WALMART_2025_10K",
+    "question": "What was Walmart's net income attributable to Walmart in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$19,436 million in fiscal 2025, up from $15,511 million in fiscal 2024, an increase of approximately 25.3%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "WALMART_2025_10K",
+    "question": "Walmart's net income grew much faster than revenue in fiscal 2025 (about 25% vs about 5%) -- what primarily explains this gap?",
+    "answer": "Operating income grew faster than revenue (about 8.6%), and \"Other (gains) and losses\" improved from a $3,027 million expense in fiscal 2024 to a $794 million expense in fiscal 2025, a favorable swing of roughly $2.2 billion that boosted income before taxes beyond what operating performance alone would suggest.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "WALMART_2025_10K",
+    "question": "What dividend per share did Walmart declare in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$0.83 per share in fiscal 2025, up from $0.76 per share in fiscal 2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "COSTCO_2025_10K",
+    "question": "What was Costco's total revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 8.2%, from $254,453 million to $275,235 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "COSTCO_2025_10K",
+    "question": "What was Costco's net income in FY2025 compared to FY2024?",
+    "answer": "$8,099 million in FY2025, up from $7,367 million in FY2024, an increase of approximately 9.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "COSTCO_2025_10K",
+    "question": "What were Costco's membership fees in FY2025 compared to FY2024?",
+    "answer": "$5,323 million in FY2025, up from $4,828 million in FY2024, an increase of approximately 10.3%.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "COSTCO_2025_10K",
+    "question": "What is Costco's FY2025 operating margin (operating income / total revenue)? Round to one decimal place.",
+    "answer": "3.8%. Operating income of $10,383 million divided by total revenue of $275,235 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "COSTCO_2025_10K",
+    "question": "What was Costco's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$18.21 in FY2025, up from $16.56 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PFIZER_2025_10K",
+    "question": "What were Pfizer's total revenues in FY2025 compared to FY2024?",
+    "answer": "$62,579 million in FY2025, down from $63,627 million in FY2024, a decrease of approximately 1.6%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PFIZER_2025_10K",
+    "question": "What was Pfizer's net income attributable to Pfizer shareholders in FY2025 compared to FY2024?",
+    "answer": "$7,771 million in FY2025, down from $8,031 million in FY2024, a decrease of approximately 3.2%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PFIZER_2025_10K",
+    "question": "What is Pfizer's FY2025 gross margin ((total revenues - cost of sales) / total revenues)? Round to one decimal place.",
+    "answer": "74.3%. (Total revenues of $62,579 million minus cost of sales of $16,067 million) divided by total revenues of $62,579 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PFIZER_2025_10K",
+    "question": "What was Pfizer's acquired in-process R&D charge in FY2025 compared to FY2024?",
+    "answer": "$1,613 million in FY2025, up sharply from $108 million in FY2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "PFIZER_2025_10K",
+    "question": "What were Pfizer's restructuring charges in FY2025 compared to FY2024?",
+    "answer": "$1,550 million in FY2025, down from $2,419 million in FY2024, a decrease of approximately 35.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "CVSHEALTH_2025_10K",
+    "question": "What was CVS Health's total revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 7.9%, from $372,809 million in FY2024 to $402,067 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "CVSHEALTH_2025_10K",
+    "question": "What was CVS Health's net income attributable to CVS Health in FY2025 compared to FY2024?",
+    "answer": "$1,768 million in FY2025, down from $4,614 million in FY2024, a decline of approximately 61.7%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "CVSHEALTH_2025_10K",
+    "question": "CVS Health's net income declined sharply in FY2025 despite revenue growth -- what primarily drove this?",
+    "answer": "Net income attributable to CVS Health fell about 61.7% (from $4,614 million to $1,768 million) despite revenue growing about 7.9%, primarily driven by a $5,725 million goodwill impairment charge recorded in FY2025 (there was none in FY2024).",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "CVSHEALTH_2025_10K",
+    "question": "Did CVS Health record a goodwill impairment charge in FY2025?",
+    "answer": "Yes, CVS Health recorded a $5,725 million goodwill impairment charge in FY2025, compared to no goodwill impairment in FY2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "CVSHEALTH_2025_10K",
+    "question": "What was CVS Health's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$1.39 in FY2025, down from $3.66 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "COCACOLA_2025_10K",
+    "question": "What was Coca-Cola's net operating revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 1.9%, from $47,061 million in FY2024 to $47,941 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "COCACOLA_2025_10K",
+    "question": "What was Coca-Cola's net income attributable to shareowners in FY2025 compared to FY2024?",
+    "answer": "$13,107 million in FY2025, up from $10,631 million in FY2024, an increase of approximately 23.3%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "COCACOLA_2025_10K",
+    "question": "What is Coca-Cola's FY2025 gross margin (gross profit / net operating revenues)? Round to one decimal place.",
+    "answer": "61.6%. Gross profit of $29,544 million divided by net operating revenues of $47,941 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "COCACOLA_2025_10K",
+    "question": "Coca-Cola's net income grew much faster than revenue in FY2025 (about 23% vs about 2%) -- what primarily explains this gap?",
+    "answer": "\"Other Operating Charges\" dropped sharply from $4,163 million in FY2024 to $1,261 million in FY2025 (a decrease of about 69.7%), which was a major contributor to operating income growing about 37.7% -- far outpacing the roughly 2% revenue growth.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "COCACOLA_2025_10K",
+    "question": "What was Coca-Cola's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$3.04 in FY2025, up from $2.46 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "VERIZON_2025_10K",
+    "question": "What was Verizon's operating revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 2.5%, from $134,788 million in FY2024 to $138,191 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "VERIZON_2025_10K",
+    "question": "What was Verizon's net income attributable to Verizon in FY2025 compared to FY2024?",
+    "answer": "$17,174 million in FY2025, down slightly from $17,506 million in FY2024, a decrease of approximately 1.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "VERIZON_2025_10K",
+    "question": "What is Verizon's FY2025 operating margin (operating income / operating revenues)? Round to one decimal place.",
+    "answer": "21.2%. Operating income of $29,259 million divided by operating revenues of $138,191 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "VERIZON_2025_10K",
+    "question": "What were Verizon's service revenues compared to wireless equipment revenues in FY2025?",
+    "answer": "Service revenues were $112,721 million and wireless equipment revenues were $25,470 million in FY2025.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "VERIZON_2025_10K",
+    "question": "What was Verizon's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$4.06 in FY2025, down slightly from $4.14 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "GENERALMILLS_2025_10K",
+    "question": "What was General Mills' net sales in fiscal year 2025 (ended May 25, 2025) compared to fiscal year 2024?",
+    "answer": "$19,486.6 million in fiscal 2025, down from $19,857.2 million in fiscal 2024, a decrease of approximately 1.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "GENERALMILLS_2025_10K",
+    "question": "What was General Mills' net earnings in fiscal year 2025 compared to fiscal year 2024?",
+    "answer": "$2,295.2 million in fiscal 2025, down from $2,496.6 million in fiscal 2024, a decrease of approximately 8.1%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "GENERALMILLS_2025_10K",
+    "question": "What was General Mills' total debt (current portion of long-term debt + long-term debt) in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$14,201.6 million in fiscal 2025 ($1,528.4M + $12,673.2M), up from $12,918.3 million in fiscal 2024 ($1,614.1M + $11,304.2M), an increase of approximately 9.9%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "GENERALMILLS_2025_10K",
+    "question": "What were General Mills' restructuring and impairment costs in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$78.3 million in fiscal 2025, down from $241.4 million in fiscal 2024, a decrease of approximately 67.6%.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "GENERALMILLS_2025_10K",
+    "question": "What dividends per share did General Mills pay in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$2.40 per share in fiscal 2025, up from $2.36 per share in fiscal 2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "KRAFTHEINZ_2025_10K",
+    "question": "What was Kraft Heinz's net sales in FY2025 compared to FY2024?",
+    "answer": "$24,942 million in FY2025, down from $25,846 million in FY2024, a decrease of approximately 3.5%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "KRAFTHEINZ_2025_10K",
+    "question": "Did Kraft Heinz report a profit or a loss in FY2025, and what primarily drove this?",
+    "answer": "Kraft Heinz reported a net loss of $(5,848) million in FY2025, compared to net income of $2,746 million in FY2024. This was primarily driven by massive impairment charges: goodwill impairment losses of $6,734 million (up from $1,638 million) and intangible asset impairment losses of $2,572 million (up from $2,031 million), together totaling over $9.3 billion.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "KRAFTHEINZ_2025_10K",
+    "question": "What were Kraft Heinz's goodwill impairment losses in FY2025 compared to FY2024?",
+    "answer": "$6,734 million in FY2025, up sharply from $1,638 million in FY2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "KRAFTHEINZ_2025_10K",
+    "question": "What is Kraft Heinz's FY2025 gross margin (gross profit / net sales)? Round to one decimal place.",
+    "answer": "33.3%. Gross profit of $8,309 million divided by net sales of $24,942 million (versus 34.7% in FY2024).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "KRAFTHEINZ_2025_10K",
+    "question": "What was Kraft Heinz's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$(4.93) in FY2025 (a loss per share), compared to $2.26 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "LOCKHEEDMARTIN_2025_10K",
+    "question": "What was Lockheed Martin's total sales in FY2025 compared to FY2024?",
+    "answer": "$75,048 million in FY2025, up from $71,043 million in FY2024, an increase of approximately 5.6%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "LOCKHEEDMARTIN_2025_10K",
+    "question": "What was Lockheed Martin's net earnings in FY2025 compared to FY2024?",
+    "answer": "$5,017 million in FY2025, down from $5,336 million in FY2024, a decrease of approximately 6.0%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "LOCKHEEDMARTIN_2025_10K",
+    "question": "What was Lockheed Martin's operating profit in FY2025 compared to FY2024?",
+    "answer": "$7,731 million in FY2025, up from $7,013 million in FY2024, an increase of approximately 10.2%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "LOCKHEEDMARTIN_2025_10K",
+    "question": "Lockheed Martin's net earnings declined in FY2025 even though sales and operating profit both grew -- what happened below the operating line?",
+    "answer": "Interest expense increased from $1,036 million to $1,118 million, and the company recorded a $377 million after-tax pension settlement charge in FY2025. Together with other non-operating items, this pulled earnings before income taxes down from $6,220 million to $5,922 million despite stronger operating performance.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "LOCKHEEDMARTIN_2025_10K",
+    "question": "What were Lockheed Martin's Products division sales compared to Services division sales in FY2025?",
+    "answer": "Products division sales were $62,654 million and Services division sales were $12,394 million in FY2025.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "MGMRESORTS_2025_10K",
+    "question": "What was MGM Resorts' total revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 1.7%, from $17,240,545 thousand in FY2024 to $17,537,683 thousand in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "MGMRESORTS_2025_10K",
+    "question": "What was MGM Resorts' net income attributable to MGM in FY2025 compared to FY2024?",
+    "answer": "$205,862 thousand in FY2025, down from $746,558 thousand in FY2024, a decline of approximately 72.4%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "MGMRESORTS_2025_10K",
+    "question": "MGM Resorts' net income declined sharply in FY2025 despite revenue growth -- what primarily drove this?",
+    "answer": "Operating income fell about 32.8% (from $1,490,456 thousand to $1,001,780 thousand) as operating expenses grew faster than revenue, and \"Other Non-operating Items\" swung from income of $70,573 thousand in FY2024 to an expense of $303,094 thousand in FY2025, an unfavorable swing of roughly $374 million.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "MGMRESORTS_2025_10K",
+    "question": "What were MGM Resorts' Casino revenue and Rooms revenue in FY2025?",
+    "answer": "Casino revenue was approximately $9.5 billion and Rooms revenue was approximately $3.4 billion in FY2025.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "MGMRESORTS_2025_10K",
+    "question": "What was MGM Resorts' diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$0.76 in FY2025, down from $2.40 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BESTBUY_2025_10K",
+    "question": "What was Best Buy's revenue in fiscal 2025 (ended February 1, 2025) compared to fiscal 2024?",
+    "answer": "$41,528 million in fiscal 2025, down from $43,452 million in fiscal 2024, a decrease of approximately 4.4%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BESTBUY_2025_10K",
+    "question": "What was Best Buy's net earnings in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$927 million in fiscal 2025, down from $1,241 million in fiscal 2024, a decrease of approximately 25.3%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BESTBUY_2025_10K",
+    "question": "Did Best Buy record a goodwill impairment charge in fiscal 2025?",
+    "answer": "Yes, Best Buy recorded a $475 million goodwill impairment charge in fiscal 2025; there was none in fiscal 2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "BESTBUY_2025_10K",
+    "question": "What is Best Buy's fiscal 2025 gross margin (gross profit / revenue)? Round to one decimal place.",
+    "answer": "22.6%. Gross profit of $9,385 million divided by revenue of $41,528 million (versus 22.1% in fiscal 2024).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BESTBUY_2025_10K",
+    "question": "What was Best Buy's diluted EPS in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$4.28 in fiscal 2025, down from $5.68 in fiscal 2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BLOCK_2025_10K",
+    "question": "What was Block's total net revenue in FY2025 compared to FY2024?",
+    "answer": "$24,193,683 thousand in FY2025, essentially flat compared to $24,121,053 thousand in FY2024 (an increase of about 0.3%).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BLOCK_2025_10K",
+    "question": "What was Block's operating income in FY2025 compared to FY2024?",
+    "answer": "$1,708,406 thousand in FY2025, up from $892,327 thousand in FY2024, an increase of approximately 91.5%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "BLOCK_2025_10K",
+    "question": "Block's operating income nearly doubled in FY2025 while net income fell by more than half -- what does this divergence most likely indicate?",
+    "answer": "Since core operating performance actually improved substantially (operating income up about 91.5%), the much larger decline in net income (down about 54.5%, from $2,866,497 thousand to $1,304,210 thousand) most likely reflects a large non-operating or tax-related item that favorably boosted FY2024's net income but did not recur at the same scale in FY2025.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "BLOCK_2025_10K",
+    "question": "What was Block's Bitcoin Ecosystem segment revenue in FY2025 compared to FY2024?",
+    "answer": "$8,502,787 thousand in FY2025, down from $10,357,783 thousand in FY2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "BLOCK_2025_10K",
+    "question": "What was Block's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$2.10 in FY2025, down from $4.56 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2025_10K",
+    "question": "What was American Water Works' operating revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 9.7%, from $4,684 million in FY2024 to $5,140 million in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2025_10K",
+    "question": "What was American Water Works' net income attributable to common shareholders in FY2025 compared to FY2024?",
+    "answer": "$1,111 million in FY2025, up from $1,051 million in FY2024, an increase of approximately 5.7%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2025_10K",
+    "question": "What is American Water Works' FY2025 operating margin (operating income / operating revenues)? Round to one decimal place.",
+    "answer": "36.6%. Operating income of $1,879 million divided by operating revenues of $5,140 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2025_10K",
+    "question": "What was American Water Works' interest expense in FY2025 compared to FY2024?",
+    "answer": "$615 million in FY2025, up from $523 million in FY2024, an increase of approximately 17.6%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2025_10K",
+    "question": "What were American Water Works' short-term debt and current portion of long-term debt combined in FY2025 compared to FY2024?",
+    "answer": "$3,067 million in FY2025 ($1,588M short-term debt + $1,479M current long-term debt), up from $1,516 million in FY2024 ($879M + $637M), more than doubling year-over-year.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2025_10K",
+    "question": "What was American Water Works' diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$5.69 in FY2025, up from $5.39 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANWATERWORKS_2025_10K",
+    "question": "American Water Works' net income grew more slowly than revenue in FY2025 (about 5.7% vs about 9.7%) -- what is a likely contributing factor?",
+    "answer": "Interest expense grew faster (about 17.6%) than the increase in revenue, consistent with the sharp rise in short-term and current debt used partly to fund continued growth in property, plant and equipment (net PP&E rose from $28,038 million to $30,576 million), which weighed on net income growth relative to revenue growth.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "FOOTLOCKER_2025_10K",
+    "question": "What was Foot Locker's total revenue in fiscal 2025 (ended February 1, 2025) compared to fiscal 2024?",
+    "answer": "$7,988 million in fiscal 2025, down from $8,168 million in fiscal 2024, a decrease of approximately 2.2%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "FOOTLOCKER_2025_10K",
+    "question": "Did Foot Locker return to profitability in fiscal 2025, and what primarily drove the turnaround?",
+    "answer": "Yes. Net income attributable to Foot Locker was $12 million in fiscal 2025, compared to a net loss of $(330) million in fiscal 2024. The turnaround was primarily driven by \"Other (expense) income, net\" improving dramatically from a $(556) million expense to just $(44) million, a favorable swing of roughly $512 million, even though income from operations actually declined.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "FOOTLOCKER_2025_10K",
+    "question": "What was Foot Locker's income from operations in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$103 million in fiscal 2025, down from $142 million in fiscal 2024, a decrease of approximately 27.5%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "FOOTLOCKER_2025_10K",
+    "question": "What were Foot Locker's impairment and other charges in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$97 million in fiscal 2025, up from $80 million in fiscal 2024.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "FOOTLOCKER_2025_10K",
+    "question": "What was Foot Locker's diluted EPS in fiscal 2025 compared to fiscal 2024?",
+    "answer": "$0.13 in fiscal 2025, compared to a diluted loss per share of $(3.51) in fiscal 2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ULTABEAUTY_2025_10K",
+    "question": "What was Ulta Beauty's net sales growth rate in fiscal 2025 (ended January 31, 2026) compared to the prior fiscal year?",
+    "answer": "Approximately 9.7%, from $11,295,654 thousand to $12,392,820 thousand.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ULTABEAUTY_2025_10K",
+    "question": "What was Ulta Beauty's operating income in fiscal 2025 compared to the prior fiscal year?",
+    "answer": "$1,532,992 thousand in fiscal 2025, down slightly from $1,564,972 thousand in the prior fiscal year, a decrease of approximately 2.0%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ULTABEAUTY_2025_10K",
+    "question": "Ulta Beauty's operating income declined slightly in fiscal 2025 despite strong net sales growth -- what primarily explains this?",
+    "answer": "SG&A expenses grew faster (about 17.4%, from $2,808,592 thousand to $3,296,411 thousand) than net sales (about 9.7%), pushing SG&A as a percent of net sales up from about 24.9% to about 26.6%, which offset the revenue and gross profit growth.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "ULTABEAUTY_2025_10K",
+    "question": "What was Ulta Beauty's net income in fiscal 2025 compared to the prior fiscal year?",
+    "answer": "$1,153,479 thousand in fiscal 2025, down from $1,201,118 thousand in the prior fiscal year, a decrease of approximately 4.0%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "ULTABEAUTY_2025_10K",
+    "question": "What was Ulta Beauty's diluted EPS in fiscal 2025 compared to the prior fiscal year, and why did it move in the opposite direction of net income?",
+    "answer": "Diluted EPS was $25.64 in fiscal 2025, slightly up from $25.34 in the prior year, even though net income declined, because diluted weighted-average shares outstanding fell from 47,404 thousand to 44,991 thousand due to share buybacks.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "ULTABEAUTY_2025_10K",
+    "question": "What is Ulta Beauty's fiscal 2025 gross margin (gross profit / net sales)? Round to one decimal place.",
+    "answer": "39.1%. Gross profit of $4,845,224 thousand divided by net sales of $12,392,820 thousand (versus 38.8% in the prior fiscal year).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NETFLIX_2025_10K",
+    "question": "What was Netflix's revenue growth rate in FY2025 compared to FY2024?",
+    "answer": "Approximately 15.9%, from $39,000,966 thousand in FY2024 to $45,183,036 thousand in FY2025.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NETFLIX_2025_10K",
+    "question": "What was Netflix's net income in FY2025 compared to FY2024?",
+    "answer": "$10,981,201 thousand in FY2025, up from $8,711,631 thousand in FY2024, an increase of approximately 26.1%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NETFLIX_2025_10K",
+    "question": "What is Netflix's FY2025 operating margin (operating income / revenues)? Round to one decimal place.",
+    "answer": "29.5%. Operating income of $13,326,603 thousand divided by revenues of $45,183,036 thousand.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NETFLIX_2025_10K",
+    "question": "Netflix's net income grew faster than its revenue in FY2025 (about 26% vs about 16%) -- what does this imply about operating margin?",
+    "answer": "This implies operating margin expanded: operating margin rose from about 26.7% in FY2024 (operating income of $10,417,614 thousand / revenue of $39,000,966 thousand) to about 29.5% in FY2025, meaning profitability improved faster than the top line grew.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "NETFLIX_2025_10K",
+    "question": "What was Netflix's diluted EPS in FY2025 compared to FY2024?",
+    "answer": "$2.53 in FY2025, up from $1.98 in FY2024.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "NETFLIX_2025_10K",
+    "question": "What was Netflix's technology and development expense in FY2025 compared to FY2024?",
+    "answer": "$3,391,390 thousand in FY2025, up from $2,925,295 thousand in FY2024, an increase of approximately 16.0%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "3M_2025_10K",
+    "question": "What was 3M's total assets at the end of FY2025 compared to FY2024?",
+    "answer": "$37,733 million at the end of FY2025, down from $39,868 million at the end of FY2024, a decrease of approximately 5.4%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMAZON_2025_10K",
+    "question": "Did Amazon's cost of sales grow faster or slower than its total net sales in FY2025, and what does that imply?",
+    "answer": "Cost of sales grew about 9.2% (from $326,288 million to $356,414 million), slower than total net sales growth of about 12.4% (from $637,959 million to $716,924 million), implying that gross margin improved slightly in FY2025.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "ADOBE_2025_10K",
+    "question": "What was Adobe's research and development expense as a percent of revenue in FY2025? Round to one decimal place.",
+    "answer": "18.1%. R&D expense of $4,294 million divided by revenue of $23,769 million.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "AMERICANEXPRESS_2025_10K",
+    "question": "What was American Express's total interest income in FY2025 compared to FY2024?",
+    "answer": "$25,598 million in FY2025, up from $23,795 million in FY2024, an increase of approximately 7.6%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PFIZER_2025_10K",
+    "question": "What were Pfizer's alliance revenues in FY2025 compared to FY2024?",
+    "answer": "$9,266 million in FY2025, up from $8,388 million in FY2024, an increase of approximately 10.5%.",
+    "question_type": "domain-relevant"
+  },
+  {
+    "doc_name": "CORNING_2025_10K",
+    "question": "What was Corning's net sales in FY2025 compared to FY2024?",
+    "answer": "$15,629 million in FY2025, up from $13,118 million in FY2024, an increase of approximately 19.1%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "CORNING_2025_10K",
+    "question": "What is Corning's FY2025 gross margin (gross profit / net sales)? Round to one decimal place.",
+    "answer": "36.0%. Gross profit of $5,621 million divided by net sales of $15,629 million (versus 32.6% in FY2024).",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "CORNING_2025_10K",
+    "question": "Corning's net income attributable to Corning more than tripled in FY2025 (from $506 million to $1,596 million) while net sales grew only about 19% -- what best explains this disproportionate increase?",
+    "answer": "Operating income more than doubled (from $1,135 million to $2,279 million, about +100.8%) because SG&A and R&D expenses grew much slower (about 9.9% and 1.9% respectively) than net sales, producing significant operating leverage and margin expansion that flowed through to net income.",
+    "question_type": "novel-generated"
+  },
+  {
+    "doc_name": "PAYPAL_2025_10K",
+    "question": "What was PayPal's net revenues in FY2025 compared to FY2024?",
+    "answer": "$33,172 million in FY2025, up from $31,797 million in FY2024, an increase of approximately 4.3%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PAYPAL_2025_10K",
+    "question": "What was PayPal's net income in FY2025 compared to FY2024?",
+    "answer": "$5,233 million in FY2025, up from $4,147 million in FY2024, an increase of approximately 26.2%.",
+    "question_type": "metrics-generated"
+  },
+  {
+    "doc_name": "PAYPAL_2025_10K",
+    "question": "PayPal's net income grew significantly faster than its net revenues in FY2025 (about 26% vs about 4%) -- what does this imply about operating margin?",
+    "answer": "This implies operating margin expanded: operating margin rose from about 16.7% in FY2024 (operating income of $5,325 million / net revenues of $31,797 million) to about 18.3% in FY2025 (operating income of $6,065 million / net revenues of $33,172 million), because total operating expenses grew only about 2.4% while net revenues grew about 4.3%.",
+    "question_type": "novel-generated"
+  }
+]
