@@ -1751,9 +1751,45 @@ def _extract_formula_guided(
             "source": source,
             "is_approximate": score < 2 or "supplementary" in source,
             "source_detail": detail,
+            # The evidence_list index backing this value, so callers can pin
+            # the exact passage that produced it into the LLM's prompt
+            # window (see _collect_used_evidence_ids) -- None when there is
+            # no single source index to point to (free-text match or a
+            # "composite" sum across several rows, both stored as ev_idx=-1
+            # above).
+            "evidence_index": ev_idx if ev_idx >= 0 else None,
         }
 
     return final, resolved, meta
+
+
+def _collect_used_evidence_ids(
+    resolved_formula_meta: Dict[str, Dict[str, Any]],
+    evidence_list: List[Dict[str, Any]],
+) -> List[str]:
+    """Evidence ids whose content actually produced a formula variable's
+    resolved value, via each variable's "evidence_index" (see
+    _extract_formula_guided's meta). Lets callers pin the exact passages a
+    PoT computation relied on into the LLM's prompt window, so a passage
+    ranked just outside the window can't silently back a number the model
+    never actually saw.
+
+    Only covers the formula-guided extraction path: the non-formula
+    extracted_table path (_extract_from_linearized_table) does not
+    currently carry a source evidence index per entry, so there is nothing
+    reliable to return for it -- an empty list there, not a guess.
+    """
+    ids: List[str] = []
+    seen: set = set()
+    for meta in resolved_formula_meta.values():
+        idx = meta.get("evidence_index")
+        if idx is None or not (0 <= idx < len(evidence_list)):
+            continue
+        ev_id = evidence_list[idx].get("id")
+        if ev_id and ev_id not in seen:
+            seen.add(ev_id)
+            ids.append(ev_id)
+    return ids
 
 
 #: Values at or below this magnitude are exempt from the duplicate-value
@@ -4169,4 +4205,5 @@ class ProgramOfThoughtReasoner:
             ),
             "is_comparison_answer": is_cf_activity_comparison,
             "is_qualitative_characterization": is_qualitative_characterization,
+            "used_evidence_ids": _collect_used_evidence_ids(resolved_formula_meta, evidence_list),
         }

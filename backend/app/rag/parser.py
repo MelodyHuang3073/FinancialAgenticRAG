@@ -16,12 +16,33 @@ class FinancialFileParser:
     Parses PDF, CSV, TXT, MD, JSON financial files into structured passages for FinAgent-RAG.
     """
 
+    #: Best-effort MinerU-based repair of malformed table_row passages (see
+    #: table_repair.py) -- runs after normal PDF parsing, on the same
+    #: upload path /api/upload-file uses, so any file with this failure
+    #: shape gets it caught and fixed at upload time rather than needing a
+    #: separate offline reprocessing pass. Class constant, not an env var,
+    #: so it can be turned off per-instance (e.g. in tests that don't have
+    #: a local MinerU service running) without touching call sites.
+    #: Already a no-op whenever MinerU isn't importable/reachable or there
+    #: is nothing malformed to repair -- see repair_malformed_tables's
+    #: docstring -- this flag exists to skip even attempting the import.
+    ENABLE_TABLE_REPAIR: bool = True
+
     def parse_file(self, filename: str, content_bytes: bytes) -> Dict[str, Any]:
         ext = os.path.splitext(filename)[1].lower()
         company_name = os.path.splitext(filename)[0]
 
         if ext == '.pdf':
-            return self._parse_pdf(filename, content_bytes, company_name)
+            result = self._parse_pdf(filename, content_bytes, company_name)
+            if self.ENABLE_TABLE_REPAIR and result.get("passages"):
+                from app.rag.table_repair import repair_malformed_tables
+                repaired = repair_malformed_tables(
+                    self, result["passages"], content_bytes, filename, company_name
+                )
+                if repaired is not result["passages"]:
+                    result["passages"] = repaired
+                    result["total_passages"] = len(repaired)
+            return result
         elif ext == '.csv':
             return self._parse_csv(filename, content_bytes, company_name)
         elif ext in ['.txt', '.md']:

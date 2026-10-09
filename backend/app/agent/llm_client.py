@@ -361,8 +361,11 @@ class LLMAnswerGenerator:
         # Pass parent_content (the full page/table) to the LLM, not just the matched
         # fragment, so multi-chunk notes/tables are seen in context.
         # Sort selected items by retriever relevance_score across sub-queries; do not
-        # rely on the concatenated retrieval order.
-        sorted_evidence = select_with_quota(evidence, EVIDENCE_PROMPT_CAP)
+        # rely on the concatenated retrieval order. Pin whichever passages the PoT
+        # sandbox actually used (pot_res["used_evidence_ids"]) so a passage backing
+        # the computed number can't rank just outside the window the model reads.
+        pinned_ids = set(pot_res.get("used_evidence_ids") or []) if pot_res else None
+        sorted_evidence = select_with_quota(evidence, EVIDENCE_PROMPT_CAP, pinned_ids=pinned_ids)
         # Use a larger per-query evidence item count for multi-page narrative topics
         # since relevant content can be spread across many pages that score similarly.
         # Numeric questions validated by the sandbox do not need this wider window; that

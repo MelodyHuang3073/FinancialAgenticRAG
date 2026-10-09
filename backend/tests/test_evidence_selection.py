@@ -25,3 +25,27 @@ def test_quota_is_plain_top_n_when_pool_fits_or_untagged():
     items = [{"id": i, "relevance_score": s} for i, s in enumerate([5, 9, 1, 7])]
     assert [h["id"] for h in select_with_quota(items, 10)] == [1, 3, 0, 2]
     assert [h["id"] for h in select_with_quota(items, 2)] == [1, 3]
+
+
+def test_pinned_id_forced_into_window_despite_low_score():
+    # id "low" would never make a window of 2 on relevance_score alone
+    # (it's dead last), but a caller that pins it (e.g. the PoT sandbox's
+    # own source evidence) must still see it included.
+    items = [{"id": i, "relevance_score": s} for i, s in
+              [("hi1", 100), ("hi2", 90), ("hi3", 80), ("low", 1)]]
+    picked = select_with_quota(items, 2, pinned_ids={"low"})
+    ids = [h["id"] for h in picked]
+    assert "low" in ids
+    assert len(picked) == 2
+
+
+def test_pinned_ids_do_not_change_output_when_pool_already_fits():
+    items = [{"id": i, "relevance_score": s} for i, s in [("a", 5), ("b", 9)]]
+    assert select_with_quota(items, 10, pinned_ids={"a"}) == select_with_quota(items, 10)
+
+
+def test_unknown_pinned_id_is_silently_ignored():
+    items = [{"id": i, "relevance_score": s} for i, s in
+              [("a", 5), ("b", 9), ("c", 1), ("d", 7)]]
+    picked = select_with_quota(items, 2, pinned_ids={"does-not-exist"})
+    assert [h["id"] for h in picked] == ["b", "d"]

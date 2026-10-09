@@ -1,6 +1,6 @@
 import math
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -256,11 +256,126 @@ def _get_alias_groups() -> List[List[str]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Re-weighting rule registry: every fixed-constant multiplier search() can
+# apply to a candidate passage, named so each one can be reported
+# (applied_rules on a result), individually disabled
+# (DISABLE_RULE_MULTIPLIERS_EXCEPT), or ablated as a whole
+# (DISABLE_RULE_MULTIPLIERS) for the paper's ablation experiments. Values and
+# trigger conditions are UNCHANGED from before this registry existed -- this
+# only names and centralizes them; search() still applies them in the same
+# order with the same if/elif gating. Two rules are NOT here because their
+# value isn't a fixed constant -- they call a scoring method instead:
+# "company_match" (_company_match_score) and "line_item_match"
+# (_line_item_match_score). The geographic region-density rule
+# ("geographic_region_density") also isn't a flat constant (it scales with
+# how many distinct regions a passage names), so only its base/step/cap are
+# listed here; see search()'s own geographic_region_density branch for the
+# formula. See tests/tools/dump_retrieval_rules.py for a human-readable
+# dump of every rule (including the two scoring-method-based ones).
+RULE_MULTIPLIERS: Dict[str, float] = {
+    "total_row_boost": 1.3,
+    "narrative_text_note_boost": 1.5,
+    "causal_language_boost": 1.4,
+    "geographic_section_boost": 1.4,
+    "geographic_region_density_base": 1.4,
+    "geographic_region_density_step": 0.3,
+    "geographic_region_density_cap": 2.9,
+    "legal_proceedings_boost": 1.5,
+    "acquisition_subheading_boost": 1.5,
+    "segment_comparison_boost": 2.0,
+    "inventory_composition_boost": 3.0,
+    "preferred_filing_year_boost": 1.3,
+    "low_confidence_column_penalty": 0.5,
+    "restricted_row_penalty": 0.6,
+    "year_match_boost": 1.4,
+    "recent_year_mismatch_penalty": 0.6,
+    "quarter_match_boost": 1.3,
+    "section_mismatch_penalty": 0.05,
+    "statement_type_hint_boost": 1.5,
+}
+
+#: One-line human-readable description per rule, for
+#: tests/tools/dump_retrieval_rules.py. Covers the two scoring-method-based
+#: rules too (not present in RULE_MULTIPLIERS itself, see its docstring).
+RULE_DESCRIPTIONS: Dict[str, str] = {
+    "company_match": "Scales the whole result toward (>1x) or away from (<1x) the target "
+        "entity based on how well the passage's company metadata matches it "
+        "(_company_match_score; 2.0/1.8/1.2/0.4/0.05 depending on match tier).",
+    "line_item_match": "1.5x when the passage's content matches one of the query's own "
+        "line-item name patterns (_line_item_match_score).",
+    "total_row_boost": "1.3x for a real statement 'Total X' row whose own label shares a "
+        "stem with the query, when not in narrative-preference mode.",
+    "narrative_text_note_boost": "1.5x for prose (text_note) passages in narrative-preference "
+        "mode, to counter BM25's length bias toward short table rows.",
+    "causal_language_boost": "1.4x for passages containing causal language (\"driven by\", "
+        "\"primarily due to\", ...) on attribution-style (\"what drove X\") questions.",
+    "geographic_section_boost": "1.4x for passages under a 'Geographic Operations/Information' "
+        "heading on geography questions.",
+    "geographic_region_density": "Up to 2.9x (1.4 base + 0.3 per region past 3) for passages "
+        "enumerating several distinct geographic regions without an explicit heading, "
+        "mutually exclusive with geographic_section_boost (elif).",
+    "legal_proceedings_boost": "1.5x for passages under an Item 3 Legal Proceedings heading "
+        "or one of its own litigation-category sub-headings, on legal questions.",
+    "acquisition_subheading_boost": "1.5x for passages matching a filing's own "
+        "acquisition-note sub-heading shape, on acquisition-list questions.",
+    "segment_comparison_boost": "2.0x for passages with a side-by-side multi-segment results "
+        "table, on segment-comparison questions (active even outside narrative mode).",
+    "inventory_composition_boost": "3.0x for passages labeled with inventory-composition "
+        "line items (raw materials/WIP/finished goods), when the query asks about "
+        "inventory composition.",
+    "preferred_filing_year_boost": "1.3x for a bare entity match (no year in the entity "
+        "string) whose document year matches the latest year named in the query.",
+    "low_confidence_column_penalty": "0.5x for passages whose column header the parser "
+        "flagged as low-confidence (e.g. an ambiguous repeated-year table).",
+    "restricted_row_penalty": "0.6x for a combined 'X, X equivalents and restricted X' row "
+        "when the query itself never mentions \"restricted\".",
+    "year_match_boost": "1.4x when the document's own year(s) intersect the query's year(s); "
+        "mutually exclusive with recent_year_mismatch_penalty (if/else).",
+    "recent_year_mismatch_penalty": "0.6x when the query names year(s) but the document's own "
+        "recent year(s) (2021-2025) don't intersect them.",
+    "quarter_match_boost": "1.3x when the document mentions a quarter the query also names.",
+    "section_mismatch_penalty": "0.05x when a legacy section label is set and the document's "
+        "own tagged section disagrees with it.",
+    "statement_type_hint_boost": "1.5x when the document's statement type (or a core line "
+        "item it contains) matches the classifier's statement_type_hint.",
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main retriever: BM25 scoring + financial-domain relevance boosts (line-item
 # match, company match, the topic detectors above)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class HybridFinancialRetriever:
+    """BM25 lexical retrieval with keyword-overlap scoring and rule-based
+    re-weighting (no dense retrieval)."""
+
+    #: Ablation switches for the paper's retrieval experiments (see
+    #: RULE_MULTIPLIERS/RULE_DESCRIPTIONS above and _rule_active below).
+    #: Class constants, not env vars -- set directly on an instance
+    #: (`retriever.DISABLE_RULE_MULTIPLIERS = True`) or the class itself
+    #: before running search(); default (both unset) is unchanged
+    #: production behavior, every rule active.
+    #: True -> every named re-weighting rule is inactive; final_score is
+    #: bm25*0.7 + overlap_count*0.3 with no multiplier at all (ranking
+    #: driven purely by lexical match, the paper's ablation baseline).
+    DISABLE_RULE_MULTIPLIERS: bool = False
+    #: Only meaningful when DISABLE_RULE_MULTIPLIERS is True: the set of
+    #: rule names (RULE_MULTIPLIERS/RULE_DESCRIPTIONS keys) to keep active
+    #: anyway, for ablating one rule at a time. None/empty = none kept.
+    DISABLE_RULE_MULTIPLIERS_EXCEPT: Optional[Set[str]] = None
+
+    def _rule_active(self, rule_name: str) -> bool:
+        """Whether `rule_name` should apply this call -- True in normal
+        operation; under DISABLE_RULE_MULTIPLIERS, True only if it's in
+        DISABLE_RULE_MULTIPLIERS_EXCEPT. Checked first (short-circuits the
+        `and`) in every rule's own condition below, so a disabled rule's
+        (sometimes expensive) regex search is skipped entirely, not just
+        its multiplier."""
+        if not self.DISABLE_RULE_MULTIPLIERS:
+            return True
+        return bool(self.DISABLE_RULE_MULTIPLIERS_EXCEPT) and rule_name in self.DISABLE_RULE_MULTIPLIERS_EXCEPT
+
     # Apply a 1.5x boost when a query and candidate passage share the same line-item
     # term so concise table rows can outrank verbose non-relevant prose that repeats
     # company tokens.
@@ -678,13 +793,22 @@ class HybridFinancialRetriever:
             overlap_count = sum(query_idf[q] for q in query_tokens if q in content_lower)
 
             multiplier = 1.0
+            applied_rules: List[str] = []
 
             # ── RC3: company entity filter ────────────────────────────────
             doc_company = doc.get('company', '')
-            multiplier *= self._company_match_score(doc_company, entity)
+            if self._rule_active("company_match"):
+                _cm = self._company_match_score(doc_company, entity)
+                multiplier *= _cm
+                if _cm != 1.0:
+                    applied_rules.append("company_match")
 
             # ── Financial line item boost ──────────────────────────────────
-            multiplier *= self._line_item_match_score(content, query_patterns)
+            if self._rule_active("line_item_match"):
+                _lim = self._line_item_match_score(content, query_patterns)
+                multiplier *= _lim
+                if _lim != 1.0:
+                    applied_rules.append("line_item_match")
 
             # ── Total-row boost ──────────────────────────────────────────────
             # Skipped under prefer_narrative: this boost exists so a real
@@ -692,7 +816,7 @@ class HybridFinancialRetriever:
             # a NUMERIC lookup — meaningless (and actively harmful, since
             # it applies to ANY "Total ..." row regardless of topic) for a
             # question that isn't about a financial total at all.
-            if not prefer_narrative and self._TOTAL_ROW_RE.search(content):
+            if self._rule_active("total_row_boost") and not prefer_narrative and self._TOTAL_ROW_RE.search(content):
                 # Handle cases where a generic "Total ..." table row in a document can
                 # outrank a query-specific total row after more rows are added to the
                 # corpus.
@@ -704,7 +828,8 @@ class HybridFinancialRetriever:
                 } - {"total", "other", "and", "the", "of"} if _lab else set()
                 _q_stems = {t[:5] for t in query_tokens}
                 if not _lab_stems or (_lab_stems & _q_stems):
-                    multiplier *= 1.3
+                    multiplier *= RULE_MULTIPLIERS["total_row_boost"]
+                    applied_rules.append("total_row_boost")
 
             # ── Narrative-content boost (only when prefer_narrative) ──────────
             # Counteracts BM25's inherent length bias: a table row chunk
@@ -716,15 +841,20 @@ class HybridFinancialRetriever:
             # or formula match at all, the answer is almost certainly in
             # prose, not a table row, so this compensates rather than
             # relying on raw BM25 alone to surface it.
-            if prefer_narrative and doc.get("type") == "text_note":
-                multiplier *= 1.5
+            if self._rule_active("narrative_text_note_boost") and prefer_narrative and doc.get("type") == "text_note":
+                multiplier *= RULE_MULTIPLIERS["narrative_text_note_boost"]
+                applied_rules.append("narrative_text_note_boost")
 
             # Apply a causal-language relevance boost only for attribution-style
             # questions and only when narrative-preference is enabled.
             # This boost is never used for purely numeric or formula-driven retrieval
             # paths.
-            if prefer_narrative and attribution_active and self._CAUSAL_LANGUAGE_RE.search(content):
-                multiplier *= 1.4
+            if (
+                self._rule_active("causal_language_boost")
+                and prefer_narrative and attribution_active and self._CAUSAL_LANGUAGE_RE.search(content)
+            ):
+                multiplier *= RULE_MULTIPLIERS["causal_language_boost"]
+                applied_rules.append("causal_language_boost")
 
             # ── Geographic-section boost (geography questions only) ───────────
             # Only ever active alongside prefer_narrative -- see
@@ -732,23 +862,39 @@ class HybridFinancialRetriever:
             # Operating Segments" sub-section can score close enough on
             # plain BM25 to edge out the real "Geographic Operations"
             # table otherwise, since both share most of their vocabulary.
-            if prefer_narrative and geography_active and _GEOGRAPHIC_SECTION_RE.search(content):
-                multiplier *= 1.4
+            if (
+                self._rule_active("geographic_section_boost")
+                and prefer_narrative and geography_active and _GEOGRAPHIC_SECTION_RE.search(content)
+            ):
+                multiplier *= RULE_MULTIPLIERS["geographic_section_boost"]
+                applied_rules.append("geographic_section_boost")
             # Boost passages that enumerate distinct geographic regions when the passage
             # does not use explicit geography headings.
             # Scale the boost by the number of distinct regions found so stronger multi-
             # region lists receive higher weight than borderline lists.
-            elif prefer_narrative and geography_active and _has_dense_geographic_region_names(content):
+            elif (
+                self._rule_active("geographic_region_density")
+                and prefer_narrative and geography_active and _has_dense_geographic_region_names(content)
+            ):
                 region_count = _geographic_region_name_count(content)
-                multiplier *= min(1.4 + 0.3 * (region_count - 3), 2.9)
+                multiplier *= min(
+                    RULE_MULTIPLIERS["geographic_region_density_base"]
+                    + RULE_MULTIPLIERS["geographic_region_density_step"] * (region_count - 3),
+                    RULE_MULTIPLIERS["geographic_region_density_cap"],
+                )
+                applied_rules.append("geographic_region_density")
 
             # Apply a stronger boost for passages that appear under legal-proceedings
             # section headings, since those headings are standardized and reliable
             # signals.
             # Use this boost for legal questions to prefer section-heading matches over
             # bag-of-words topic matches.
-            if prefer_narrative and legal_active and _LEGAL_PROCEEDINGS_SECTION_RE.search(content):
-                multiplier *= 1.5
+            if (
+                self._rule_active("legal_proceedings_boost")
+                and prefer_narrative and legal_active and _LEGAL_PROCEEDINGS_SECTION_RE.search(content)
+            ):
+                multiplier *= RULE_MULTIPLIERS["legal_proceedings_boost"]
+                applied_rules.append("legal_proceedings_boost")
 
             # Boost chunks matching a filing's own acquisitions-note sub-heading shape
             # (see _ACQUISITION_SUBHEADING_RE) for acquisition questions. An acquisitions
@@ -756,93 +902,121 @@ class HybridFinancialRetriever:
             # chunks, and without this boost one acquired company's own chunk can rank
             # just outside the retrieval cutoff while a neighboring chunk from the same
             # note (naming a different acquired company) ranks comfortably inside it.
-            if prefer_narrative and acquisition_active and _ACQUISITION_SUBHEADING_RE.search(content):
-                multiplier *= 1.5
+            if (
+                self._rule_active("acquisition_subheading_boost")
+                and prefer_narrative and acquisition_active and _ACQUISITION_SUBHEADING_RE.search(content)
+            ):
+                multiplier *= RULE_MULTIPLIERS["acquisition_subheading_boost"]
+                applied_rules.append("acquisition_subheading_boost")
 
             # Boost documents that contain side-by-side segment results for segment-
             # comparison questions; this applies even when narrative preference is off.
             # This ensures multi-segment summary pages rank above multiple single-
             # segment pages that individually have high overlap.
-            if segment_comparison_active and _SEGMENT_RESULTS_SECTION_RE.search(content):
-                multiplier *= 2.0
+            if (
+                self._rule_active("segment_comparison_boost")
+                and segment_comparison_active and _SEGMENT_RESULTS_SECTION_RE.search(content)
+            ):
+                multiplier *= RULE_MULTIPLIERS["segment_comparison_boost"]
+                applied_rules.append("segment_comparison_boost")
 
             # Boost label matches that indicate inventory composition when retrieving
             # inputs for inventory-turnover formulas; applies in numeric retrieval mode.
             # This helps surface the composition row over shorter, generic inventory
             # total rows that would otherwise rank higher.
-            if inventory_composition_active and _INVENTORY_COMPOSITION_LABEL_RE.search(content):
-                multiplier *= 3.0
+            if (
+                self._rule_active("inventory_composition_boost")
+                and inventory_composition_active and _INVENTORY_COMPOSITION_LABEL_RE.search(content)
+            ):
+                multiplier *= RULE_MULTIPLIERS["inventory_composition_boost"]
+                applied_rules.append("inventory_composition_boost")
 
             # Preferred-year boost for bare entity matches.
             # When a query names an entity without a year, boost documents whose year
             # matches the year(s) extracted from the query to break ties among same-
             # entity filings with similar boilerplate.
-            if preferred_filing_year and not self._extract_company_filing_year(entity or ""):
+            if (
+                self._rule_active("preferred_filing_year_boost")
+                and preferred_filing_year and not self._extract_company_filing_year(entity or "")
+            ):
                 doc_filing_year = self._extract_company_filing_year(doc.get("company", ""))
                 if doc_filing_year == preferred_filing_year:
-                    multiplier *= 1.3
+                    multiplier *= RULE_MULTIPLIERS["preferred_filing_year_boost"]
+                    applied_rules.append("preferred_filing_year_boost")
 
             # Low-confidence column penalty applies to numeric and narrative lookups.
             # A mis-parsed year header can mislead any lookup mode; see the column-
             # confidence pattern's docstring for details.
-            if self._LOW_CONFIDENCE_COLUMN_RE.search(content):
-                multiplier *= 0.5
+            if self._rule_active("low_confidence_column_penalty") and self._LOW_CONFIDENCE_COLUMN_RE.search(content):
+                multiplier *= RULE_MULTIPLIERS["low_confidence_column_penalty"]
+                applied_rules.append("low_confidence_column_penalty")
 
             # Avoid answering "X and equivalents" from a combined "Total X, X
             # equivalents and restricted X" row.
             # This prevents returning an aggregated total when the question requests the
             # plain row.
             if (
-                doc.get("type") == "table_row"
+                self._rule_active("restricted_row_penalty")
+                and doc.get("type") == "table_row"
                 and re.search(r'Line Item:[^|]*\brestricted\b', content, re.IGNORECASE)
                 and "restricted" not in query.lower()
             ):
-                multiplier *= 0.6
+                multiplier *= RULE_MULTIPLIERS["restricted_row_penalty"]
+                applied_rules.append("restricted_row_penalty")
 
             # ── Year / quarter boost ───────────────────────────────────────
             doc_period = str(doc.get('period', '')) + " " + content
             if query_years:
                 # Normalise FY prefix for comparison
                 doc_years_found = _extract_years(doc_period)
-                if query_years & doc_years_found:
-                    multiplier *= 1.4
-                else:
+                if self._rule_active("year_match_boost") and query_years & doc_years_found:
+                    multiplier *= RULE_MULTIPLIERS["year_match_boost"]
+                    applied_rules.append("year_match_boost")
+                elif self._rule_active("recent_year_mismatch_penalty"):
                     # Penalise docs with completely different recent years
                     recent_years = {'2021', '2022', '2023', '2024', '2025'}
                     if doc_years_found & recent_years:
-                        multiplier *= 0.6
+                        multiplier *= RULE_MULTIPLIERS["recent_year_mismatch_penalty"]
+                        applied_rules.append("recent_year_mismatch_penalty")
 
-            if query_quarters:
+            if self._rule_active("quarter_match_boost") and query_quarters:
                 if any(q in doc_period.lower() for q in query_quarters):
-                    multiplier *= 1.3
+                    multiplier *= RULE_MULTIPLIERS["quarter_match_boost"]
+                    applied_rules.append("quarter_match_boost")
 
             # ── Step 3: section anchoring (soft filter / penalty) ─────────────
-            if section:
+            if self._rule_active("section_mismatch_penalty") and section:
                 doc_section = doc.get("section", "")  # empty = untagged old passage
                 if doc_section and doc_section != section:
                     # Wrong section: heavy penalty but not hard exclusion
-                    multiplier *= 0.05
+                    multiplier *= RULE_MULTIPLIERS["section_mismatch_penalty"]
+                    applied_rules.append("section_mismatch_penalty")
 
             # ── Step 4: statement_type_hint boost (soft preference) ──────────
             # Use 'statement_type' field (set during ingestion by parser/table_parser).
             # A matching document gets a 1.5x boost; non-matching docs are unchanged.
-            if statement_type_hint and statement_type_hint != "unknown":
+            if (
+                self._rule_active("statement_type_hint_boost")
+                and statement_type_hint and statement_type_hint != "unknown"
+            ):
                 doc_stmt_type = doc.get("statement_type", "") or doc.get("section", "")
                 if doc_stmt_type == statement_type_hint or self._matches_core_statement_line_item(
                     content, statement_type_hint
                 ):
-                    multiplier *= 1.5
+                    multiplier *= RULE_MULTIPLIERS["statement_type_hint_boost"]
+                    applied_rules.append("statement_type_hint_boost")
 
             final_score = (bm25 * 0.7 + overlap_count * 0.3) * multiplier
             if final_score > 0.01:
-                scored_results.append((final_score, doc))
+                scored_results.append((final_score, doc, applied_rules))
 
 
         scored_results.sort(key=lambda x: x[0], reverse=True)
 
         results = []
-        for score, doc in scored_results[:top_k]:
+        for score, doc, applied_rules in scored_results[:top_k]:
             doc_copy = dict(doc)
             doc_copy['relevance_score'] = round(float(score), 4)
+            doc_copy['applied_rules'] = applied_rules
             results.append(doc_copy)
         return results

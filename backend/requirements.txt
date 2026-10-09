@@ -11,3 +11,5 @@ pymupdf>=1.28.0
 pdfplumber>=0.11.0
 pypdf>=6.0.0
 pdfminer.six>=20260107
+beautifulsoup4>=4.12.0
+mineru>=4.0.0
