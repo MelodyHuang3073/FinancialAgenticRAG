@@ -516,7 +516,9 @@ class FinAgentRAGOrchestrator:
                 iter_trace["result_value"] = pot_res["result_value"]
 
                 # ── Tri-Check Verification ──
-                verification_res = self.verifier.verify(query, context_window, pot_res)
+                verification_res = self.verifier.verify(
+                    query, context_window, pot_res, entity=classification.get("entity")
+                )
                 iter_trace["verification"] = verification_res
 
                 trace_steps.append({
@@ -528,6 +530,57 @@ class FinAgentRAGOrchestrator:
                 # Accept or simple → done
                 if verification_res["decision"] == "ACCEPT" or complexity == "SIMPLE":
                     break
+
+                # Reject → targeted retry (if the verifier pinpointed a specific
+                # gap it can name) in addition to the existing generic refine-
+                # and-re-search below, which still runs every time either way.
+                dup_pair = verification_res.get("duplicate_placeholder_pair")
+                if dup_pair and formula_entry:
+                    # The verifier flagged two of this formula's own
+                    # placeholders (e.g. revenue_new/revenue_old) as both
+                    # having resolved via free-text to the identical value --
+                    # re-issue retrieval for exactly those two, using the
+                    # same alias/entity/year query shape the first pass
+                    # built them with (_build_formula_subquestions), rather
+                    # than hoping the single generic refined query below
+                    # happens to surface the real structured row for one of
+                    # them. A wider top_k than the first pass used, since the
+                    # real row not ranking in the original window at all is
+                    # exactly the failure this is trying to recover from.
+                    targeted_steps = [
+                        step for step in self._build_formula_subquestions(
+                            formula_entry, query_entity, retrieval_years
+                        )
+                        if step["target_metric"] in dup_pair
+                    ]
+                    targeted_queries = []
+                    for step in targeted_steps:
+                        hits = self.vector_store.search(
+                            step["query"], top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
+                            exclude_ids=list(retrieved_ids),
+                            entity=classification.get("entity"),
+                            statement_type_hint=statement_type_hint,
+                            is_segment_comparison=is_segment_comparison,
+                            query_years=classification.get("years"),
+                        )
+                        hits = self._tag_subquery(
+                            400 + iteration_count * 10 + step["step"],
+                            self._deduplicate_hits(hits, entity=classification.get("entity")),
+                        )
+                        targeted_queries.append(step["query"])
+                        for hit in hits:
+                            retrieved_ids.add(hit["id"])
+                            evidence_buffer.append(hit)
+                            info = self._build_evidence_info(hit, sub_question=step["query"])
+                            evidence_meta.append(info)
+                    trace_steps.append({
+                        "step_name": f"Targeted Duplicate-Placeholder Retry #{iteration_count}",
+                        "type": "refinement",
+                        "detail": (
+                            f"REJECT (duplicate_placeholder_pair={dup_pair}) → "
+                            f"targeted re-search: {targeted_queries}"
+                        ),
+                    })
 
                 # Reject → refine and re-search
                 current_query = self.refiner.refine(
@@ -657,7 +710,9 @@ class FinAgentRAGOrchestrator:
             iter_trace["sandbox_output"] = pot_res.get("output_log", "")
             iter_trace["result_value"] = pot_res.get("result_value")
 
-            verification_res = self.verifier.verify(query, self._top_evidence(evidence_buffer), pot_res)
+            verification_res = self.verifier.verify(
+                query, self._top_evidence(evidence_buffer), pot_res, entity=classification.get("entity")
+            )
             iter_trace["verification"] = verification_res
             trace_steps.append({
                 "step_name": "Evidence Retrieval & Analysis",
@@ -716,30 +771,35 @@ class FinAgentRAGOrchestrator:
             "is_comparison_answer": pot_res.get("is_comparison_answer", False) if pot_res else False,
             "is_qualitative_characterization": pot_res.get("is_qualitative_characterization", False) if pot_res else False,
             # Return ONLY the subset of evidence that actually reached the
-            # LLM's prompt (see llm_client.generate_answer's own sort +
-            # EVIDENCE_PROMPT_CAP slice, applied here identically to
-            # final_context -- the SAME list generate_answer received),
-            # not every candidate retrieval ever pulled in. evidence_meta/
-            # evidence_buffer can hold every retrieved item
-            # across every sub-query; only EVIDENCE_PROMPT_CAP of the
-            # highest-scoring ones ever got FORMATTED into the prompt text
-            # the model actually read. Returning the full unfiltered list
-            # here made the frontend's Source Evidence panel show
-            # candidates the LLM never saw, so there was no way to tell
-            # from the UI alone whether an answer's citations and its
-            # actual grounding evidence agreed. Falls back to rebuilding
-            # via _build_evidence_info for any final_context item that
+            # LLM's prompt -- the SAME select_with_quota(final_context, ...)
+            # call llm_client.generate_answer makes on this same pool with
+            # the same cap and the same pinned PoT-sourced ids (see
+            # select_with_quota's pinned_ids and
+            # pot_reasoner._collect_used_evidence_ids), not a separately
+            # recomputed plain top-N-by-score sort -- the two previously
+            # used different algorithms on the same input and could
+            # disagree whenever the per-sub-query quota reserved a lower
+            # raw-score item generate_answer's own call would also have
+            # kept but a plain sort would not have. evidence_meta/
+            # evidence_buffer can hold every retrieved item across every
+            # sub-query; only EVIDENCE_PROMPT_CAP of the highest-scoring
+            # ones ever got FORMATTED into the prompt text the model
+            # actually read. Returning the full unfiltered list here made
+            # the frontend's Source Evidence panel show candidates the LLM
+            # never saw, so there was no way to tell from the UI alone
+            # whether an answer's citations and its actual grounding
+            # evidence agreed. Falls back to rebuilding via
+            # _build_evidence_info for any selected item that
             # (unexpectedly) has no matching evidence_meta entry by id.
             "evidence_sources": [
                 next(
                     (m for m in evidence_meta if m.get("id") == h.get("id")),
                     None,
                 ) or self._build_evidence_info(h)
-                for h in sorted(
-                    final_context,
-                    key=lambda item: item.get("relevance_score") or 0,
-                    reverse=True,
-                )[:evidence_prompt_cap]
+                for h in select_with_quota(
+                    final_context, evidence_prompt_cap,
+                    pinned_ids=set(pot_res.get("used_evidence_ids") or []) if pot_res else None,
+                )
             ],
             "reasoning_steps": trace_steps,
             "execution_trace": trace_steps,
