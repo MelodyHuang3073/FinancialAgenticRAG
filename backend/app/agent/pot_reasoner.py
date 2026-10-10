@@ -1069,6 +1069,20 @@ def _score_row_match(label: str, aliases: List[str]) -> float:
     label_norm_unqualified = re.sub(
         r',?\s*net of amounts capitalized\s*$', '', label_norm_unqualified
     ).strip()
+    # A trailing ", net" qualifier on a balance-sheet asset/liability line (e.g.
+    # "Trade receivables, net", "Accounts receivable, net") marks the SAME
+    # concept as the bare alias -- by near-universal convention these lines are
+    # reported net of a contra-account (allowance for doubtful accounts,
+    # accumulated depreciation, etc.), not a different line item. Without this,
+    # a bare same-named row from a totally unrelated context elsewhere in the
+    # filing (e.g. a line sharing the same caption inside an unrelated
+    # reconciliation note) scores a higher exact-match tier than the real
+    # "..., net" balance-sheet row purely because the alias list doesn't
+    # itself spell out ", net". Stripping it here lets both rows tie at the
+    # exact-match tier, so _pick_best_in_group's own is_net tiebreak (below)
+    # decides correctly instead of this tier deciding it first, wrongly, on
+    # accidental exact text equality.
+    label_norm_unqualified = re.sub(r',\s*net\s*$', '', label_norm_unqualified).strip()
     # Per-share rows must only match aliases that themselves request a per-share figure
     # (the per-share placeholder's alias list).
     # Any match to a non-per-share placeholder is a disqualifying mismatch.
