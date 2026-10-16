@@ -29,9 +29,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["quick ratio", "acid test", "acid-test"],
         "formula_expr": "(current_assets - inventory) / current_liabilities",
         "required_vars": {
-            "current_assets":    ["流動資產", "current assets", "total current assets"],
-            "inventory":         ["存貨", "inventory", "inventories", "stock"],
-            "current_liabilities": ["流動負債", "current liabilities", "total current liabilities"],
+            "current_assets":    ["current assets", "total current assets"],
+            "inventory":         ["inventory", "inventories", "stock"],
+            "current_liabilities": ["current liabilities", "total current liabilities"],
         },
         "result_label": "Quick Ratio",
         "unit": "x",
@@ -47,19 +47,19 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["positive working capital", "negative working capital", "net working capital"],
         "formula_expr": "current_assets - current_liabilities",
         "required_vars": {
-            "current_assets":    ["流動資產", "current assets", "total current assets"],
-            "current_liabilities": ["流動負債", "current liabilities", "total current liabilities"],
+            "current_assets":    ["current assets", "total current assets"],
+            "current_liabilities": ["current liabilities", "total current liabilities"],
         },
         "result_label": "Working Capital",
         "unit": "$",
     },
     "current_ratio": {
         "keywords_zh": ["流動比率", "流動比"],
-        "keywords_en": ["current ratio"],
+        "keywords_en": ["current ratio", "working capital ratio"],
         "formula_expr": "current_assets / current_liabilities",
         "required_vars": {
-            "current_assets":    ["流動資產", "current assets", "total current assets"],
-            "current_liabilities": ["流動負債", "current liabilities", "total current liabilities"],
+            "current_assets":    ["current assets", "total current assets"],
+            "current_liabilities": ["current liabilities", "total current liabilities"],
         },
         "result_label": "Current Ratio",
         "unit": "x",
@@ -69,9 +69,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["cash ratio"],
         "formula_expr": "(cash + short_term_investments) / current_liabilities",
         "required_vars": {
-            "cash":                  ["現金及約當現金", "cash", "cash and cash equivalents", "cash & equivalents"],
-            "short_term_investments": ["短期投資", "short-term investments", "marketable securities", "short term investments"],
-            "current_liabilities":   ["流動負債", "current liabilities", "total current liabilities"],
+            "cash":                  ["cash", "cash and cash equivalents", "cash & equivalents"],
+            "short_term_investments": ["short-term investments", "marketable securities", "short term investments"],
+            "current_liabilities":   ["current liabilities", "total current liabilities"],
         },
         "result_label": "Cash Ratio",
         "unit": "x",
@@ -91,8 +91,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "cash_from_operations": ["net cash provided by operating activities", "cash from operations",
                                       "cash provided by operating activities",
                                       "net cash from operating activities", "operating cash flow",
-                                      "營業活動之現金流量", "營業活動現金流量"],
-            "current_liabilities":  ["流動負債", "current liabilities", "total current liabilities"],
+                                      ],
+            "current_liabilities":  ["current liabilities", "total current liabilities"],
         },
         "result_label": "Operating Cash Flow Ratio",
         "unit": "x",
@@ -104,8 +104,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["gross margin", "gross profit margin", "gross profit ratio"],
         "formula_expr": "gross_profit / revenue",
         "required_vars": {
-            "gross_profit": ["毛利", "gross profit", "gross income"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "gross_profit": ["gross profit", "gross income"],
+            "revenue":      ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Gross Margin",
         "unit": "%",
@@ -124,8 +124,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "unadjusted operating income % margin", "unadjusted operating margin"],
         "formula_expr": "operating_income / revenue",
         "required_vars": {
-            "operating_income": ["營業利益", "operating income", "operating profit", "ebit", "income from operations"],
-            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "operating_income": ["operating income", "operating profit", "ebit", "income from operations"],
+            "revenue":          ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Operating Margin",
         "unit": "%",
@@ -136,8 +136,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["net margin", "net profit margin", "net income margin", "profit margin"],
         "formula_expr": "net_income / revenue",
         "required_vars": {
-            "net_income": ["本期淨利", "淨利", "net income", "net profit", "profit after tax", "net earnings"],
-            "revenue":    ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "net_income": ["net income", "net profit", "profit after tax", "net earnings"],
+            "revenue":    ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Net Profit Margin",
         "unit": "%",
@@ -160,9 +160,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "d&a from cash flow statement"],
         "formula_expr": "depreciation / revenue",
         "required_vars": {
-            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+            "depreciation": ["depreciation and amortization", "depreciation & amortization",
                              "depreciation"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "revenue":      ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "D&A Margin",
         "unit": "%",
@@ -188,14 +188,14 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # alias/candidate pipeline as other variables.
         "direct_lookup_var": "effective_tax_rate_direct",
         "required_vars": {
-            "effective_tax_rate_direct": ["effective tax rate", "有效稅率", "實質稅率"],
+            "effective_tax_rate_direct": ["effective tax rate", ],
             # Use a precise alias like "provision for income taxes" to avoid matching
             # unrelated tax rows.
             # Avoid bare "income tax" aliases because they can match pretax or deferred-
             # tax lines and return the wrong row.
             "income_tax":    ["provision for income taxes", "income tax provision", "income tax expense",
-                              "provision for taxes on income", "所得稅費用"],
-            "pretax_income": ["稅前淨利", "income before income tax", "income before income taxes",
+                              "provision for taxes on income", ],
+            "pretax_income": ["income before income tax", "income before income taxes",
                               "income before provision for income taxes",
                               "earnings before income taxes", "pretax income", "income before taxes"],
         },
@@ -207,8 +207,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["ebitda margin"],
         "formula_expr": "ebitda / revenue",
         "required_vars": {
-            "ebitda":  ["ebitda", "稅息折舊及攤銷前利潤"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "ebitda":  ["ebitda", ],
+            "revenue": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "EBITDA Margin",
         "unit": "%",
@@ -224,11 +224,11 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "unadjusted ebitda %margin"],
         "formula_expr": "(op_income + depreciation) / revenue",
         "required_vars": {
-            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+            "op_income":    ["operating income", "operating profit", "ebit",
                               "income from operations"],
-            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+            "depreciation": ["depreciation and amortization", "depreciation & amortization",
                               "depreciation", "amortization", "d&a"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "revenue":      ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Unadjusted EBITDA Margin",
         "unit": "%",
@@ -247,13 +247,13 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # routinely a parenthesised/negative outflow figure.
         "formula_expr": "op_income + depreciation - abs(capex)",
         "required_vars": {
-            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+            "op_income":    ["operating income", "operating profit", "ebit",
                               "income from operations"],
-            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+            "depreciation": ["depreciation and amortization", "depreciation & amortization",
                               "depreciation", "amortization", "d&a"],
             "capex":        ["capital expenditures", "capital expenditure", "purchases of property",
                               "purchases of property and equipment",
-                              "purchases of property, plant and equipment", "資本支出"],
+                              "purchases of property, plant and equipment", ],
         },
         "result_label": "Unadjusted EBITDA less CapEx",
         "unit": "",
@@ -267,9 +267,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "operating income plus depreciation"],
         "formula_expr": "op_income + depreciation",
         "required_vars": {
-            "op_income":    ["營業利益", "operating income", "operating profit", "ebit",
+            "op_income":    ["operating income", "operating profit", "ebit",
                               "income from operations"],
-            "depreciation": ["折舊", "depreciation and amortization", "depreciation & amortization",
+            "depreciation": ["depreciation and amortization", "depreciation & amortization",
                               "depreciation", "amortization", "d&a"],
         },
         "result_label": "Unadjusted EBITDA",
@@ -287,9 +287,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["return on equity", "roe"],
         "formula_expr": "net_income / ((shareholders_equity_old + shareholders_equity_new) / 2)",
         "required_vars": {
-            "net_income":              ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
-            "shareholders_equity_old": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
-            "shareholders_equity_new": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
+            "net_income":              ["net income", "net profit", "net earnings"],
+            "shareholders_equity_old": ["shareholders equity", "stockholders equity", "equity", "total equity"],
+            "shareholders_equity_new": ["shareholders equity", "stockholders equity", "equity", "total equity"],
         },
         "result_label": "Return on Equity (ROE)",
         # Bare decimal (e.g. "-0.02"), not a percentage.
@@ -302,9 +302,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["return on assets", "roa"],
         "formula_expr": "net_income / ((total_assets_old + total_assets_new) / 2)",
         "required_vars": {
-            "net_income":       ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
-            "total_assets_old": ["總資產", "total assets", "assets"],
-            "total_assets_new": ["總資產", "total assets", "assets"],
+            "net_income":       ["net income", "net profit", "net earnings"],
+            "total_assets_old": ["total assets", "assets"],
+            "total_assets_new": ["total assets", "assets"],
         },
         "result_label": "Return on Assets (ROA)",
         # Bare decimal ratio, not a percentage — consistent with other ratio fields in
@@ -318,8 +318,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["return on invested capital", "roic"],
         "formula_expr": "nopat / invested_capital",
         "required_vars": {
-            "nopat":           ["稅後淨營業利潤", "nopat", "net operating profit after tax"],
-            "invested_capital": ["投入資本", "invested capital"],
+            "nopat":           ["nopat", "net operating profit after tax"],
+            "invested_capital": ["invested capital"],
         },
         "result_label": "Return on Invested Capital (ROIC)",
         "unit": "%",
@@ -338,14 +338,14 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             # "Dividends".
             # Use the bare alias and apply negation-prefix checks to avoid substring
             # collisions.
-            "dividends_paid": ["股利", "現金股利", "支付股利", "dividends paid",
+            "dividends_paid": ["dividends paid",
                                 "cash dividends paid", "dividends"],
             # Do NOT merge this alias with the plain "net_income" pool: the
             # shareholders-attributable line is distinct from consolidated net income.
             # Include alternate wording like "net earnings attributable to" early in
             # alias lists so firms that use "earnings" phrasing are matched.
             "net_income_attributable": [
-                "歸屬於股東之淨利", "net income attributable to shareowners",
+                "net income attributable to shareowners",
                 "net earnings attributable to",
                 "net income attributable to shareholders",
                 "net income attributable to common shareholders",
@@ -367,13 +367,13 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["retention ratio", "plowback ratio"],
         "formula_expr": "(net_income_attributable - abs(dividends_paid)) / net_income_attributable",
         "required_vars": {
-            "dividends_paid": ["股利", "現金股利", "支付股利", "dividends paid",
+            "dividends_paid": ["dividends paid",
                                 "cash dividends paid", "dividends"],
             # Some filers use the word "earnings" instead of "income" in P&L labels.
             # Include an alias for "net earnings attributable to" early so it co-occurs
             # with "net income" aliases in retrieval queries.
             "net_income_attributable": [
-                "歸屬於股東之淨利", "net income attributable to shareowners",
+                "net income attributable to shareowners",
                 "net earnings attributable to",
                 "net income attributable to shareholders",
                 "net income attributable to common shareholders",
@@ -390,8 +390,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["debt to equity", "debt-to-equity", "leverage ratio", "d/e ratio"],
         "formula_expr": "total_debt / shareholders_equity",
         "required_vars": {
-            "total_debt":          ["總負債", "total debt", "total liabilities", "liabilities"],
-            "shareholders_equity": ["股東權益", "shareholders equity", "stockholders equity", "equity", "total equity"],
+            "total_debt":          ["total debt", "total liabilities", "liabilities"],
+            "shareholders_equity": ["shareholders equity", "stockholders equity", "equity", "total equity"],
         },
         "result_label": "Debt-to-Equity Ratio",
         "unit": "x",
@@ -401,8 +401,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["debt to assets", "debt-to-assets", "debt ratio"],
         "formula_expr": "total_debt / total_assets",
         "required_vars": {
-            "total_debt":   ["總負債", "total debt", "total liabilities", "liabilities"],
-            "total_assets": ["總資產", "total assets", "assets"],
+            "total_debt":   ["total debt", "total liabilities", "liabilities"],
+            "total_assets": ["total assets", "assets"],
         },
         "result_label": "Debt-to-Assets Ratio",
         "unit": "%",
@@ -442,8 +442,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # as 0 rather than a negative ratio.
         "formula_expr": "max(0, ebit) / abs(interest_expense)",
         "required_vars": {
-            "ebit":             ["營業利益", "ebit", "operating income", "operating profit"],
-            "interest_expense": ["利息費用", "interest expense", "finance costs"],
+            "ebit":             ["ebit", "operating income", "operating profit"],
+            "interest_expense": ["interest expense", "finance costs"],
         },
         "result_label": "Interest Coverage Ratio",
         "unit": "x",
@@ -466,16 +466,16 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "ppe turnover", "property plant and equipment turnover"],
         "formula_expr": "revenue / ((ppe_old + ppe_new) / 2)",
         "required_vars": {
-            "revenue":  ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "revenue":  ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
             # Same alias list for both — distinguished purely by which
             # year column matches, same convention as revenue_yoy's
             # revenue_new/revenue_old below.
             "ppe_old": ["property, plant and equipment, net", "property and equipment, net",
                         "net property, plant and equipment", "property, plant and equipment",
-                        "property and equipment", "不動產、廠房及設備"],
+                        "property and equipment", ],
             "ppe_new": ["property, plant and equipment, net", "property and equipment, net",
                         "net property, plant and equipment", "property, plant and equipment",
-                        "property and equipment", "不動產、廠房及設備"],
+                        "property and equipment", ],
         },
         "result_label": "Fixed Asset Turnover",
         "unit": "x",
@@ -490,9 +490,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["asset turnover", "total asset turnover"],
         "formula_expr": "revenue / ((total_assets_old + total_assets_new) / 2)",
         "required_vars": {
-            "revenue":          ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
-            "total_assets_old": ["總資產", "total assets", "assets"],
-            "total_assets_new": ["總資產", "total assets", "assets"],
+            "revenue":          ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "total_assets_old": ["total assets", "assets"],
+            "total_assets_new": ["total assets", "assets"],
         },
         "result_label": "Asset Turnover",
         "unit": "x",
@@ -508,8 +508,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["capital-intensive", "capital intensive", "capital intensity ratio"],
         "formula_expr": "total_assets / revenue",
         "required_vars": {
-            "total_assets": ["總資產", "total assets", "assets"],
-            "revenue":      ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "total_assets": ["total assets", "assets"],
+            "revenue":      ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Capital Intensity Ratio",
         "unit": "x",
@@ -531,17 +531,17 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             " - 365 * ((ap_old + ap_new) / 2) / (abs(cogs) + (inv_new - inv_old))"
         ),
         "required_vars": {
-            "cogs":    ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
-            "inv_old": ["存貨", "inventory", "inventories"],
-            "inv_new": ["存貨", "inventory", "inventories"],
+            "cogs":    ["cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
+            "revenue": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "inv_old": ["inventory", "inventories"],
+            "inv_new": ["inventory", "inventories"],
             # Include bare "receivables"/"receivable" as an alias.
             # Some balance sheets use that exact label without qualifiers, so substring-
             # only aliases miss them.
-            "ar_old":  ["應收帳款", "accounts receivable", "trade receivables", "receivables", "receivable"],
-            "ar_new":  ["應收帳款", "accounts receivable", "trade receivables", "receivables", "receivable"],
-            "ap_old":  ["應付帳款", "accounts payable"],
-            "ap_new":  ["應付帳款", "accounts payable"],
+            "ar_old":  ["accounts receivable", "trade receivables", "receivables", "receivable"],
+            "ar_new":  ["accounts receivable", "trade receivables", "receivables", "receivable"],
+            "ap_old":  ["accounts payable"],
+            "ap_new":  ["accounts payable"],
         },
         "result_label": "Cash Conversion Cycle (CCC)",
         "unit": "",
@@ -558,9 +558,9 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # rationale (same formula, just averaged inventory).
         "formula_expr": "abs(cogs) / ((inventory_old + inventory_new) / 2)",
         "required_vars": {
-            "cogs":      ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
-            "inventory_old": ["存貨", "inventory", "inventories"],
-            "inventory_new": ["存貨", "inventory", "inventories"],
+            "cogs":      ["cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
+            "inventory_old": ["inventory", "inventories"],
+            "inventory_new": ["inventory", "inventories"],
         },
         "result_label": "Inventory Turnover",
         "unit": "x",
@@ -578,8 +578,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             # Add "cost of products sold" as an alias for COGS.
             # Some sectors use that phrasing instead of other common COGS labels and
             # would otherwise fail to match.
-            "cogs":      ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
-            "inventory": ["存貨", "inventory", "inventories"],
+            "cogs":      ["cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
+            "inventory": ["inventory", "inventories"],
         },
         "result_label": "Inventory Turnover",
         "unit": "x",
@@ -589,8 +589,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["receivables turnover", "accounts receivable turnover"],
         "formula_expr": "revenue / accounts_receivable",
         "required_vars": {
-            "revenue":             ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
-            "accounts_receivable": ["應收帳款", "accounts receivable", "trade receivables", "receivables", "receivable"],
+            "revenue":             ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "accounts_receivable": ["accounts receivable", "trade receivables", "receivables", "receivable"],
         },
         "result_label": "Receivables Turnover",
         "unit": "x",
@@ -610,11 +610,11 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # step rather than a plain positive magnitude.
         "formula_expr": "365 * ((ap_old + ap_new) / 2) / (abs(cogs) + (inv_new - inv_old))",
         "required_vars": {
-            "ap_old": ["應付帳款", "accounts payable"],
-            "ap_new": ["應付帳款", "accounts payable"],
-            "cogs":   ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
-            "inv_old": ["存貨", "inventory", "inventories"],
-            "inv_new": ["存貨", "inventory", "inventories"],
+            "ap_old": ["accounts payable"],
+            "ap_new": ["accounts payable"],
+            "cogs":   ["cost of goods sold", "cost of products sold", "cost of sales", "cogs", "cost of revenue"],
+            "inv_old": ["inventory", "inventories"],
+            "inv_new": ["inventory", "inventories"],
         },
         "result_label": "Days Payable Outstanding (DPO)",
         "unit": "",
@@ -627,8 +627,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "keywords_en": ["eps", "earnings per share"],
         "formula_expr": "net_income / shares_outstanding",
         "required_vars": {
-            "net_income":        ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
-            "shares_outstanding": ["流通在外股數", "shares outstanding", "weighted average shares", "diluted shares"],
+            "net_income":        ["net income", "net profit", "net earnings"],
+            "shares_outstanding": ["shares outstanding", "weighted average shares", "diluted shares"],
         },
         "result_label": "Earnings Per Share (EPS)",
         "unit": "",
@@ -646,10 +646,10 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
             "cash_from_operations": ["net cash provided by operating activities", "cash from operations",
                                       "cash provided by operating activities",
                                       "net cash from operating activities", "operating cash flow",
-                                      "營業活動之現金流量", "營業活動現金流量"],
+                                      ],
             "capex": ["capital expenditures", "capital expenditure", "purchases of property",
                       "purchases of property and equipment", "purchases of property, plant and equipment",
-                      "purchases of land, buildings, and equipment", "資本支出"],
+                      "purchases of land, buildings, and equipment", ],
         },
         "result_label": "Free Cash Flow (FCF)",
         "unit": "$",
@@ -674,8 +674,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # Use this to avoid spurious grading failures from rounding differences.
         "direct_lookup_var": "revenue_pct_change_direct",
         "required_vars": {
-            "revenue_new": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
-            "revenue_old": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "revenue_new": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "revenue_old": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
             # First alias becomes the actual retrieval query text (see
             # orchestrator._build_formula_subquestions) -- empirically the
             # single best-ranking phrasing found for this row's own
@@ -696,8 +696,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "change in net income"],
         "formula_expr": "(net_income_new - net_income_old) / net_income_old * 100",
         "required_vars": {
-            "net_income_new": ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
-            "net_income_old": ["本期淨利", "淨利", "net income", "net profit", "net earnings"],
+            "net_income_new": ["net income", "net profit", "net earnings"],
+            "net_income_old": ["net income", "net profit", "net earnings"],
         },
         "result_label": "Net Income YoY Growth",
         "unit": "%",
@@ -709,8 +709,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
                          "change in operating income"],
         "formula_expr": "(operating_income_new - operating_income_old) / operating_income_old * 100",
         "required_vars": {
-            "operating_income_new": ["營業利益", "operating income", "operating profit"],
-            "operating_income_old": ["營業利益", "operating income", "operating profit"],
+            "operating_income_new": ["operating income", "operating profit"],
+            "operating_income_old": ["operating income", "operating profit"],
         },
         "result_label": "Operating Income YoY Growth",
         "unit": "%",
@@ -735,20 +735,21 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # retrieval fell back to LLM decomposition (no guarantee that every requested year gets
         # both its cost and revenue rows) and the direct-lookup fallback could return revenue
         # itself. Registering the formula gives one deterministic cost/revenue sub-query pair per
-        # year; the matching _MARGIN_MAP trigger in pot_reasoner.py covers calculation when this
-        # entry does not match first.
+        # year.
         "keywords_zh": ["銷貨成本佔營收比", "銷貨成本占營收比", "營業成本率"],
         "keywords_en": ["cost of goods sold as a % of revenue",
                          "cost of goods sold as a percentage of revenue",
                          "cost of sales as a % of revenue",
-                         "cost of revenue as a % of revenue"],
+                         "cost of revenue as a % of revenue",
+                         "cogs ratio", "cogs margin", "cogs % margin",
+                         "cost of goods sold margin"],
         # abs(cogs): same sign convention as capex_to_revenue below -- COGS
         # is occasionally presented as a parenthesised/negative figure.
         "formula_expr": "abs(cogs) / revenue",
         "required_vars": {
-            "cogs":    ["銷售成本", "cost of goods sold", "cost of products sold", "cost of sales",
+            "cogs":    ["cost of goods sold", "cost of products sold", "cost of sales",
                         "cost of revenue"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+            "revenue": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "Cost of Revenue Ratio",
         "unit": "%",
@@ -760,7 +761,7 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         # This differs from a two-point ratio that only needs an old/new pair;
         # extraction/codegen must fetch the full per-year series.
         "keywords_zh": ["資本支出佔營收比", "資本支出占營收比", "資本支出營收比"],
-        "keywords_en": ["capex to revenue", "capex as a percentage of revenue",
+        "keywords_en": ["capex ratio", "capex to revenue", "capex as a percentage of revenue",
                          "capex % of revenue", "capital expenditures to revenue",
                          "capex as a % of revenue"],
         # abs(capex): "Purchases of property and equipment" is a cash
@@ -771,8 +772,8 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "required_vars": {
             "capex":   ["capital expenditures", "capital expenditure", "purchases of property",
                         "purchases of property and equipment", "purchases of property, plant and equipment",
-                        "資本支出"],
-            "revenue": ["營業收入", "revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+                        ],
+            "revenue": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
         },
         "result_label": "CapEx to Revenue (period average)",
         "unit": "%",
@@ -863,6 +864,33 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         "unit": "%",
         "period_average": True,
     },
+    "rd_to_revenue": {
+        "keywords_en": ["r&d as a % of revenue", "r&d as a percentage of revenue",
+                         "r&d to revenue", "r&d intensity",
+                         "research and development as a % of revenue",
+                         "research and development as a percentage of revenue"],
+        "formula_expr": "abs(rd_expense) / revenue",
+        "required_vars": {
+            "rd_expense": ["research and development", "research & development", "r&d"],
+            "revenue":    ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "R&D % of Revenue",
+        "unit": "%",
+        "period_average": True,
+    },
+    "sga_to_revenue": {
+        "keywords_en": ["sg&a as a % of revenue", "sg&a as a percentage of revenue",
+                         "sg&a to revenue", "sg&a ratio",
+                         "sg&a as a % of net sales", "sg&a as a percentage of net sales"],
+        "formula_expr": "abs(sga) / revenue",
+        "required_vars": {
+            "sga":     ["selling, general and administrative", "selling general and administrative", "sg&a"],
+            "revenue": ["revenue", "net sales", "net revenue", "total revenue", "sales to customers"],
+        },
+        "result_label": "SG&A % of Revenue",
+        "unit": "%",
+        "period_average": True,
+    },
     "long_term_debt_to_capitalization": {
         "keywords_en": ["long-term debt to capitalization", "long term debt to capitalization",
                          "debt to capitalization ratio", "debt-to-capitalization"],
@@ -901,7 +929,8 @@ def detect_formula(query: str) -> Optional[Dict[str, Any]]:
     # Second pass: English keywords
     for key, entry in FORMULA_LIBRARY.items():
         for kw in entry.get("keywords_en", []):
-            if re.search(r'\b' + re.escape(kw) + r'\b', q_lower):
+            # A trailing plural ("gross margins", "current ratios") names the same metric.
+            if re.search(r'\b' + re.escape(kw) + r's?\b', q_lower):
                 return {**entry, "formula_key": key}
 
     return None

@@ -2,13 +2,13 @@ import json
 import os
 from typing import List, Dict, Any
 from app.tools.table_parser import linearize_financial_table
-from app.tools.hybrid_retriever import HybridFinancialRetriever
+from app.tools.lexical_retriever import LexicalFinancialRetriever
 from app.rag.chunker import chunk_text
 
-class FinancialVectorStoreManager:
+class FinancialCorpusStore:
     def __init__(self, sample_json_path: str = None, load_sample_data: bool = False):
         self.corpus: List[Dict[str, Any]] = []
-        self.retriever: HybridFinancialRetriever = None
+        self.retriever: LexicalFinancialRetriever = None
         self.uploaded_files: List[Dict[str, Any]] = []
         # parent_id -> parent_content (≤1000 chars context)
         self.parent_map: Dict[str, str] = {}
@@ -48,7 +48,7 @@ class FinancialVectorStoreManager:
                         "raw_data": note
                     })
 
-        self.retriever = HybridFinancialRetriever(self.corpus)
+        self.retriever = LexicalFinancialRetriever(self.corpus)
 
     def add_parsed_passages(self, filename: str, company: str, passages: List[Dict[str, Any]]):
         for p in passages:
@@ -62,7 +62,7 @@ class FinancialVectorStoreManager:
             "company": company,
             "passage_count": len(passages)
         })
-        self.retriever = HybridFinancialRetriever(self.corpus)
+        self.retriever = LexicalFinancialRetriever(self.corpus)
 
     def get_parent_content(self, parent_id: str) -> str:
         """Return stored parent_content for a given parent_id, or empty string."""
@@ -88,28 +88,20 @@ class FinancialVectorStoreManager:
             "company": company,
             "passage_count": len(chunks)
         })
-        self.retriever = HybridFinancialRetriever(self.corpus)
+        self.retriever = LexicalFinancialRetriever(self.corpus)
         return doc_id
 
     def search(self, query: str, top_k: int = 5, exclude_ids: List[str] = None,
-               entity: str = None, section: str = None,
+               entity: str = None,
                statement_type_hint: str = None, prefer_narrative: bool = False,
-               is_attribution: bool = False, is_geography: bool = False,
-               is_legal: bool = False, is_acquisition: bool = False,
-               is_segment_comparison: bool = False,
                query_years: List[str] = None) -> List[Dict[str, Any]]:
         if not self.retriever:
             return []
         return self.retriever.search(
             query, top_k=top_k, exclude_ids=exclude_ids,
-            entity=entity, section=section,
+            entity=entity,
             statement_type_hint=statement_type_hint,
             prefer_narrative=prefer_narrative,
-            is_attribution=is_attribution,
-            is_geography=is_geography,
-            is_legal=is_legal,
-            is_acquisition=is_acquisition,
-            is_segment_comparison=is_segment_comparison,
             query_years=query_years,
         )
 

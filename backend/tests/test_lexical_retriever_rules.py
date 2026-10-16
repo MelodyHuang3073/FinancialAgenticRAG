@@ -1,4 +1,4 @@
-"""The Task-4 rule registry (hybrid_retriever.py's RULE_MULTIPLIERS/
+"""The Task-4 rule registry (lexical_retriever.py's RULE_MULTIPLIERS/
 RULE_DESCRIPTIONS, DISABLE_RULE_MULTIPLIERS/_EXCEPT, applied_rules): ablation
 switches and per-result rule reporting. search()'s own rule VALUES and
 trigger conditions are unchanged by this registry (see the comment above
@@ -10,12 +10,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from app.tools.hybrid_retriever import HybridFinancialRetriever, RULE_MULTIPLIERS
+from app.tools.lexical_retriever import LexicalFinancialRetriever, RULE_MULTIPLIERS
 
 
 def _corpus():
     return [
-        # Real "Total X" row shape (see hybrid_retriever._TOTAL_ROW_RE),
+        # Real "Total X" row shape (see lexical_retriever._TOTAL_ROW_RE),
         # so total_row_boost's condition actually fires for it.
         {"id": "a", "content": "Company: ACME | Line Item: Total revenue | 2023: 5,000",
          "company": "ACME", "type": "table_row"},
@@ -28,7 +28,7 @@ def _corpus():
 
 def test_disable_rule_multipliers_ranks_by_bm25_and_overlap_only():
     corpus = _corpus()
-    retriever = HybridFinancialRetriever(corpus)
+    retriever = LexicalFinancialRetriever(corpus)
     retriever.DISABLE_RULE_MULTIPLIERS = True
     query = "revenue growth"
 
@@ -54,14 +54,14 @@ def test_disable_rule_multipliers_ranks_by_bm25_and_overlap_only():
 
 def test_rule_multipliers_active_by_default_changes_ranking_and_reports_applied_rules():
     corpus = _corpus()
-    retriever = HybridFinancialRetriever(corpus)
+    retriever = LexicalFinancialRetriever(corpus)
     # Doc "a" is a real "Total revenue" row sharing a stem with the query,
     # so total_row_boost should fire for it (default: every rule active).
     results = retriever.search("revenue growth", top_k=10)
     doc_a = next(r for r in results if r["id"] == "a")
     assert "total_row_boost" in doc_a["applied_rules"]
 
-    retriever_ablated = HybridFinancialRetriever(corpus)
+    retriever_ablated = LexicalFinancialRetriever(corpus)
     retriever_ablated.DISABLE_RULE_MULTIPLIERS = True
     ablated_results = retriever_ablated.search("revenue growth", top_k=10)
     assert [r["id"] for r in results] != [r["id"] for r in ablated_results] or \
@@ -70,7 +70,7 @@ def test_rule_multipliers_active_by_default_changes_ranking_and_reports_applied_
 
 def test_disable_rule_multipliers_except_keeps_only_named_rules():
     corpus = _corpus()
-    retriever = HybridFinancialRetriever(corpus)
+    retriever = LexicalFinancialRetriever(corpus)
     retriever.DISABLE_RULE_MULTIPLIERS = True
     retriever.DISABLE_RULE_MULTIPLIERS_EXCEPT = {"total_row_boost"}
 
