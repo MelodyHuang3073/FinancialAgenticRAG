@@ -23,133 +23,13 @@ from typing import List, Dict, Any, Optional, Tuple
 from app.tools.sandbox import execute_pot_code
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases, FORMULA_LIBRARY
 from app.tools.table_parser import is_markdown_separator_row
+from app.agent.financial_vocabulary import LINE_ITEM_ALIASES, COMPOSITE_LINE_ITEM_ALIASES
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical item taxonomy  (order matters — first match wins)
 # ─────────────────────────────────────────────────────────────────────────────
-_ITEM_TAXONOMY: List[Tuple[str, List[str]]] = [
-    # Revenue / top line
-    ("revenue",        ["total revenue", "net revenue", "net sales", "revenue",
-                         "sales to customers", "total revenues", "total net revenues",
-                         "net revenues", "total net revenue", "total net sales",
-                         "total sales", "營業收入", "營收"]),
-    # Gross
-    ("gross_profit",   ["gross profit", "gross margin amount", "營業毛利", "毛利"]),
-    # Operating
-    ("cost_of_revenue",["cost of revenue", "cost of goods sold", "cogs",
-                         "cost of sales", "cost of products", "cost of services",
-                         "cost of products sold", "營業成本"]),
-    ("op_expense",     ["operating expenses", "operating expense", "opex", "營業費用"]),
-    ("op_income",      ["operating income", "operating profit", "operating earnings",
-                         "income from operations", "earnings from operations",
-                         "ebit", "營業利益", "營業淨利"]),
-    ("rd_expense",     ["research & development", "r&d", "research and development",
-                         "research and development expense", "research and development expenses",
-                         "研發費用"]),
-    ("sga",            ["sg&a", "selling general", "selling and marketing",
-                         "推銷管理費用", "推銷與管理費用"]),
-    ("restructuring_costs", ["restructuring and impairment charges",
-                              "restructuring charges", "restructuring costs",
-                              "重組費用", "重組成本"]),
-    # Net income / EPS
-    ("net_income_btax",["net income before tax", "income before tax", "pretax income",
-                         "稅前淨利"]),
-    ("income_tax",     ["income tax", "tax expense", "所得稅費用"]),
-    ("net_income",     ["net income", "net profit", "net earnings",
-                         "本期淨利", "淨利"]),
-    ("eps",            ["eps", "earnings per share", "diluted eps", "基本每股盈餘",
-                         "稀釋每股盈餘", "每股盈餘"]),
-    # Already an eps/book_value_per_share formula placeholder -- adding the
-    # canonical itself lets that formula's "try to fill from linearized
-    # table" fallback find a filing's own "Weighted average shares
-    # outstanding" row when the primary extraction path doesn't.
-    ("shares_outstanding", ["shares outstanding", "weighted average shares",
-                             "diluted shares", "common shares outstanding"]),
-    # Balance sheet
-    ("cash",           ["cash and cash equivalents", "cash & equivalents",
-                         "現金及約當現金"]),
-    # Was previously untagged (no canonical at all) despite already being
-    # used as a formula placeholder (cash_ratio's own "short_term_investments"
-    # required_vars alias list) -- this canonical is purely a fallback
-    # source for that formula's "try to fill from linearized table" step
-    # when the primary alias-matched extraction path comes up empty; a
-    # no-op for every filing without a distinct short-term-investments row.
-    ("short_term_investments", ["short-term investments", "short term investments",
-                                 "marketable securities"]),
-    ("total_assets",   ["total assets", "總資產"]),
-    ("current_assets", ["total current assets", "current assets", "流動資產"]),
-    ("inventory",      ["inventory", "inventories", "存貨"]),
-    ("accounts_rec",   ["accounts receivable", "trade receivables", "receivables", "receivable", "應收帳款"]),
-    ("accounts_payable", ["accounts payable", "trade payables", "payables", "payable", "應付帳款"]),
-    ("current_liab",   ["total current liabilities", "current liabilities", "流動負債"]),
-    ("total_liab",     ["total liabilities", "總負債"]),
-    # Same rationale as short_term_investments above -- already a formula
-    # placeholder name (debt_change_yoy's composite fallback,
-    # long_term_debt_to_capitalization) but previously had no direct
-    # taxonomy canonical of its own for a plain "how much long-term debt
-    # does X have" style question to route to.
-    ("long_term_debt", ["long-term debt", "long term debt"]),
-    # Standalone P&L line, distinct from ebit/operating_income -- a plain
-    # "what is X's interest expense" question had no canonical to route to
-    # even though interest_coverage's formula already extracts it under a
-    # differently-scoped alias list of its own.
-    ("interest_expense", ["interest expense"]),
-    ("goodwill",       ["goodwill"]),
-    ("intangible_assets", ["intangible assets", "other intangible assets"]),
-    ("retained_earnings", ["retained earnings", "accumulated deficit"]),
-    # Ensure suffix variants like ", net" are checked early so exact balance-sheet rows
-    # get higher match scores than shorter, incidental footnote rows.
-    # This prevents wrong selection when multiple rows contain the same core phrase but
-    # differ by short suffixes.
-    ("ppe",            ["property, plant and equipment, net", "property, plant, and equipment, net",
-                         "property and equipment, net",
-                         "property, plant and equipment", "property, plant, and equipment",
-                         "property and equipment", "net ppe", "pp&e", "fixed assets",
-                         "不動產、廠房及設備", "固定資產"]),
-    ("equity",         ["total equity", "total shareholders equity",
-                         "stockholders equity", "股東權益總額", "股東權益"]),
-    # Include the specific phrasing variant "provided (used) by" for operating cash
-    # flows so it matches contiguous aliases that other cash-flow groups already catch.
-    # Avoid adding a bare "operations"/"operating activities" alias because those tokens
-    # are too generic and would misclassify unrelated lines.
-    ("operating_cf",   ["operating cash flow", "cash from operations",
-                         "cash provided by operating",
-                         "cash provided (used) by operations",
-                         "cash provided (used) by operating activities",
-                         "營業活動現金"]),
-    # Siblings of operating_cf above -- the OTHER two SEC-standard cash-
-    # flow-statement summary lines, needed for a "which of operations/
-    # investing/financing activities brought in the most cash?" question
-    # (see the dedicated comparison branch in _build_calculation_code).
-    ("investing_cf",   ["cash used in investing", "cash provided by investing",
-                         "investing activities", "投資活動現金"]),
-    ("financing_cf",   ["cash used in financing", "cash provided by financing",
-                         "financing activities", "籌資活動現金"]),
-    ("capex",          ["capital expenditure", "purchases of ppe",
-                         "purchases of property and equipment",
-                         "purchases of property, plant and equipment",
-                         "additions to property and equipment",
-                         "capital spending", "資本支出"]),
-    ("depreciation",   ["depreciation and amortization", "depreciation & amortization",
-                         "depreciation", "amortization", "d&a", "折舊"]),
-    ("fcf",            ["free cash flow", "fcf", "自由現金流"]),
-    # Add a canonical tag for dividend cash outflows so direct-lookup answers can route
-    # to the extracted "Dividends paid" row instead of falling back to generic output.
-    # This fills a missing mapping that prevents returning zero or no direct result.
-    ("dividends_paid", ["dividends paid", "cash dividends paid", "dividends", "股利"]),
-    # Treat dividend-per-share queries as requests for the per-share rate, not the
-    # aggregate cash outflow; provide aliases that explicitly include "per share".
-    # This lets the per-share exclusion filter allow matching per-share rows only for
-    # this canonical, avoiding misrouting to aggregate cash-flow lines.
-    ("dividends_per_share", [
-        "dividends declared per share", "dividends declared per common share",
-        "cash dividends declared per share", "dividends per common share",
-        "dividends per share", "dividend per share",
-        "每股股利", "每股現金股利",
-    ]),
-    # Misc
-    ("data_center_rev",["data center revenue", "data center"]),
-]
+# Filing line-item labels -- see financial_vocabulary.LINE_ITEM_ALIASES.
+_ITEM_TAXONOMY: List[Tuple[str, List[str]]] = list(LINE_ITEM_ALIASES.items())
 
 # Pre-build a flat lookup: lowercase alias → canonical key
 _ALIAS_TO_CANONICAL: Dict[str, str] = {}
@@ -1113,26 +993,7 @@ def _score_row_match(label: str, aliases: List[str]) -> float:
 #: Some variables are reported as multiple sub-items rather than a single line.
 #: Keyed by the placeholder name, each value lists sub-item alias fragments to sum for
 #: the composite concept.
-_COMPOSITE_ITEM_ALIASES: Dict[str, List[str]] = {
-    "inventory": [
-        "raw materials", "raw materials and supplies",
-        "work in process", "work in process and finished goods",
-        "finished goods", "merchandise inventory",
-        "存貨", "原料", "在製品", "製成品",
-    ],
-    # Questions about a filer’s borrowings require that filer’s own borrowings, not a
-    # broader total-liabilities placeholder.
-    # Borrowings may be split across long-term and current portions, so both must be
-    # summed when resolving the borrowing placeholder in multi-year formulas.
-    "total_borrowings_old": [
-        "long-term debt", "current portion of long-term debt",
-        "short-term borrowings", "current maturities of long-term debt",
-    ],
-    "total_borrowings_new": [
-        "long-term debt", "current portion of long-term debt",
-        "short-term borrowings", "current maturities of long-term debt",
-    ],
-}
+_COMPOSITE_ITEM_ALIASES: Dict[str, List[str]] = COMPOSITE_LINE_ITEM_ALIASES
 
 
 def _resolve_composite_item(
@@ -2627,63 +2488,6 @@ def _adjust_quick_ratio_for_prepaid_and_other(
         ]
 
 
-def _capital_intensity_context_lines(
-    resolved: Dict[str, float], extracted_table: Dict[str, Dict],
-) -> List[str]:
-    """Emit supplementary diagnostics for capital_intensity_ratio: compute
-    CAPEX/Revenue, Fixed-Assets/Total-Assets, and ROA alongside the primary
-    assets/revenue ratio without modifying the main result or resolved data.
-    Only includes signals whose underlying rows (capex, ppe, net_income)
-    resolve from the same year as the ratio's total_assets value, so partial
-    outputs are still consistent and more informative than the bare ratio.
-    """
-    if "total_assets" not in resolved or "revenue" not in resolved:
-        return []
-    ta_year = None
-    for v in extracted_table.values():
-        if v.get("canonical") == "total_assets" and v.get("val") == resolved["total_assets"]:
-            ta_year = v.get("year")
-            break
-    if ta_year is None:
-        return []
-
-    def _find(canonical: str) -> Optional[float]:
-        # When both gross and net PP&E rows are present under the same canonical, prefer
-        # the explicit net row for fixed-assets/total-assets calculations.
-        # Net carrying value conventionally defines fixed-assets ratios; do not use the
-        # gross value if net is available.
-        candidates = [
-            v for v in extracted_table.values()
-            if v.get("canonical") == canonical and v.get("year") == ta_year
-        ]
-        if not candidates:
-            return None
-        net_rows = [v for v in candidates if "net" in (v.get("item", "") or "").lower()]
-        gross_rows = [v for v in candidates if "gross" in (v.get("item", "") or "").lower()]
-        pick = net_rows or [v for v in candidates if v not in gross_rows] or candidates
-        return pick[0].get("val")
-
-    capex = _find("capex")
-    ppe = _find("ppe")
-    net_income = _find("net_income")
-
-    out: List[str] = []
-    out.append(
-        "# Supplementary capital-intensity signals (FinanceBench gold answers use "
-        "DIFFERENT conventions per company -- see all of these, not just the ratio above)"
-    )
-    if capex is not None:
-        out.append(f"_capex_to_revenue_pct = round(abs({capex}) / {resolved['revenue']} * 100, 2)")
-        out.append(f"print(f'CapEx/Revenue ({ta_year}): {{_capex_to_revenue_pct}}%')")
-    if ppe is not None:
-        out.append(f"_fixed_assets_to_total_assets_pct = round({ppe} / {resolved['total_assets']} * 100, 2)")
-        out.append(f"print(f'Fixed Assets/Total Assets ({ta_year}): {{_fixed_assets_to_total_assets_pct}}%')")
-    if net_income is not None:
-        out.append(f"_roa_pct = round({net_income} / {resolved['total_assets']} * 100, 2)")
-        out.append(f"print(f'Return on Assets ({ta_year}): {{_roa_pct}}%')")
-    return out
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # PoT code generation: single formula (_gen_formula_code)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2742,9 +2546,7 @@ def _gen_formula_code(
                 [(yr, str(by_year[yr])) for yr in trend_years],
             )
             return lines
-        picked_year = preferred_year if preferred_year in by_year else (
-            query_years[-1] if query_years and query_years[-1] in by_year else None
-        )
+        picked_year = query_years[-1] if query_years and query_years[-1] in by_year else None
         if picked_year is None:
             val, picked_year = direct_series[-1]
         else:
@@ -2771,9 +2573,8 @@ def _gen_formula_code(
 
     # ── Multi-year trend comparison ─────────────────────────────────────────
     # A "did X improve or decline" question needs the SAME ratio computed
-    # for two years to actually answer, not one year's snapshot (same
-    # rationale as _emit_multi_year_ratio, used by the non-formula-library
-    # calculation path for the identical reason). Skipped for is_multi_year
+    # for two years to actually answer, not one year's snapshot (see
+    # _emit_multi_year_ratio). Skipped for is_multi_year
     # formulas (fixed_asset_turnover etc.) — those already compare two
     # years INSIDE a single ratio (average PP&E across years), so a
     # year-over-year comparison of the ratio ITSELF is a different,
@@ -2782,8 +2583,16 @@ def _gen_formula_code(
     # partial/guessed comparison.
     if not is_multi_year and resolved_series:
         trend_years = sorted(set(_with_implied_trend_year(query_years, q_lower)))
+        needed_phs = _extract_formula_placeholders(expr)
+        # A consistency question ("historically consistent", "each year") is
+        # answered by a multi-year series even when it names fewer than two
+        # years: use the latest three years every input has data for.
+        if len(trend_years) < 2 and any(kw in q_lower for kw in _CONSISTENCY_QUERY_KWS):
+            common_years = set.intersection(
+                *({y for _, y in resolved_series.get(ph, [])} for ph in needed_phs)
+            ) if needed_phs else set()
+            trend_years = sorted(common_years)[-3:]
         if len(trend_years) >= 2:
-            needed_phs = _extract_formula_placeholders(expr)
             per_year_vals: Dict[str, Dict[str, float]] = {}
             for yr in trend_years:
                 ph_vals = {}
@@ -2855,9 +2664,6 @@ def _gen_formula_code(
             lines.append(f"years = {abs(int(yr_matches[-1]) - int(yr_matches[0]))}.0")
         else:
             lines.append("years = 1.0")
-
-    if fk == "capital_intensity_ratio":
-        lines.extend(_capital_intensity_context_lines(resolved, extracted_table))
 
     # Some filings report a percent-change line using a short label that prevents alias-
     # substring matching; use a direct percent-change finder for those cases.
@@ -3233,92 +3039,6 @@ def _pick_best_in_group(
     return max(items, key=sort_key)
 
 
-def _find_pair_for_margin(
-    groups: Dict[str, List[Dict]],
-    num_canonical: str,
-    den_canonical: str,
-    preferred_year: Optional[str] = None,
-) -> Tuple[Optional[Dict], Optional[Dict]]:
-    """
-    Find (numerator_var, denominator_var) for a margin calculation.
-    Prefers matching the SAME year, and among same-year candidates prefers
-    genuine total/subtotal rows over sub-items (same scoring as
-    _pick_best_in_group). Falls back to any available year.
-    """
-    nums = groups.get(num_canonical, [])
-    dens = groups.get(den_canonical, [])
-    if not nums or not dens:
-        return None, None
-
-    num_aliases = _CANONICAL_TO_ALIASES.get(num_canonical, [num_canonical])
-    den_aliases = _CANONICAL_TO_ALIASES.get(den_canonical, [den_canonical])
-
-    same_year_pairs = [(n, d) for n in nums for d in dens if n["year"] == d["year"]]
-    if same_year_pairs:
-        def pair_key(pair: Tuple[Dict, Dict]) -> Tuple[int, int, int]:
-            n, d = pair
-            year_match = 1 if preferred_year and n["year"] == preferred_year else 0
-            score = _score_row_match(n["item"], num_aliases) + _score_row_match(d["item"], den_aliases)
-            # Tie-break on label length (shorter = better) when score ties:
-            # _score_row_match's substring tier can't distinguish a genuine close
-            # label from one where the alias is a tiny fragment of a much longer
-            # unrelated label. Prefer shorter labels as they more likely match the
-            # intended statement line; avoid selecting long, qualifying footnote rows.
-            neg_len = -(len(n["item"]) + len(d["item"]))
-            return (year_match, score, neg_len)
-        return max(same_year_pairs, key=pair_key)
-
-    # Fallback: no shared year — best candidate for each side independently
-    n = _pick_best_in_group(nums, num_canonical, preferred_year)
-    d = _pick_best_in_group(dens, den_canonical, preferred_year)
-    return n, d
-
-
-def _pair_for_year(
-    groups: Dict[str, List[Dict]],
-    num_canonical: str,
-    den_canonical: str,
-    year: str,
-) -> Tuple[Optional[Dict], Optional[Dict]]:
-    """Like the general pair-finding routine but restricted to a single year.
-
-    Used when comparing a ratio or margin across years so each year's numerator and
-    denominator are taken only from that year's data.
-    """
-    nums = [x for x in groups.get(num_canonical, []) if x["year"] == year]
-    dens = [x for x in groups.get(den_canonical, []) if x["year"] == year]
-    if not nums or not dens:
-        return None, None
-    return _find_pair_for_margin({num_canonical: nums, den_canonical: dens}, num_canonical, den_canonical, year)
-
-
-# Calculation builder aligned to a financial QA benchmark
-# Provides helpers to construct numeric queries and compute derived metrics for model
-# evaluation
-
-# Maps query intent → (numerator_canonical, denominator_canonical, label)
-_MARGIN_MAP: List[Tuple[List[str], str, str, str]] = [
-    # triggers            numerator_canonical  denominator_canonical  label
-    (["毛利率", "gross margin"],    "gross_profit",  "revenue",    "Gross Margin"),
-    (["op_margin", "operating margin", "營業利益率"],
-                                    "op_income",     "revenue",    "Operating Margin"),
-    (["net margin", "淨利率", "net profit margin"],
-                                    "net_income",    "revenue",    "Net Profit Margin"),
-    (["r&d", "rd", "研發費用佔"],   "rd_expense",    "revenue",    "R&D % of Revenue"),
-    (["sg&a", "sga", "推銷"],       "sga",           "revenue",    "SG&A % of Revenue"),
-    (["d&a", "depreciation and amortization", "depreciation & amortization",
-      "折舊攤銷佔"],                "depreciation",  "revenue",    "D&A % of Revenue"),
-    # Recognize phrasing like "X as a % of revenue" / "X as a percentage of revenue":
-    # This recurring wording indicates a ratio and must trigger the ratio
-    # builder. If not recognized, the fallback returns revenue itself,
-    # leading to numeric-type mismatches where a percentage is expected.
-    (["cost ratio", "cogs ratio", "cogs margin", "cogs %", "cost of goods sold margin",
-      "cost of goods sold %", "cost of goods sold as a % of revenue",
-      "cost of goods sold as a percentage of revenue"],
-                                    "cost_of_revenue","revenue",   "Cost of Revenue Ratio"),
-    (["capex%", "capex ratio"],     "capex",          "revenue",   "CapEx % of Revenue"),
-]
-
 def _synthesize_gross_profit(
     code_lines: List[str],
     groups: Dict[str, List[Dict]],
@@ -3390,13 +3110,112 @@ def _synthesize_gross_profit(
     return groups
 
 
-_ROE_TRIGGERS = ["roe", "return on equity"]
-_ROA_TRIGGERS = ["roa", "return on assets"]
-_CURRENT_RATIO_TRIGGERS = [
-    "current ratio", "working capital ratio", "working capital",
-    "流動比率", "營運資金比率",
-]
-_QUICK_RATIO_TRIGGERS = ["quick ratio", "acid", "速動"]
+#: "(x_old + x_new) / 2" -- an average-balance term in a library formula.
+_AVERAGE_BALANCE_RE = re.compile(r"\(\s*(\w+)_old\s*\+\s*\1_new\s*\)\s*/\s*2")
+
+#: A consistency question ("historically consistent", "each year") needs a
+#: multi-year series even when the question names fewer than two years.
+_CONSISTENCY_QUERY_KWS = ("historically consistent", "not fluctuating", "each year", "every year")
+
+
+def _placeholder_line_item(placeholder: str, formula_entry: Dict[str, Any]) -> Optional[str]:
+    """The table-extraction canonical line item a formula placeholder refers
+    to: the placeholder's own name when it is a canonical, otherwise the
+    canonical whose filing labels its required_vars aliases most often name."""
+    base = re.sub(r"_(old|new)$", "", placeholder)
+    if base in LINE_ITEM_ALIASES:
+        return base
+    aliases = (formula_entry.get("required_vars") or {}).get(placeholder) or []
+    votes: Dict[str, int] = {}
+    for alias in aliases:
+        canonical = _ALIAS_TO_CANONICAL.get(alias.lower())
+        if canonical:
+            votes[canonical] = votes.get(canonical, 0) + 1
+    return max(votes, key=votes.get) if votes else None
+
+
+def _library_formula_from_table(
+    code_lines: List[str],
+    formula_entry: Dict[str, Any],
+    groups: Dict[str, List[Dict]],
+    extracted_table: Dict[str, Dict],
+    preferred_year: Optional[str],
+    query_years: Optional[List[str]],
+    q_lower: str,
+    degraded_notes: Optional[List[str]],
+) -> bool:
+    """Run the question's library formula on values from the generic table
+    extraction, for when formula-guided extraction resolved nothing. The
+    formula definition and the code generator (_gen_formula_code) are the
+    same ones PATH 1 uses, so a metric has exactly one definition whichever
+    extraction found its inputs.
+
+    Values come from one target year (the latest year the question names, or
+    else the latest year every current-period input shares); an "_old" input
+    takes the closest earlier year. The one approximation allowed is the
+    general average-balance convention: when only a single balance exists for
+    a "(x_old + x_new) / 2" term, the year-end balance stands in for the
+    average, and that is stated as a limitation of the result.
+    """
+    expr = formula_entry.get("formula_expr", "")
+    placeholders = _extract_formula_placeholders(expr)
+    if not placeholders:
+        return False
+    canonical = {ph: _placeholder_line_item(ph, formula_entry) for ph in placeholders}
+    if any(c is None for c in canonical.values()):
+        return False
+    if "gross_profit" in canonical.values():
+        groups = _synthesize_gross_profit(code_lines, groups, degraded_notes)
+
+    def years_of(ph: str) -> set:
+        return {r["year"] for r in groups.get(canonical[ph], [])}
+
+    def value_in(ph: str, year: str) -> float:
+        rows = [r for r in groups.get(canonical[ph], []) if r["year"] == year]
+        return _pick_best_in_group(rows, canonical[ph])["val"]
+
+    current = [ph for ph in placeholders if not ph.endswith("_old")]
+    shared_years = set.intersection(*(years_of(ph) for ph in current)) if current else set()
+    if not shared_years:
+        return False
+    target = preferred_year if preferred_year in shared_years else max(shared_years)
+
+    resolved: Dict[str, float] = {}
+    averaged_from_one_balance: List[str] = []
+    for ph in sorted(placeholders):
+        if not ph.endswith("_old"):
+            resolved[ph] = value_in(ph, target)
+            continue
+        earlier = sorted(y for y in years_of(ph) if y < target)
+        if earlier:
+            resolved[ph] = value_in(ph, earlier[-1])
+            continue
+        base = ph[: -len("_old")]
+        if base not in _AVERAGE_BALANCE_RE.findall(expr) or f"{base}_new" not in placeholders:
+            return False
+        resolved[ph] = value_in(f"{base}_new", target)
+        averaged_from_one_balance.append(base)
+
+    resolved_series: Dict[str, List[Tuple[float, str]]] = {}
+    for ph in current:
+        if ph.endswith("_new"):
+            continue
+        resolved_series[ph] = [(value_in(ph, y), y) for y in sorted(years_of(ph))]
+
+    lines = _gen_formula_code(
+        formula_entry, resolved, extracted_table, resolved_series,
+        None, query_years, q_lower,
+    )
+    if not lines:
+        return False
+    code_lines.extend(lines)
+    if averaged_from_one_balance and degraded_notes is not None:
+        degraded_notes.append(
+            f"Only one balance was available for {', '.join(averaged_from_one_balance)}, "
+            f"so the {target} year-end balance was used in place of the two-year "
+            "average balance the metric's definition calls for."
+        )
+    return True
 
 
 def _emit_multi_year_ratio(
@@ -3464,15 +3283,18 @@ def _build_calculation_code(
     degraded_notes: Optional[List[str]] = None,
     detected_unit: Optional[List[str]] = None,
     evidence_list: Optional[List[Dict[str, Any]]] = None,
+    formula_entry: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Build the calculation section of the PoT code.
-    `degraded_notes`, if given, is appended to whenever this function
-    silently substitutes a DIFFERENT formula than the one actually asked
-    about (e.g. Current Ratio in place of Quick Ratio, because no
-    inventory data — direct or composite — could be found) — never
+    `degraded_notes`, if given, is appended to whenever the computed value
+    is an approximation of the metric asked about (a derived gross profit,
+    a year-end balance standing in for an average balance) — never
     overwritten by the caller, only appended to, since generate_and_execute
     passes the same list across the extracted_table AND free-text attempts.
+    `formula_entry` is the question's library (or inline-defined) formula;
+    when given, its single definition is applied to the table-extracted
+    values (see _library_formula_from_table).
     Returns True if a calculation was successfully generated.
     """
     groups = _group_by_canonical(extracted_table)
@@ -3583,170 +3405,14 @@ def _build_calculation_code(
             )
             return True
 
-    # ── ROE ───────────────────────────────────────────────────────────────────
-    # Bare decimal ratio (e.g. "-0.02"), not a "-2.00%" percentage — see
-    # the ROA comment just below for why (same fix, same reasoning).
-    if _kw_match(_ROE_TRIGGERS, q_lower):
-        n, d = _find_pair_for_margin(groups, "net_income", "equity", preferred_year)
-        if n and d:
-            code_lines.append(f"# ROE = Net Income / Equity")
-            code_lines.append(f"result = round({n['code_key']} / {d['code_key']}, 2)")
-            yr = n['year']
-            code_lines.append(f"print(f'Return on Equity (ROE) ({yr}): {{result}}')")
-            return True
-
-    # Return ROA as a bare decimal ratio (no ×100) to keep consistent with other ratio
-    # outputs in this codebase; avoid applying percentage scaling that would produce a
-    # 100x mismatch versus ratio conventions.
-    if _kw_match(_ROA_TRIGGERS, q_lower):
-        n, d = _find_pair_for_margin(groups, "net_income", "total_assets", preferred_year)
-        if n and d:
-            code_lines.append(f"# ROA = Net Income / Total Assets")
-            code_lines.append(f"result = round({n['code_key']} / {d['code_key']}, 2)")
-            yr = n['year']
-            code_lines.append(f"print(f'Return on Assets (ROA) ({yr}): {{result}}')")
-            return True
-
-    # ── Current Ratio ─────────────────────────────────────────────────────────
-    if _kw_match(_CURRENT_RATIO_TRIGGERS, q_lower):
-        ca_list = groups.get("current_assets", [])
-        cl_list = groups.get("current_liab", [])
-        if ca_list and cl_list:
-            distinct_years = sorted(set(query_years or []))
-            if len(distinct_years) >= 2:
-                year_exprs = []
-                for yr in distinct_years:
-                    ca_yr = [x for x in ca_list if x["year"] == yr]
-                    cl_yr = [x for x in cl_list if x["year"] == yr]
-                    if not ca_yr or not cl_yr:
-                        continue
-                    ca = _pick_best_in_group(ca_yr, "current_assets")
-                    cl = _pick_best_in_group(cl_yr, "current_liab")
-                    year_exprs.append((yr, f"{ca['code_key']} / {cl['code_key']}"))
-                if len(year_exprs) >= 2:
-                    code_lines.append("# Current Ratio = Current Assets / Current Liabilities")
-                    _emit_multi_year_ratio(code_lines, "Current Ratio", "", year_exprs)
-                    return True
-            ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
-            cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
-            code_lines.append(f"# Current Ratio = Current Assets / Current Liabilities")
-            code_lines.append(f"result = round({ca['code_key']} / {cl['code_key']}, 4)")
-            yr = ca['year']
-            code_lines.append(f"print(f'Current Ratio ({yr}): {{result}}')")
-            return True
-
-    # ── Quick Ratio ───────────────────────────────────────────────────────────
-    if _kw_match(_QUICK_RATIO_TRIGGERS, q_lower):
-        ca_list = groups.get("current_assets", [])
-        inv_list = groups.get("inventory", [])
-        cl_list = groups.get("current_liab", [])
-        if ca_list and cl_list:
-            distinct_years = sorted(set(query_years or []))
-            if len(distinct_years) >= 2:
-                year_exprs = []
-                any_degraded = False
-                for yr in distinct_years:
-                    ca_yr = [x for x in ca_list if x["year"] == yr]
-                    cl_yr = [x for x in cl_list if x["year"] == yr]
-                    if not ca_yr or not cl_yr:
-                        continue
-                    ca = _pick_best_in_group(ca_yr, "current_assets")
-                    cl = _pick_best_in_group(cl_yr, "current_liab")
-                    inv_yr = [x for x in inv_list if x["year"] == yr]
-                    if inv_yr:
-                        inv = _pick_best_in_group(inv_yr, "inventory")
-                        year_exprs.append((yr, f"({ca['code_key']} - {inv['code_key']}) / {cl['code_key']}"))
-                    else:
-                        year_exprs.append((yr, f"{ca['code_key']} / {cl['code_key']}"))
-                        any_degraded = True
-                if len(year_exprs) >= 2:
-                    label = "Quick Ratio (approx, no inventory data)" if any_degraded else "Quick Ratio"
-                    code_lines.append("# Quick Ratio = (Current Assets - Inventory) / Current Liabilities")
-                    _emit_multi_year_ratio(code_lines, label, "", year_exprs)
-                    if any_degraded and degraded_notes is not None:
-                        degraded_notes.append(
-                            "Quick Ratio could not be computed for at least one year (no "
-                            "inventory line item found, even after trying known sub-item "
-                            "breakdowns like raw materials + work in process) -- the value(s) "
-                            "shown use Current Ratio (Current Assets / Current Liabilities) as "
-                            "an approximation, which is NOT the true Quick Ratio and will read "
-                            "higher than the real figure."
-                        )
-                    return True
-            ca = _pick_best_in_group(ca_list, "current_assets", preferred_year)
-            cl = _pick_best_in_group(cl_list, "current_liab", ca["year"])
-            if inv_list:
-                inv = _pick_best_in_group(inv_list, "inventory", ca["year"])
-                code_lines.append(f"# Quick Ratio = (Current Assets - Inventory) / Current Liabilities")
-                code_lines.append(f"result = round(({ca['code_key']} - {inv['code_key']}) / {cl['code_key']}, 4)")
-            else:
-                code_lines.append(f"# Quick Ratio (approx, no inventory data) = CA / CL")
-                code_lines.append(f"result = round({ca['code_key']} / {cl['code_key']}, 4)")
-                if degraded_notes is not None:
-                    degraded_notes.append(
-                        "Quick Ratio could not be computed (no inventory line item found, "
-                        "even after trying known sub-item breakdowns like raw materials + "
-                        "work in process) -- the value shown uses Current Ratio (Current "
-                        "Assets / Current Liabilities) as an approximation, which is NOT the "
-                        "true Quick Ratio and will read higher than the real figure."
-                    )
-            yr = ca['year']
-            code_lines.append(f"print(f'Quick Ratio ({yr}): {{result}}')")
-            return True
-
-    # ── Margin / Ratio ────────────────────────────────────────────────────────
-    if _kw_match(["毛利率", "gross margin"], q_lower):
-        groups = _synthesize_gross_profit(code_lines, groups, degraded_notes)
-    # When the question asks for an X-year average of a margin, emit a single blended
-    # number (mean of each year's ratio) rather than a single-year value; only use
-    # multi-year-last-year semantics for explicit trend/delta queries.
-    wants_average = any(kw in q_lower for kw in ("average", "avg", "平均"))
-    # Check multi-year consistency by using every comparative year the filing tabulates
-    # (typically a multi-year income statement), not a single prior-year snapshot.
-    # If the query implies a pattern but query_years yields fewer than two distinct
-    # years, do not return a single-year ratio; require the full multi-year series to
-    # evaluate consistency.
-    wants_consistency_check = any(
-        kw in q_lower for kw in ("historically consistent", "not fluctuating", "each year", "every year")
-    )
-    for triggers, num_c, den_c, label in _MARGIN_MAP:
-        if _kw_match(triggers, q_lower):
-            distinct_years = sorted(set(query_years or []))
-            if len(distinct_years) < 2 and wants_consistency_check:
-                num_years = {v["year"] for v in groups.get(num_c, [])}
-                den_years = {v["year"] for v in groups.get(den_c, [])}
-                distinct_years = sorted(num_years & den_years)[-3:]
-            if len(distinct_years) >= 2:
-                year_exprs = []
-                for yr in distinct_years:
-                    n_yr, d_yr = _pair_for_year(groups, num_c, den_c, yr)
-                    if n_yr and d_yr:
-                        year_exprs.append((yr, f"margin({n_yr['code_key']}, {d_yr['code_key']})"))
-                if len(year_exprs) >= 2:
-                    code_lines.append(f"# {label} = {num_c} / {den_c}")
-                    if wants_average:
-                        var_names = []
-                        for yr, expr in year_exprs:
-                            var = f"{_sanitize(label)}_{yr}"
-                            code_lines.append(f"{var} = round({expr}, 4)")
-                            code_lines.append(f"print(f'{label} ({yr}): {{{var}}}%')")
-                            var_names.append(var)
-                        code_lines.append(
-                            f"result = round(({' + '.join(var_names)}) / {len(var_names)}, 2)"
-                        )
-                        code_lines.append(
-                            f"print(f'{label} ({len(var_names)}-yr avg): {{result}}%')"
-                        )
-                    else:
-                        _emit_multi_year_ratio(code_lines, label, "%", year_exprs)
-                    return True
-            n, d = _find_pair_for_margin(groups, num_c, den_c, preferred_year)
-            if n and d:
-                code_lines.append(f"# {label} = {num_c} / {den_c}")
-                code_lines.append(f"result = round(margin({n['code_key']}, {d['code_key']}), 2)")
-                yr = n['year']
-                code_lines.append(f"print(f'{label} ({yr}): {{result}}%')")
-                return True
+    # ── Library formula on table-extracted values ─────────────────────────────
+    # The question's metric keeps the one definition it has in FORMULA_LIBRARY;
+    # only where its input values come from differs from PATH 1.
+    if formula_entry is not None and _library_formula_from_table(
+        code_lines, formula_entry, groups, extracted_table,
+        preferred_year, query_years, q_lower, degraded_notes,
+    ):
+        return True
 
     # ── Direct lookup ─────────────────────────────────────────────────────────
     # Pick the var that best matches the query intent. Uses the same
@@ -3929,6 +3595,12 @@ def _check_ratio_plausibility(
 # Main Reasoner
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: Default for generate_and_execute's library_formula_entry: "the caller made
+#: no formula decision, match the query here" (distinct from None, which is
+#: the caller's decision that no library formula applies).
+_MATCH_FROM_QUERY = object()
+
+
 class ProgramOfThoughtReasoner:
     """A financial reasoning component that generates intermediate reasoning steps aligned
     to a benchmarking style.
@@ -3938,8 +3610,19 @@ class ProgramOfThoughtReasoner:
 
     def generate_and_execute(
         self, query: str, evidence_list: List[Dict[str, Any]], entity: str = "",
+        library_formula_entry: Any = _MATCH_FROM_QUERY,
         dynamic_formula_entry: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Compute the question's numeric answer from `evidence_list`.
+
+        library_formula_entry: the FORMULA_LIBRARY match (or None) the
+        orchestrator already made for this question -- formula
+        identification happens once, there, and this module receives the
+        decision. Standalone callers (tests, tools) may omit it, in which
+        case the query is matched here.
+        dynamic_formula_entry: a formula the question defines inline,
+        extracted by the decomposer; used only when the library has none.
+        """
         q_lower = query.lower()
 
         # For "which of operations, investing, financing brought in the most/least cash"
@@ -3989,7 +3672,10 @@ class ProgramOfThoughtReasoner:
         preferred_year = query_years[-1] if query_years else None  # latest year mentioned
 
         # ── Step 1: Detect formula intent ────────────────────────────────────
-        formula_entry = detect_formula(query)
+        formula_entry = (
+            detect_formula(query) if library_formula_entry is _MATCH_FROM_QUERY
+            else library_formula_entry
+        )
         formula_entry = _apply_inventory_turnover_convention_override(formula_entry, entity, evidence_list)
         # Fallback only: the static library didn't recognize this metric at
         # all (not merely "matched but couldn't resolve a value" -- that
@@ -4143,6 +3829,7 @@ class ProgramOfThoughtReasoner:
                 success_calc = _build_calculation_code(
                     code_lines, extracted_table, query, q_lower, preferred_year, query_years,
                     degraded_notes, detected_unit, evidence_list,
+                    _originally_matched_formula_entry,
                 )
                 if not success_calc:
                     # When evidence contains structured tables but none match the
@@ -4169,6 +3856,7 @@ class ProgramOfThoughtReasoner:
                     success_calc = _build_calculation_code(
                         code_lines, free_text_extracted, query, q_lower, preferred_year, query_years,
                         degraded_notes, detected_unit, evidence_list,
+                    _originally_matched_formula_entry,
                     )
                     if not success_calc:
                         # Same fix as the extracted_table branch above: no

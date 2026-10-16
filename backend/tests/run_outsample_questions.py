@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from test_financebench_qa import _check_numeric, _check_contains_facts
 from app.rag.parser import FinancialFileParser
-from app.rag.vector_store import FinancialVectorStoreManager
+from app.rag.corpus_store import FinancialCorpusStore
 from app.agent.orchestrator import FinAgentRAGOrchestrator
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "financebench_outsample_pdfs")
@@ -55,8 +55,8 @@ def _cache_is_fresh() -> bool:
     return True
 
 
-def _build_indexed_store() -> FinancialVectorStoreManager:
-    vs = FinancialVectorStoreManager()
+def _build_indexed_store() -> FinancialCorpusStore:
+    vs = FinancialCorpusStore()
     if _cache_is_fresh():
         print(f"  loading cached corpus from {CACHE_PATH}")
         with open(CACHE_PATH, "rb") as f:
@@ -64,8 +64,8 @@ def _build_indexed_store() -> FinancialVectorStoreManager:
         vs.corpus = cached["corpus"]
         vs.parent_map = cached["parent_map"]
         vs.uploaded_files = cached["uploaded_files"]
-        from app.tools.hybrid_retriever import HybridFinancialRetriever
-        vs.retriever = HybridFinancialRetriever(vs.corpus)
+        from app.tools.lexical_retriever import LexicalFinancialRetriever
+        vs.retriever = LexicalFinancialRetriever(vs.corpus)
         for uf in vs.uploaded_files:
             print(f"  loaded {uf['filename']} ({uf['company']}): {uf['passage_count']} passages")
         return vs
@@ -95,7 +95,7 @@ def main():
     vs = _build_indexed_store()
     print(f"Indexing took {time.time() - t0:.1f}s, total passages: {len(vs.corpus)}")
 
-    orchestrator = FinAgentRAGOrchestrator(vector_store=vs)
+    orchestrator = FinAgentRAGOrchestrator(corpus_store=vs)
 
     results = []
     for i, qa in enumerate(qa_pairs, 1):

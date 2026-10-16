@@ -8,7 +8,7 @@ _PLACEHOLDER_SUFFIX_RE = re.compile(r'_(new|old)$')
 
 #: Boilerplate/filler tokens stripped before comparing a document's company
 #: metadata against a target entity string -- same normalization shape as
-#: hybrid_retriever.HybridFinancialRetriever._normalise_company, kept as an
+#: lexical_retriever.LexicalFinancialRetriever._normalise_company, kept as an
 #: independent, self-contained copy here (deliberately not imported) so the
 #: verifier has no dependency on the retriever module.
 _COMPANY_FILLER_RE = re.compile(r'(?:19|20)\d{2}(?:q[1-4])?$|^10k$|^10q$', re.IGNORECASE)

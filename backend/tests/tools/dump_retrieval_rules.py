@@ -1,4 +1,4 @@
-"""Dumps every retrieval re-weighting rule hybrid_retriever.HybridFinancialRetriever
+"""Dumps every retrieval re-weighting rule lexical_retriever.LexicalFinancialRetriever
 applies (name, multiplier, trigger condition) as a Markdown table, for the
 paper's methodology appendix. Reads RULE_MULTIPLIERS/RULE_DESCRIPTIONS
 directly -- values/descriptions can never drift out of sync with the actual
@@ -13,19 +13,14 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from app.tools.hybrid_retriever import RULE_MULTIPLIERS, RULE_DESCRIPTIONS
+from app.tools.lexical_retriever import RULE_MULTIPLIERS, RULE_DESCRIPTIONS
 
 #: Rules whose value is scaling-formula/method-based rather than a flat
-#: constant in RULE_MULTIPLIERS -- see hybrid_retriever.py's
+#: constant in RULE_MULTIPLIERS -- see lexical_retriever.py's
 #: RULE_MULTIPLIERS docstring for why.
 _NON_FLAT_RULES = {
     "company_match": "0.05x - 2.0x (scoring method, see _company_match_score)",
     "line_item_match": "1.0x or 1.5x (scoring method, see _line_item_match_score)",
-    "geographic_region_density": (
-        f"{RULE_MULTIPLIERS['geographic_region_density_base']}x - "
-        f"{RULE_MULTIPLIERS['geographic_region_density_cap']}x "
-        f"(scales with region count, see RULE_MULTIPLIERS['geographic_region_density_*'])"
-    ),
 }
 
 
@@ -43,7 +38,7 @@ def build_markdown() -> str:
     lines = [
         "# Retrieval re-weighting rules",
         "",
-        "Every rule `hybrid_retriever.HybridFinancialRetriever.search()` can apply to a "
+        "Every rule `lexical_retriever.LexicalFinancialRetriever.search()` can apply to a "
         "candidate passage's score, generated from `RULE_MULTIPLIERS`/`RULE_DESCRIPTIONS` "
         "so this table can never drift out of sync with the implementation.",
         "",
@@ -54,14 +49,12 @@ def build_markdown() -> str:
         lines.append(f"| `{name}` | {_value_display(name)} | {RULE_DESCRIPTIONS[name]} |")
     lines.append("")
     lines.append(
-        "Two pairs are mutually exclusive (if/elif, only the first matching one in each "
-        "pair applies): `geographic_section_boost`/`geographic_region_density`, and "
-        "`year_match_boost`/`recent_year_mismatch_penalty`. Every other rule is "
-        "independent and stacks multiplicatively with any other rule that also fires."
+        "Every rule is independent and stacks multiplicatively with any other rule "
+        "that also fires."
     )
     lines.append("")
     lines.append(
-        "Set `DISABLE_RULE_MULTIPLIERS = True` on a `HybridFinancialRetriever` instance "
+        "Set `DISABLE_RULE_MULTIPLIERS = True` on a `LexicalFinancialRetriever` instance "
         "(or the class) to ablate every rule at once (ranking driven purely by "
         "`bm25 * 0.7 + overlap_count * 0.3`), or additionally set "
         "`DISABLE_RULE_MULTIPLIERS_EXCEPT = {\"rule_name\", ...}` to keep only specific "

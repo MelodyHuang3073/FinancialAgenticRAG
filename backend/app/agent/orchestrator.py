@@ -3,7 +3,7 @@
 Main flow:
   1. question classification
   2. multi-step decomposition
-  3. hybrid retrieval (vector + sparse)
+  3. lexical retrieval (BM25 + rule-based re-weighting)
   4. chain-of-thought style reasoning in a sandbox
   5. verification passes and iterative refinement
   6. final answer synthesis via LLM client
@@ -12,7 +12,7 @@ Main flow:
 import re
 from typing import Dict, Any, List, Optional
 
-from app.rag.vector_store import FinancialVectorStoreManager
+from app.rag.corpus_store import FinancialCorpusStore
 from app.agent.question_classifier import FinanceBenchClassifier
 from app.agent.decomposer import QueryDecomposer
 from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical
@@ -23,35 +23,7 @@ from app.agent.llm_client import (
 )
 from app.agent.evidence_selection import select_with_quota
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
-from app.tools.hybrid_retriever import (
-    is_attribution_query, is_geography_query, is_legal_query, is_acquisition_query,
-    is_segment_comparison_query,
-)
-
-
-#: llm_client.py's own "CRITICAL: you MUST quote this exact PoT result
-#: number" instruction is worded strongly enough that the model sometimes
-#: prints the bare result_value a SECOND time, as its own trailing
-#: paragraph, in addition to already using it correctly in prose -- e.g.
-#: "...raised guidance by **1 percentage point** (from 8% to 9%).\n\n1" or
-#: "...paid a dividend of **$0.55 per share**.\n\nNumeric answer: **0.55**".
-#: The number and prose sentence are both already correct; only this
-#: redundant echo is wrong, so it is safe to strip mechanically -- but only
-#: when it's the LAST paragraph, contains NOTHING but a number (optionally
-#: bold-marked, optionally "Numeric answer:"-prefixed), and the answer has
-#: other substantive content before it (never strips a genuinely one-line
-#: numeric-only answer).
-_TRAILING_BARE_NUMBER_RE = re.compile(
-    r'^\s*(?:numeric\s+answer:?\s*)?\*{0,2}-?\$?[\d,]*\.?\d+\*{0,2}%?\s*$',
-    re.IGNORECASE,
-)
-
-
-def _strip_trailing_bare_number(answer: str) -> str:
-    paragraphs = re.split(r'\n\s*\n', answer.strip())
-    if len(paragraphs) >= 2 and _TRAILING_BARE_NUMBER_RE.match(paragraphs[-1]):
-        return '\n\n'.join(paragraphs[:-1]).strip()
-    return answer
+from app.tools.lexical_retriever import is_attribution_query
 
 
 class FinAgentRAGOrchestrator:
@@ -71,8 +43,8 @@ class FinAgentRAGOrchestrator:
     # retrieved earlier, so ensure final limit preserves diversity across subqueries.
     CONTEXT_CHUNK_LIMIT = 30
 
-    def __init__(self, vector_store: FinancialVectorStoreManager):
-        self.vector_store = vector_store
+    def __init__(self, corpus_store: FinancialCorpusStore):
+        self.corpus_store = corpus_store
         self.classifier = FinanceBenchClassifier()
         self.decomposer = QueryDecomposer()
         self.pot_reasoner = ProgramOfThoughtReasoner()
@@ -101,7 +73,7 @@ class FinAgentRAGOrchestrator:
         """
         parent_id = hit.get("parent_id", "")
         parent_content = hit.get("parent_content") or (
-            self.vector_store.get_parent_content(parent_id) if parent_id else ""
+            self.corpus_store.get_parent_content(parent_id) if parent_id else ""
         )
         info = {
             "id": hit.get("id", ""),
@@ -146,7 +118,7 @@ class FinAgentRAGOrchestrator:
         q_years = set(_re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", query))
         base = _base(resolved)
         cands = []
-        for uf in self.vector_store.uploaded_files:
+        for uf in self.corpus_store.uploaded_files:
             name = uf.get("company", "")
             if not name or name == resolved or _base(name) != base:
                 continue
@@ -182,12 +154,6 @@ class FinAgentRAGOrchestrator:
         answer_mode = classification["answer_mode"]
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
-        # "Which segment had the highest/lowest X" stays NUMERIC (see
-        # hybrid_retriever.is_segment_comparison_query's docstring) so this
-        # is computed here, not alongside is_attribution/is_geography/
-        # is_legal below (those are only ever used on the non-numeric
-        # branch further down).
-        is_segment_comparison = is_segment_comparison_query(query)
 
         # Entity alignment: match extracted entity against corpus company names.
         # Keep a cleaned human-readable entity for query text and use the raw filename-
@@ -201,7 +167,7 @@ class FinAgentRAGOrchestrator:
             clean_entity = self._readable_company_name(classification["entity"], query) or clean_entity
 
         # statement_type_hint: from question_classifier (income_statement / balance_sheet /
-        # cash_flow / notes).  Used for 1.5x boost in hybrid_retriever.
+        # cash_flow / notes).  Used for 1.5x boost in lexical_retriever.
         statement_type_hint = classification.get("statement_type_hint") or None
         if statement_type_hint == "unknown":
             statement_type_hint = None
@@ -234,7 +200,12 @@ class FinAgentRAGOrchestrator:
         # sheer sampling variance). Deriving sub-queries from the
         # formula's own aliases guarantees retrieval searches for
         # exactly what extraction will later look for, deterministically.
-        formula_entry = detect_formula(query) if answer_mode == "NUMERIC" else None
+        # Formula identification happens once per question, here: the same
+        # library match drives retrieval sub-queries (numeric and non-numeric
+        # paths alike) and is handed to the PoT module, which does not
+        # re-match the query itself.
+        library_formula = detect_formula(query)
+        formula_entry = library_formula if answer_mode == "NUMERIC" else None
         # If a question asks whether a metric is improving/declining as of year Y, treat
         # it as implying a comparison to year Y-1.
         # Without this implied prior-year fetch, retrieval may lack the earlier-year
@@ -247,8 +218,8 @@ class FinAgentRAGOrchestrator:
         # formula_entry above already matched (the registered library always
         # takes precedence and is never second-guessed by this) or the
         # question simply doesn't define one; passed down to
-        # pot_reasoner.generate_and_execute() as a same-shaped fallback for
-        # when ITS OWN detect_formula() call also finds nothing registered.
+        # pot_reasoner.generate_and_execute() as a same-shaped fallback used
+        # only when library_formula is None.
         dynamic_formula_entry = None
         if formula_entry:
             sub_questions = self._build_formula_subquestions(
@@ -426,12 +397,11 @@ class FinAgentRAGOrchestrator:
                             if sub_q.get("source") == "narrative_topic"
                             else self.RETRIEVAL_TOP_K
                         )
-                        hits = self.vector_store.search(
+                        hits = self.corpus_store.search(
                             step_query, top_k=step_top_k,
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=effective_hint,
-                            is_segment_comparison=is_segment_comparison,
                             query_years=classification.get("years"),
                         )
                         hits = self._tag_subquery(
@@ -468,13 +438,12 @@ class FinAgentRAGOrchestrator:
                     # ── Fallback: if zero evidence collected, use classifier retrieval_queries ──
                     if not evidence_buffer:
                         for fb_idx, sq in enumerate(classification["retrieval_queries"]):
-                            hits = self.vector_store.search(
+                            hits = self.corpus_store.search(
                                 sq, top_k=self.RETRIEVAL_TOP_K,
                                 exclude_ids=list(retrieved_ids),
                                 entity=classification.get("entity"),
                                 statement_type_hint=statement_type_hint,  # Step 4
-                                is_segment_comparison=is_segment_comparison,
-                                query_years=classification.get("years"),
+                                    query_years=classification.get("years"),
                             )
                             for hit in self._tag_subquery(
                                 100 + fb_idx,
@@ -489,12 +458,11 @@ class FinAgentRAGOrchestrator:
                 else:
                     # ── Subsequent iterations: use refined query ──
                     new_hits = self._deduplicate_hits(
-                        self.vector_store.search(
+                        self.corpus_store.search(
                             current_query, top_k=self.RETRIEVAL_TOP_K,
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=statement_type_hint,  # Step 4
-                            is_segment_comparison=is_segment_comparison,
                             query_years=classification.get("years"),
                         ),
                         entity=classification.get("entity"),
@@ -515,10 +483,11 @@ class FinAgentRAGOrchestrator:
                     ev_enriched = dict(ev)
                     parent_id = ev.get("parent_id")
                     if parent_id and not ev_enriched.get("parent_content"):
-                        ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
+                        ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
                     context_window.append(ev_enriched)
                 pot_res = self.pot_reasoner.generate_and_execute(
                     query, context_window, entity=classification["entity"],
+                    library_formula_entry=library_formula,
                     dynamic_formula_entry=dynamic_formula_entry,
                 )
                 iter_trace["pot_code"] = pot_res["code"]
@@ -565,12 +534,11 @@ class FinAgentRAGOrchestrator:
                     ]
                     targeted_queries = []
                     for step in targeted_steps:
-                        hits = self.vector_store.search(
+                        hits = self.corpus_store.search(
                             step["query"], top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=statement_type_hint,
-                            is_segment_comparison=is_segment_comparison,
                             query_years=classification.get("years"),
                         )
                         hits = self._tag_subquery(
@@ -617,13 +585,13 @@ class FinAgentRAGOrchestrator:
             # required variables.
             # The raw question text often omits the derived metric's component line-item
             # names.
-            non_numeric_formula = detect_formula(query)
+            non_numeric_formula = library_formula
             # Evaluated against the ORIGINAL question, not each individual
             # sub-query below (a keyword-stuffed sub-query that just
             # concatenates the entity name with metric keywords never
             # repeats "what drove" phrasing even when the overall question
             # plainly is an attribution question) -- see
-            # hybrid_retriever.is_attribution_query's docstring.
+            # lexical_retriever.is_attribution_query's docstring.
             is_attribution = is_attribution_query(query)
             # Single combined signal, computed once up front: do we need prose/
             # narrative evidence at all for this question? True whenever there's no
@@ -662,12 +630,9 @@ class FinAgentRAGOrchestrator:
             # construction, instead of two separately-triggered insertions.
             if prefer_narrative and query not in search_queries:
                 search_queries.append(query)
-            is_geography = is_geography_query(query)
-            is_legal = is_legal_query(query)
-            is_acquisition = is_acquisition_query(query)
             new_hits = []
             for sq_idx, sq in enumerate(search_queries):
-                new_hits.extend(self._tag_subquery(sq_idx, self.vector_store.search(
+                new_hits.extend(self._tag_subquery(sq_idx, self.corpus_store.search(
                     # This retrieval block runs for non-numeric answer modes and always
                     # uses the wider narrative top_k.
                     # prefer_narrative controls scoring boosts but not how many
@@ -677,10 +642,6 @@ class FinAgentRAGOrchestrator:
                     entity=classification.get("entity"),
                     statement_type_hint=statement_type_hint,  # Step 4
                     prefer_narrative=prefer_narrative,
-                    is_attribution=is_attribution,
-                    is_geography=is_geography,
-                    is_legal=is_legal,
-                    is_acquisition=is_acquisition,
                     query_years=classification.get("years"),
                 )))
             new_hits = self._deduplicate_hits(new_hits, entity=classification.get("entity"))
@@ -702,12 +663,13 @@ class FinAgentRAGOrchestrator:
                 ev_enriched = dict(ev)
                 parent_id = ev.get("parent_id")
                 if parent_id and not ev_enriched.get("parent_content"):
-                    ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
+                    ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
                 context_window.append(ev_enriched)
 
             if non_numeric_formula:
                 pot_res = self.pot_reasoner.generate_and_execute(
-                    query, context_window, entity=classification["entity"]
+                    query, context_window, entity=classification["entity"],
+                    library_formula_entry=non_numeric_formula,
                 )
             else:
                 pot_res = {
@@ -838,14 +800,6 @@ class FinAgentRAGOrchestrator:
     _FORWARD_LOOKING_CUE_RE = re.compile(
         r"\bexpected?\s+to\b|\bexpects?\b|\bguidance\b|\boutlook\b|\bforecast\w*|\banticipat\w+"
     )
-    #: If a question about an ongoing multi-period liability names no year, the code
-    #: prefers the most recent filing rather than an older annual filing; otherwise
-    #: cumulative-in-progress percentages can be stale.
-    #: When queries omit a period, ensure selection logic looks for the latest available
-    #: filing for that entity.
-    _SEPARATION_TOPIC_RE = re.compile(
-        r"\bseparat\w+|\bspin[- ]?off\w*|\bdivest\w*", re.IGNORECASE
-    )
 
     @staticmethod
     def _readable_company_name(matched_company: str, query: str) -> str:
@@ -875,7 +829,7 @@ class FinAgentRAGOrchestrator:
         Also handles the case where the classifier returned generic 'company'.
         """
         import re as _re
-        if not self.vector_store.uploaded_files:
+        if not self.corpus_store.uploaded_files:
             return classifier_entity  # no uploads yet — use classifier result as-is
 
         q_lower = query.lower()
@@ -972,7 +926,7 @@ class FinAgentRAGOrchestrator:
         best_tie_key = None
         scored = []
 
-        for uf in self.vector_store.uploaded_files:
+        for uf in self.corpus_store.uploaded_files:
             corpus_company = uf.get("company", "")
             if not corpus_company:
                 continue
@@ -1041,15 +995,12 @@ class FinAgentRAGOrchestrator:
                 1 if (query_quarter is not None and corpus_quarter == query_quarter) else 0,
                 (2 if (forward_year_prior and corpus_year == forward_year_prior)
                  else 1 if corpus_year in query_years else 0),
-                # Refers to a specific regex's behavior: it overrides a higher-tier
-                # default preference for plain annual reports, but only for a narrowly
-                # defined forward-looking separation-cost question shape; it is guarded
-                # so it cannot trigger on unrelated no-year questions and will not
-                # conflict with the higher-tier rule.
+                # A forward-looking question that names no period asks about the
+                # current expectation, which the most recent filing (including an
+                # interim one) states; this overrides the plain-annual default below.
                 1 if (
                     not query_years and corpus_quarter
                     and self._FORWARD_LOOKING_CUE_RE.search(q_lower)
-                    and self._SEPARATION_TOPIC_RE.search(q_lower)
                 ) else 0,
                 0 if corpus_quarter else 1,
                 corpus_year or "",
@@ -1082,7 +1033,7 @@ class FinAgentRAGOrchestrator:
                 ]
                 if len(_terms) >= 2:
                     _counts = {d: 0 for d in tied_docs}
-                    for _p in self.vector_store.corpus:
+                    for _p in self.corpus_store.corpus:
                         _pc = _p.get("company")
                         if _pc in _counts:
                             _low = (_p.get("content") or "").lower()
@@ -1111,7 +1062,7 @@ class FinAgentRAGOrchestrator:
             return classifier_entity
 
         # Last resort: most recently uploaded file
-        return self.vector_store.uploaded_files[-1].get("company", "company")
+        return self.corpus_store.uploaded_files[-1].get("company", "company")
 
     def _infer_entity_from_corpus(self, query: str) -> str:
         """Legacy method — kept for backward compatibility. Delegates to _match_entity_to_corpus."""
@@ -1305,7 +1256,7 @@ class FinAgentRAGOrchestrator:
             verification_res=verifier_res, sub_questions=sub_questions,
         )
         if llm_answer:
-            return _strip_trailing_bare_number(llm_answer)
+            return llm_answer
 
         # ── Fallback: concise rule-based synthesis ──
         if answer_mode == "NUMERIC":
