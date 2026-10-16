@@ -101,8 +101,18 @@ class TriCheckSelfVerifier:
         suff_passed = len(evidence_list) > 0
         suff_reason = "已獲取相關財報數據與附註說明。" if suff_passed else "未檢索到足夠的財報證據。"
 
-        # 2. nu_num: Numerical Consistency
-        if answer_mode == "NUMERIC":
+        # 2. nu_num: Numerical Consistency. Not applicable (and so not a
+        # failure) when there is no single number to check: a non-numeric
+        # question, or a numeric-mode question whose shape (a selection,
+        # comparison or existence question) the calculation module
+        # deliberately does not reduce to one computed value.
+        no_real_data = False
+        implausible_reason = None
+        num_applicable = answer_mode == "NUMERIC" and not pot_output.get("calculation_skipped")
+        if not num_applicable:
+            num_passed = True
+            num_reason = "不適用:此題不以單一計算數值作答(非數值題,或選擇/比較類題型),改以證據整合判斷。"
+        else:
             num_passed = pot_output.get("success", False) and (pot_output.get("result_value") is not None)
             # The sandbox's own explicit "give up" marker (see
             # pot_reasoner.py's raw-number/no-match fallback paths, which
@@ -128,9 +138,6 @@ class TriCheckSelfVerifier:
                     else f"PoT 程式碼沙盒計算順利完成 (結果 = {pot_output.get('result_value')})。" if num_passed
                     else f"計算失敗: {pot_output.get('output_log')}")
             )
-        else:
-            num_passed = suff_passed
-            num_reason = "此題為非數值分析路徑，不以 PoT 計算為必要條件；以證據整合與語意判斷為主。" if num_passed else "非數值路徑但缺少足夠證據。"
 
         # 3. nu_cross: Cross-Evidence Validation
         cross_passed = True
@@ -155,6 +162,7 @@ class TriCheckSelfVerifier:
         # never looked at. Skipped (no signal either way) when there's no
         # entity to check against, no evidence at all (nu_suff already
         # covers that), or no evidence item carries company metadata.
+        entity_mismatch = False
         entity_words = _company_words(entity or "") if entity and entity.lower() not in ("company", "unknown", "") else set()
         if entity_words and evidence_list:
             companies_present = [ev.get("company", "") for ev in evidence_list if ev.get("company")]
@@ -162,6 +170,7 @@ class TriCheckSelfVerifier:
                 _evidence_matches_entity(c, entity_words) for c in companies_present
             ):
                 cross_passed = False
+                entity_mismatch = True
                 cross_reasons.append(
                     f"檢索到的證據公司與目標實體「{entity}」不符，可能是實體辨識或檢索範圍偏移。"
                 )
@@ -186,9 +195,28 @@ class TriCheckSelfVerifier:
         is_accepted = suff_passed and num_passed and cross_passed
         confidence_score = 0.95 if is_accepted else (0.6 if suff_passed else 0.2)
 
+        # The failure the retry controller reacts to (orchestrator
+        # _plan_retry): the first one that applies, in the order a fix
+        # has to happen -- no evidence at all before anything else, a wrong
+        # or incomplete evidence set before a bad number computed from it.
+        failures = [
+            name for name, failed in (
+                ("no_evidence", not suff_passed),
+                ("entity_mismatch", entity_mismatch),
+                ("missing_years", bool(missing_years)),
+                ("duplicate_placeholder", bool(dup_pair)),
+                ("implausible_result", bool(implausible_reason)),
+                ("no_relevant_data", no_real_data),
+                ("calculation_failed", num_applicable and not num_passed
+                    and not implausible_reason and not no_real_data),
+            ) if failed
+        ]
+
         return {
             "decision": "ACCEPT" if is_accepted else "REJECT",
             "confidence_score": confidence_score,
+            "failure_type": failures[0] if failures else None,
+            "missing_years": sorted(missing_years),
             # Structured (not prose-parsed) signal for callers that want to
             # react specifically to this failure mode -- e.g. the
             # orchestrator's retry logic issuing a targeted re-search for
@@ -197,7 +225,7 @@ class TriCheckSelfVerifier:
             "duplicate_placeholder_pair": dup_pair,
             "checks": {
                 "nu_suff": {"passed": suff_passed, "detail": suff_reason},
-                "nu_num": {"passed": num_passed, "detail": num_reason},
+                "nu_num": {"passed": num_passed, "applicable": num_applicable, "detail": num_reason},
                 "nu_cross": {"passed": cross_passed, "detail": cross_reason}
             }
         }

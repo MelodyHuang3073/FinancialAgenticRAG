@@ -360,6 +360,50 @@ COMPOSITE_LINE_ITEM_ALIASES: Dict[str, List[str]] = {
 }
 
 
+#: The primary financial statement each line item belongs to. When several
+#: evidence rows carry the same label, the row from this statement is the
+#: one a financial ratio means; a same-labeled row in a note or a
+#: supplementary table (segment, investee or schedule figures) is not.
+#: Values match the page `section` tags assigned at ingestion. Line items
+#: that are not presented on a primary statement are left out.
+LINE_ITEM_STATEMENT: Dict[str, str] = {
+    'revenue': 'income_statement',
+    'cost_of_revenue': 'income_statement',
+    'gross_profit': 'income_statement',
+    'op_expense': 'income_statement',
+    'rd_expense': 'income_statement',
+    'sga': 'income_statement',
+    'restructuring_costs': 'income_statement',
+    'op_income': 'income_statement',
+    'interest_expense': 'income_statement',
+    'net_income_btax': 'income_statement',
+    'income_tax': 'income_statement',
+    'net_income': 'income_statement',
+    'eps': 'income_statement',
+    'cash': 'balance_sheet',
+    'short_term_investments': 'balance_sheet',
+    'accounts_rec': 'balance_sheet',
+    'inventory': 'balance_sheet',
+    'current_assets': 'balance_sheet',
+    'ppe': 'balance_sheet',
+    'goodwill': 'balance_sheet',
+    'intangible_assets': 'balance_sheet',
+    'total_assets': 'balance_sheet',
+    'accounts_payable': 'balance_sheet',
+    'current_liab': 'balance_sheet',
+    'long_term_debt': 'balance_sheet',
+    'total_liab': 'balance_sheet',
+    'retained_earnings': 'balance_sheet',
+    'equity': 'balance_sheet',
+    'operating_cf': 'cash_flow',
+    'investing_cf': 'cash_flow',
+    'financing_cf': 'cash_flow',
+    'capex': 'cash_flow',
+    'depreciation': 'cash_flow',
+    'dividends_paid': 'cash_flow',
+}
+
+
 def metric_view(field: str) -> Dict[str, Any]:
     """{metric: value} for every QUESTION_METRICS record that defines
     `field`, in QUESTION_METRICS order."""
