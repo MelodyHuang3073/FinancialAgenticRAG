@@ -23,7 +23,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from app.tools.sandbox import execute_pot_code
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases, FORMULA_LIBRARY
 from app.tools.table_parser import is_markdown_separator_row
-from app.agent.financial_vocabulary import LINE_ITEM_ALIASES, COMPOSITE_LINE_ITEM_ALIASES
+from app.agent.financial_vocabulary import (
+    LINE_ITEM_ALIASES, COMPOSITE_LINE_ITEM_ALIASES, LINE_ITEM_STATEMENT,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical item taxonomy  (order matters — first match wins)
@@ -727,7 +729,7 @@ def _extract_from_linearized_table(
                     key = f"{base_key}_{idx}"
                     idx += 1
                 if key not in extracted:
-                    extracted[key] = dict(entry, code_key=key)
+                    extracted[key] = dict(entry, code_key=key, section=ev.get("section", ""))
             continue  # this evidence item is fully handled by the Markdown parser
 
         # ── Legacy single-line "Line Item: X | Year: Val" format ────────────
@@ -770,6 +772,7 @@ def _extract_from_linearized_table(
                     "year": year,
                     "val": val,
                     "code_key": key,
+                    "section": ev.get("section", ""),
                 }
 
     return extracted
@@ -1328,6 +1331,7 @@ def _extract_formula_guided(
 
     for placeholder in var_aliases:
         query_year_set = set(query_years or [])
+        placeholder_canonical = _placeholder_line_item(placeholder, formula_entry)
 
         # Handle cases where both a pre-split subtotal and a parent-level headline
         # figure exist with similar labels.
@@ -1344,7 +1348,7 @@ def _extract_formula_guided(
         # MAX-priority candidates, pick the winner by frequency first —
         # see the block comment there for why a straight "biggest wins"
         # tie-break isn't safe on its own.
-        by_year: Dict[str, List[Tuple[Tuple[bool, bool, bool, int, bool], float, int, str, int, str]]] = {}
+        by_year: Dict[str, List[Tuple[Tuple[bool, bool, bool, int, bool, bool], float, int, str, int, str]]] = {}
         for val, yr, score, source, is_primary, ev_idx, line_item_label in candidates[placeholder]:
             # Prefer a candidate whose own filing's reporting year matches the data year
             # over an exact-label match that appears as a historical column in a
@@ -1376,6 +1380,7 @@ def _extract_formula_guided(
             priority = (
                 _entity_matches(ev_idx), is_primary, year_matches_filing, effective_score,
                 _is_summary_table(ev_idx),
+                _on_home_statement(placeholder_canonical, evidence_list[ev_idx].get("section")),
             )
             by_year.setdefault(yr, []).append((priority, val, score, source, ev_idx, line_item_label))
 
@@ -1397,7 +1402,7 @@ def _extract_formula_guided(
                 for yr in query_year_set:
                     forced_ev_by_year[yr] = chosen_ev
 
-        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, bool, bool, int, bool], int, str]] = {}
+        best_by_year: Dict[str, Tuple[float, int, str, Tuple[bool, bool, bool, int, bool, bool], int, str]] = {}
         for yr, cands in by_year.items():
             # After forcing a consistent source across years, still run
             # magnitude/frequency/length reductions on the rows from that source.
@@ -3004,6 +3009,15 @@ _CANONICAL_TO_ALIASES: Dict[str, List[str]] = {c: aliases for c, aliases in _ITE
 _NET_QUALIFIER_RE = re.compile(r'\bnet\b')
 
 
+def _on_home_statement(canonical: Optional[str], section: Optional[str]) -> bool:
+    """Whether a row comes from the primary financial statement its line
+    item belongs to (financial_vocabulary.LINE_ITEM_STATEMENT): among rows
+    with the same label, a ratio's inputs come from the primary statement,
+    not from a same-labeled note or supplementary table."""
+    home = LINE_ITEM_STATEMENT.get(canonical or "")
+    return bool(home) and section == home
+
+
 def _pick_best_in_group(
     items: List[Dict],
     canonical: str,
@@ -3034,7 +3048,8 @@ def _pick_best_in_group(
         # This prevents choosing a shorter but non-total line when the canonical refers
         # to a total metric.
         is_total = 1 if aliases and aliases[0].startswith("total") and aliases[0] in x["item"].lower() else 0
-        return (score, year_match, is_total, is_net, -len(x["item"]), magnitude)
+        on_home = 1 if _on_home_statement(canonical, x.get("section")) else 0
+        return (score, year_match, on_home, is_total, is_net, -len(x["item"]), magnitude)
 
     return max(items, key=sort_key)
 
@@ -3666,6 +3681,9 @@ class ProgramOfThoughtReasoner:
                 "degraded_note": "", "result_series": [],
                 "result_delta": None, "result_direction": None,
                 "result_unit": "",
+                # Deliberate: this question shape has no single computed
+                # answer, so the numerical check does not apply to it.
+                "calculation_skipped": True,
             }
 
         query_years = _extract_query_years(query)
@@ -3713,6 +3731,9 @@ class ProgramOfThoughtReasoner:
                 "degraded_note": "", "result_series": [],
                 "result_delta": None, "result_direction": None,
                 "result_unit": "",
+                # Deliberate: this question shape has no single computed
+                # answer, so the numerical check does not apply to it.
+                "calculation_skipped": True,
             }
 
         # ── Step 2: Extract variables from linearized tables ──────────────────

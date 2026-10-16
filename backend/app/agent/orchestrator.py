@@ -92,58 +92,93 @@ class FinAgentRAGOrchestrator:
             info["sub_question"] = sub_question
         return info
 
-    #: Opening words of an answer that says the chosen file lacks the fact.
-    _REFUSAL_HEAD_RE = re.compile(
-        r"(?:cannot|can't|can not|unable to|not able to)\s+(?:conclusively\s+)?"
-        r"(?:determine|confirm|calculate|compute|identify|say|answer|tell|find)"
-        r"|(?:do(?:es)?\s+not|don't|doesn't)\s+(?:include|disclose|contain|provide|state|show|say)"
-        r"|(?:not|isn't|aren't)\s+(?:disclosed|included|provided|available|stated)"
-        r"|insufficient (?:evidence|data|information)|no (?:such )?(?:data|information) (?:in|is)",
-        re.IGNORECASE,
-    )
+    def _plan_retry(
+        self, query: str, verification_res: Dict[str, Any],
+        formula_entry: Optional[Dict[str, Any]], query_entity: str,
+        retrieval_years: List[str], classification: Dict[str, Any],
+        attempt: int, evidence_so_far: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """The single retry controller: map the verifier's structured
+        failure type to the next retrieval.
 
-    def _looks_like_refusal(self, answer: str) -> bool:
-        return bool(answer) and bool(self._REFUSAL_HEAD_RE.search(answer[:220]))
+          no_evidence            -> broaden: the classifier's general queries
+          missing_years          -> targeted: the formula's variables for the
+                                    missing years
+          duplicate_placeholder  -> targeted: the two variables that collided
+          implausible_result,
+          no_relevant_data,
+          calculation_failed     -> targeted: every formula variable again,
+                                    with a wider window over unseen passages
+          anything else, or no
+          formula to target      -> refine: rule-based query refinement
 
-    def _alternate_company_docs(self, resolved: str, query: str, limit: int = 2) -> List[str]:
-        """Other files of the SAME company as `resolved`, best guess first
-        (a year the question names, then plain annual filings, then more
-        recent). Each is tried on its own -- one file per attempt."""
-        import re as _re
-        def _base(name: str) -> str:
-            return _re.split(r"_(?:19|20)\d{2}", name or "", maxsplit=1)[0].lower()
-        def _year(name: str) -> str:
-            m = _re.search(r"(?<!\d)((?:19|20)\d{2})(?!\d)", name or "")
-            return m.group(1) if m else ""
-        q_years = set(_re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", query))
-        base = _base(resolved)
-        cands = []
-        for uf in self.corpus_store.uploaded_files:
-            name = uf.get("company", "")
-            if not name or name == resolved or _base(name) != base:
-                continue
-            has_q = bool(_re.search(r"(?<!\d)(?:19|20)\d{2}q[1-4]", name, _re.IGNORECASE)) or "earnings" in name.lower()
-            cands.append((1 if _year(name) in q_years else 0, 0 if has_q else 1, _year(name), name))
-        cands.sort(reverse=True)
-        return [c[3] for c in cands[:limit]]
+        Every action excludes passages already retrieved, so each attempt
+        brings in new evidence. The attempt budget is the caller's loop bound.
+        """
+        failure = verification_res.get("failure_type")
+        if failure == "no_evidence":
+            return {
+                "failure": failure, "action": "broaden",
+                "queries": list(classification.get("retrieval_queries") or [query]),
+                "top_k": self.RETRIEVAL_TOP_K,
+            }
+        if formula_entry:
+            steps: List[Dict[str, Any]] = []
+            if failure == "missing_years" and verification_res.get("missing_years"):
+                steps = self._build_formula_subquestions(
+                    formula_entry, query_entity, verification_res["missing_years"]
+                )
+            elif failure == "duplicate_placeholder" and verification_res.get("duplicate_placeholder_pair"):
+                pair = verification_res["duplicate_placeholder_pair"]
+                steps = [
+                    st for st in self._build_formula_subquestions(formula_entry, query_entity, retrieval_years)
+                    if st["target_metric"] in pair
+                ]
+            elif failure in ("implausible_result", "no_relevant_data", "calculation_failed"):
+                steps = self._build_formula_subquestions(formula_entry, query_entity, retrieval_years)
+            if steps:
+                return {
+                    "failure": failure, "action": "targeted",
+                    "queries": [st["query"] for st in steps],
+                    "top_k": self.RETRIEVAL_TOP_K_NARRATIVE,
+                }
+        refined = self.refiner.refine(
+            query, verification_res, attempt,
+            target_metrics=classification.get("target_metrics"),
+            evidence_so_far=evidence_so_far,
+        )
+        return {"failure": failure, "action": "refine", "queries": [refined], "top_k": self.RETRIEVAL_TOP_K}
+
+    def _run_retry_plan(
+        self, plan: Dict[str, Any], attempt: int, classification: Dict[str, Any],
+        statement_type_hint: Optional[str], retrieved_ids: set,
+        evidence_buffer: List[Dict[str, Any]], evidence_meta: List[Dict[str, Any]],
+        iter_trace: Dict[str, Any],
+    ) -> None:
+        """Run a _plan_retry plan's searches, adding new evidence in place."""
+        for k, plan_query in enumerate(plan["queries"]):
+            hits = self.corpus_store.search(
+                plan_query, top_k=plan["top_k"],
+                exclude_ids=list(retrieved_ids),
+                entity=classification.get("entity"),
+                statement_type_hint=statement_type_hint,
+                query_years=classification.get("years"),
+            )
+            for hit in self._tag_subquery(
+                200 + attempt * 10 + k,
+                self._deduplicate_hits(hits, entity=classification.get("entity")),
+            ):
+                retrieved_ids.add(hit["id"])
+                evidence_buffer.append(hit)
+                info = self._build_evidence_info(hit, sub_question=plan_query)
+                iter_trace["retrieved_passages"].append(info)
+                evidence_meta.append(info)
 
     def process_query(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
-        """Answer from the best-guess file; if that answer says the file lacks
-        the fact, try the same company's other files one at a time (each
-        attempt uses a single file) and keep the first non-refusing answer."""
-        result = self._process_query_once(query, max_iterations)
-        if not self._looks_like_refusal(result.get("final_answer", "")):
-            return result
-        for alt in self._alternate_company_docs(result.get("resolved_entity", ""), query):
-            alt_result = self._process_query_once(query, max_iterations, _entity_override=alt)
-            if not self._looks_like_refusal(alt_result.get("final_answer", "")):
-                alt_result["retried_from"] = result.get("resolved_entity", "")
-                return alt_result
-        return result
+        """Answer `query` from the single best-matching filing."""
+        return self._process_query_once(query, max_iterations)
 
-    def _process_query_once(
-        self, query: str, max_iterations: int = 3, _entity_override: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def _process_query_once(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
         trace_steps = []
         evidence_buffer: List[Dict[str, Any]] = []  # full evidence objects
         evidence_meta: List[Dict[str, Any]] = []    # per-item sub_question metadata
@@ -160,11 +195,8 @@ class FinAgentRAGOrchestrator:
         # stem form only for the corpus filter; fused filename tokens can lose retrieval
         # signal if used directly in the query.
         clean_entity = classification["entity"]
-        classification["entity"] = _entity_override or self._match_entity_to_corpus(
-            classification["entity"], query
-        )
-        if not _entity_override:
-            clean_entity = self._readable_company_name(classification["entity"], query) or clean_entity
+        classification["entity"] = self._match_entity_to_corpus(classification["entity"], query)
+        clean_entity = self._readable_company_name(classification["entity"], query) or clean_entity
 
         # statement_type_hint: from question_classifier (income_statement / balance_sheet /
         # cash_flow / notes).  Used for 1.5x boost in lexical_retriever.
@@ -291,22 +323,19 @@ class FinAgentRAGOrchestrator:
         pot_res = None
 
         if answer_mode == "NUMERIC":
-            current_query = query
-            is_first_iteration = True
 
             while iteration_count < max_iterations:
                 iteration_count += 1
                 iter_trace = {
                     "iteration": iteration_count,
-                    "query": current_query,
+                    "query": query,
                     "retrieved_passages": [],
                     "pot_code": "",
                     "sandbox_output": "",
                     "verification": {}
                 }
 
-                if is_first_iteration:
-                    is_first_iteration = False
+                if iteration_count == 1:
 
                     # ── Step-by-step retrieval: one search per decomposed sub-question ──
                     retrieval_steps = [
@@ -435,44 +464,12 @@ class FinAgentRAGOrchestrator:
                             ),
                         })
 
-                    # ── Fallback: if zero evidence collected, use classifier retrieval_queries ──
-                    if not evidence_buffer:
-                        for fb_idx, sq in enumerate(classification["retrieval_queries"]):
-                            hits = self.corpus_store.search(
-                                sq, top_k=self.RETRIEVAL_TOP_K,
-                                exclude_ids=list(retrieved_ids),
-                                entity=classification.get("entity"),
-                                statement_type_hint=statement_type_hint,  # Step 4
-                                    query_years=classification.get("years"),
-                            )
-                            for hit in self._tag_subquery(
-                                100 + fb_idx,
-                                self._deduplicate_hits(hits, entity=classification.get("entity")),
-                            ):
-                                retrieved_ids.add(hit["id"])
-                                evidence_buffer.append(hit)
-                                info = self._build_evidence_info(hit)
-                                iter_trace["retrieved_passages"].append(info)
-                                evidence_meta.append(info)
-
                 else:
-                    # ── Subsequent iterations: use refined query ──
-                    new_hits = self._deduplicate_hits(
-                        self.corpus_store.search(
-                            current_query, top_k=self.RETRIEVAL_TOP_K,
-                            exclude_ids=list(retrieved_ids),
-                            entity=classification.get("entity"),
-                            statement_type_hint=statement_type_hint,  # Step 4
-                            query_years=classification.get("years"),
-                        ),
-                        entity=classification.get("entity"),
+                    # ── Attempt 2+: the retry plan chosen from the last REJECT ──
+                    self._run_retry_plan(
+                        retry_plan, iteration_count, classification, statement_type_hint,
+                        retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
                     )
-                    for hit in self._tag_subquery(200 + iteration_count, new_hits):
-                        retrieved_ids.add(hit["id"])
-                        evidence_buffer.append(hit)
-                        info = self._build_evidence_info(hit)
-                        iter_trace["retrieved_passages"].append(info)
-                        evidence_meta.append(info)
 
                 # ── PoT Execution ──
                 # Sort by relevance score so the BEST chunks reach PoT,
@@ -506,70 +503,23 @@ class FinAgentRAGOrchestrator:
                     "data": iter_trace
                 })
 
-                # Accept or simple → done
-                if verification_res["decision"] == "ACCEPT" or complexity == "SIMPLE":
+                if verification_res["decision"] == "ACCEPT" or iteration_count >= max_iterations:
                     break
 
-                # Reject → targeted retry (if the verifier pinpointed a specific
-                # gap it can name) in addition to the existing generic refine-
-                # and-re-search below, which still runs every time either way.
-                dup_pair = verification_res.get("duplicate_placeholder_pair")
-                if dup_pair and formula_entry:
-                    # The verifier flagged two of this formula's own
-                    # placeholders (e.g. revenue_new/revenue_old) as both
-                    # having resolved via free-text to the identical value --
-                    # re-issue retrieval for exactly those two, using the
-                    # same alias/entity/year query shape the first pass
-                    # built them with (_build_formula_subquestions), rather
-                    # than hoping the single generic refined query below
-                    # happens to surface the real structured row for one of
-                    # them. A wider top_k than the first pass used, since the
-                    # real row not ranking in the original window at all is
-                    # exactly the failure this is trying to recover from.
-                    targeted_steps = [
-                        step for step in self._build_formula_subquestions(
-                            formula_entry, query_entity, retrieval_years
-                        )
-                        if step["target_metric"] in dup_pair
-                    ]
-                    targeted_queries = []
-                    for step in targeted_steps:
-                        hits = self.corpus_store.search(
-                            step["query"], top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
-                            exclude_ids=list(retrieved_ids),
-                            entity=classification.get("entity"),
-                            statement_type_hint=statement_type_hint,
-                            query_years=classification.get("years"),
-                        )
-                        hits = self._tag_subquery(
-                            400 + iteration_count * 10 + step["step"],
-                            self._deduplicate_hits(hits, entity=classification.get("entity")),
-                        )
-                        targeted_queries.append(step["query"])
-                        for hit in hits:
-                            retrieved_ids.add(hit["id"])
-                            evidence_buffer.append(hit)
-                            info = self._build_evidence_info(hit, sub_question=step["query"])
-                            evidence_meta.append(info)
-                    trace_steps.append({
-                        "step_name": f"Targeted Duplicate-Placeholder Retry #{iteration_count}",
-                        "type": "refinement",
-                        "detail": (
-                            f"REJECT (duplicate_placeholder_pair={dup_pair}) → "
-                            f"targeted re-search: {targeted_queries}"
-                        ),
-                    })
-
-                # Reject → refine and re-search
-                current_query = self.refiner.refine(
-                    query, verification_res, iteration_count,
-                    target_metrics=classification.get("target_metrics"),
-                    evidence_so_far=evidence_buffer,
+                # REJECT → one retry controller: the verifier's structured
+                # failure type picks the next retrieval (see _plan_retry).
+                retry_plan = self._plan_retry(
+                    query, verification_res, formula_entry or dynamic_formula_entry,
+                    query_entity, retrieval_years, classification, iteration_count,
+                    evidence_buffer,
                 )
                 trace_steps.append({
-                    "step_name": f"Query Refinement #{iteration_count}",
+                    "step_name": f"Retry plan #{iteration_count}",
                     "type": "refinement",
-                    "detail": f"REJECT → refined query: '{current_query}'"
+                    "detail": (
+                        f"REJECT ({retry_plan['failure']}) → {retry_plan['action']}: "
+                        f"{retry_plan['queries']}"
+                    ),
                 })
 
         else:
@@ -728,10 +678,17 @@ class FinAgentRAGOrchestrator:
             # raw placeholder value.
             "result_value": (
                 None
-                if pot_res and "result is not reliable" in (pot_res.get("output_log") or "")
+                if pot_res and (
+                    "result is not reliable" in (pot_res.get("output_log") or "")
+                    or pot_res.get("implausible_result_reason")
+                )
                 else (pot_res.get("result_value") if pot_res else None)
             ),
             "verification": verification_res,
+            # Whether the final attempt passed Tri-Check, and if not, why --
+            # an answer that never passed is returned flagged, not hidden.
+            "verified": bool(verification_res) and verification_res.get("decision") == "ACCEPT",
+            "verification_failure": (verification_res or {}).get("failure_type"),
             "pot_code": pot_res.get("code") if pot_res else "",
             "sandbox_log": pot_res.get("output_log") if pot_res else "",
             "is_degraded_formula": pot_res.get("is_degraded_formula", False) if pot_res else False,
@@ -1276,6 +1233,12 @@ class FinAgentRAGOrchestrator:
         parts = []
 
         # ── Line 1: Direct answer ──
+        if pot_res.get("implausible_result_reason"):
+            parts.append(
+                f"The figure for **{company}** could not be reliably computed from the filing: "
+                f"{pot_res['implausible_result_reason']}"
+            )
+            return "\n".join(parts)
         if code_val is not None:
             parts.append(f"The calculation result for **{company}** is **`{code_val}`**.")
         else:

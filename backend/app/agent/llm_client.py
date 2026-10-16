@@ -235,8 +235,9 @@ class LLMAnswerGenerator:
                 )
             elif implausible_reason:
                 computed_summary += (
-                    f"\nStatus: the computed value is outside the plausible range for "
-                    f"this metric ({implausible_reason}) and is not reliable."
+                    f"\nStatus: after every retrieval attempt the computed value is still "
+                    f"outside the plausible range for this metric ({implausible_reason}), "
+                    f"so it is not reliable."
                 )
             elif result_value is not None:
                 computed_summary += (
@@ -341,9 +342,11 @@ Available Evidence:
     units or rounding the question asks), do not recompute it, and cite its
     inputs with exactly the values the calculation used -- the evidence may
     contain same-labeled rows for other years. If its status says it is a
-    placeholder or not reliable, do not cite it: use the same metric if the
-    filing states it directly, otherwise say it could not be reliably
-    determined. If a limitation is given, state it.
+    placeholder, do not cite it: use the same metric if the filing states it
+    directly, otherwise say it could not be determined. If its status says
+    it is not reliable, do not cite it and do not compute or substitute the
+    figure yourself: state plainly that it could not be reliably computed
+    from the filing. If a limitation is given, state it.
 
 ⑥ Accounting conventions (definitions)
 - A figure in parentheses is negative or an outflow, not zero.
