@@ -282,7 +282,16 @@ class FinanceBenchClassifier:
         )
 
         # ── Step 6: Determine statement_type_hint (Step 3/4 Section Anchoring) ──
-        statement_type_hint = self._infer_statement_type_hint(target_metrics)
+        # Prefer the question's OWN explicit statement restriction (e.g. "...by
+        # primarily using information that is shown in the balance sheet") over
+        # the metric-inferred guess below -- it's a direct statement of intent,
+        # not a heuristic. Only overrides when exactly one statement is named;
+        # a question naming two (a composite ratio needing both, e.g. DPO) is
+        # already handled per-sub-question by the formula-decomposition path
+        # further down, which re-derives its own hint from each sub-question's
+        # own text rather than this single query-level value.
+        literal_hint = self._extract_literal_statement_hint(query)
+        statement_type_hint = literal_hint or self._infer_statement_type_hint(target_metrics)
 
         # ── Step 7: Determine answer_mode ─────────────────────────────────────
         # Priority: EXCLUSION > NUMERIC(with data) > EXPLANATION/ASSESSMENT
@@ -459,6 +468,39 @@ class FinanceBenchClassifier:
         if n_years >= 2:
             return "NUMERICAL_REASONING"
         return "LOOKUP"
+
+    #: Matches the handful of ways FinanceBench-style questions name a
+    #: specific financial statement. Grouped so the match itself tells us
+    #: which canonical statement type was named (see
+    #: _extract_literal_statement_hint).
+    _LITERAL_STATEMENT_RE = re.compile(
+        r'(balance sheet|statement of financial position)|'
+        r'(income statement|statement of income|p&l statement|profit and loss statement)|'
+        r'(cash flow statement|statement of cash flows)',
+        re.IGNORECASE,
+    )
+    _LITERAL_STATEMENT_GROUPS = {1: "balance_sheet", 2: "income_statement", 3: "cash_flow"}
+
+    def _extract_literal_statement_hint(self, query: str) -> Optional[str]:
+        """
+        The question's own explicit statement restriction, when it names
+        EXACTLY ONE financial statement (e.g. "...by primarily using
+        information that is shown in the balance sheet", "...who can only
+        use the details shown within the balance sheet"). Returns None when
+        no statement is named, or when more than one is named -- a
+        composite-ratio question needing two statements (e.g. DPO needs both
+        the balance sheet and the income statement) is not something a
+        single hint value can represent correctly; that case is already
+        handled per-sub-question elsewhere.
+        """
+        found = set()
+        for m in self._LITERAL_STATEMENT_RE.finditer(query):
+            for group_idx, stmt in self._LITERAL_STATEMENT_GROUPS.items():
+                if m.group(group_idx):
+                    found.add(stmt)
+        if len(found) == 1:
+            return next(iter(found))
+        return None
 
     def _infer_statement_type_hint(self, target_metrics: List[str]) -> str:
         """

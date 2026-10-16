@@ -104,7 +104,30 @@ class TriCheckSelfVerifier:
         # 2. nu_num: Numerical Consistency
         if answer_mode == "NUMERIC":
             num_passed = pot_output.get("success", False) and (pot_output.get("result_value") is not None)
-            num_reason = f"PoT 程式碼沙盒計算順利完成 (結果 = {pot_output.get('result_value')})。" if num_passed else f"計算失敗: {pot_output.get('output_log')}"
+            # The sandbox's own explicit "give up" marker (see
+            # pot_reasoner.py's raw-number/no-match fallback paths, which
+            # print this exact phrase and set result=0.0 rather than borrow
+            # an unrelated number) -- a bare 0.0 with this marker is not a
+            # genuine computed answer and must not be accepted as one just
+            # because success=True and result_value is technically non-None.
+            no_real_data = "result is not reliable" in (pot_output.get("output_log") or "")
+            if no_real_data:
+                num_passed = False
+            # A margin/growth-rate result outside its structurally plausible
+            # range (see pot_reasoner._check_ratio_plausibility) is treated
+            # as a numerical-consistency failure, not just a cosmetic
+            # oddity -- it almost always means the sandbox resolved against
+            # the wrong evidence row, so this rejects and retries the same
+            # way an outright sandbox failure does.
+            implausible_reason = pot_output.get("implausible_result_reason") if num_passed else None
+            if implausible_reason:
+                num_passed = False
+            num_reason = (
+                implausible_reason
+                or ("PoT 沙盒未能在證據中找到與此問題相關的資料，result=0.0 僅為預設值，非真實計算結果。" if no_real_data
+                    else f"PoT 程式碼沙盒計算順利完成 (結果 = {pot_output.get('result_value')})。" if num_passed
+                    else f"計算失敗: {pot_output.get('output_log')}")
+            )
         else:
             num_passed = suff_passed
             num_reason = "此題為非數值分析路徑，不以 PoT 計算為必要條件；以證據整合與語意判斷為主。" if num_passed else "非數值路徑但缺少足夠證據。"

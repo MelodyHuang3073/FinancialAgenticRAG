@@ -550,6 +550,7 @@ class LLMAnswerGenerator:
                 f"{pot_code_text[:1200]}\n"
                 f"Sandbox output: {output_log_text[:600]}"
             )
+            implausible_reason = pot_res.get("implausible_result_reason")
             if is_unreliable_fallback:
                 pot_summary += (
                     "\n⚠️ NOTE: The sandbox could NOT find structured data in the retrieved "
@@ -560,6 +561,26 @@ class LLMAnswerGenerator:
                     "evidence text below (e.g. explaining what actually drove a change, or why "
                     "this metric isn't a meaningful one for this company), the same way you "
                     "would if no PoT result had been computed at all."
+                )
+            elif implausible_reason:
+                # Same "do not force-quote" treatment as the unreliable-fallback
+                # case above, for a different failure shape: the sandbox DID
+                # compute a number, but it falls outside the range this kind of
+                # ratio can plausibly take (see pot_reasoner._check_ratio_plausibility)
+                # -- almost always because it resolved against a same-captioned
+                # but wrong row (e.g. a segment/quarterly sub-table) rather than
+                # the consolidated figure the question wants. Confidently quoting
+                # it as the headline would be worse than acknowledging the
+                # uncertainty.
+                pot_summary += (
+                    f"\n⚠️ NOTE: The sandbox's result above ({result_value}) is almost certainly "
+                    f"WRONG: {implausible_reason} Do NOT quote this number as your headline "
+                    "answer. If the evidence below contains the SAME metric stated directly in "
+                    "prose (e.g. an MD&A sentence giving the margin/growth rate as a plain "
+                    "percentage) or a clearly-labeled consolidated total row, use that instead "
+                    "and say so. Otherwise, state plainly that you could not reliably compute "
+                    "this figure from the retrieved evidence rather than presenting the sandbox "
+                    "value as if it were trustworthy."
                 )
             elif result_value is not None:
                 pot_summary += (

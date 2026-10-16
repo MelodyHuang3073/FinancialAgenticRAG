@@ -12,9 +12,89 @@ Decomposition modes (priority order):
 import json
 import os
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from app.agent.usage_tracker import record_usage
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM-extracted formula validation
+# ─────────────────────────────────────────────────────────────────────────────
+# A question's own inline formula definition ("X is defined as: A / B") is
+# extracted by the SAME LLM call that already decomposes the question into
+# retrieval sub-queries (see _SYSTEM_PROMPT) -- not a second call, and not a
+# regex parser. The LLM's JSON output is still untrusted input, though: this
+# validates and sanitizes it into the exact shape FORMULA_LIBRARY entries use
+# (formula_expr / required_vars / result_label / unit / multi_year) before
+# pot_reasoner's existing, already-proven extraction/codegen engine
+# (_extract_formula_guided / _gen_formula_code) ever sees it. A formula that
+# fails any check here is dropped (returns None) rather than guessed at --
+# the caller then falls back to the same no-formula behavior as a question
+# that never defined one, never to a partially-trusted guess.
+#
+# formula_expr is only ever built from pieces validated here before being
+# embedded in generated Python code and executed in pot_reasoner's sandbox
+# (app/tools/sandbox.py, which itself AST-checks all generated code
+# regardless of where it came from) -- this character whitelist is an
+# additional, narrower check specific to this being the first time
+# formula_expr is LLM-sourced rather than developer-authored.
+_SAFE_FORMULA_EXPR_RE = re.compile(r'^[A-Za-z0-9_\s+\-*/().]+$')
+_FORMULA_IDENTIFIER_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+_FORMULA_EXPR_SAFE_FUNCS = {"abs", "max", "min", "round"}
+_VALID_FORMULA_UNITS = {"%", "x", ""}
+
+
+def _validate_llm_formula(raw: Any) -> Optional[Dict[str, Any]]:
+    """The LLM's "formula" field, sanitized into a FORMULA_LIBRARY-shaped
+    entry, or None if it's absent (the question didn't define one -- the
+    overwhelmingly common case) or fails any structural/safety check."""
+    if not isinstance(raw, dict):
+        return None
+
+    formula_expr = raw.get("formula_expr")
+    required_vars = raw.get("required_vars")
+    if not isinstance(formula_expr, str) or not formula_expr.strip():
+        return None
+    if not isinstance(required_vars, dict) or not required_vars:
+        return None
+    if not _SAFE_FORMULA_EXPR_RE.match(formula_expr):
+        return None
+
+    clean_vars: Dict[str, List[str]] = {}
+    for var_name, aliases in required_vars.items():
+        if not isinstance(var_name, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', var_name):
+            return None
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        if not isinstance(aliases, list) or not aliases:
+            return None
+        clean_aliases = [str(a).strip().lower() for a in aliases if str(a).strip()]
+        if not clean_aliases:
+            return None
+        clean_vars[var_name] = clean_aliases
+
+    # Every identifier formula_expr actually references must be either a
+    # declared variable or a whitelisted helper function name -- an
+    # expression referencing something undeclared (a hallucinated or typo'd
+    # variable name) is rejected outright rather than silently producing a
+    # NameError deep in codegen.
+    referenced = set(_FORMULA_IDENTIFIER_RE.findall(formula_expr))
+    unknown = referenced - set(clean_vars.keys()) - _FORMULA_EXPR_SAFE_FUNCS
+    if unknown:
+        return None
+
+    unit = raw.get("unit") if raw.get("unit") in _VALID_FORMULA_UNITS else ""
+    result_label = str(raw.get("result_label") or "Computed Ratio").strip() or "Computed Ratio"
+    multi_year = bool(raw.get("multi_year"))
+
+    return {
+        "formula_key": "llm_extracted",
+        "result_label": result_label,
+        "unit": unit,
+        "formula_expr": formula_expr,
+        "required_vars": clean_vars,
+        "multi_year": multi_year,
+    }
 
 
 def _is_reasoning_model(model_name: str) -> bool:
@@ -112,12 +192,41 @@ class QueryDecomposer:
         "Break the user's financial question into atomic search sub-queries.\n"
         "Each sub-query must target ONE specific (metric, year) pair.\n"
         "For ratio/margin questions, include sub-queries for BOTH numerator and denominator.\n"
-        "Output ONLY a JSON array, no explanation. Format:\n"
-        "[\n"
-        "  {\"step\": 1, \"query\": \"<company> <metric> <year>\", "
+        "\n"
+        "Also check: does the question define its OWN formula inline (e.g. \"X is defined "
+        "as: A / B\", or \"X (A / B)\")? This only applies to a formula the question spells "
+        "out itself in words — not a metric you merely recognize by name (gross margin, ROE, "
+        "etc. without an explicit definition in the question text). If it does, ALSO output a "
+        "\"formula\" object describing exactly that formula, using short variable names (op0, "
+        "op1, ...) for each named financial quantity, so it can be computed later from "
+        "retrieved data. If the question does not define its own formula inline, set "
+        "\"formula\" to null.\n"
+        "\n"
+        "A formula object looks like:\n"
+        "{\n"
+        "  \"result_label\": \"<short metric name from the question>\",\n"
+        "  \"unit\": \"%\" | \"x\" | \"\",\n"
+        "  \"formula_expr\": \"<arithmetic expression using ONLY the variable names below, "
+        "+ - * / ( ) and numeric literals — no other text>\",\n"
+        "  \"required_vars\": {\"<var_name>\": [\"<line item name this variable refers to>\"]},\n"
+        "  \"multi_year\": true | false\n"
+        "}\n"
+        "For a quantity that needs the AVERAGE of a line item between two fiscal years (e.g. "
+        "\"average total assets between FY2021 and FY2022\"), use TWO variables with the SAME "
+        "base name suffixed _old and _new (e.g. op1_old, op1_new, both mapped to the SAME "
+        "line-item alias), combine them as ((op1_old + op1_new) / 2) inside formula_expr, and "
+        "set multi_year to true. Use the same _old/_new pattern for a \"change in X between "
+        "year1 and year2\" quantity, combined as (op_new - op_old).\n"
+        "\n"
+        "Output ONLY a JSON object, no explanation. Format:\n"
+        "{\n"
+        "  \"sub_queries\": [\n"
+        "    {\"step\": 1, \"query\": \"<company> <metric> <year>\", "
         "\"target_metric\": \"<canonical_metric>\", \"target_year\": \"<YYYY>\"},\n"
-        "  ...\n"
-        "]\n"
+        "    ...\n"
+        "  ],\n"
+        "  \"formula\": <formula object, or null>\n"
+        "}\n"
         "Use short, precise English queries. Include company name in every query."
     )
 
@@ -172,14 +281,20 @@ class QueryDecomposer:
         entity: str,
         target_metrics: List[str],
         years: List[str],
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
         """
-        Call the LLM to generate structured sub-queries for the decomposition step.
-        Returns None if LLM is unavailable or output cannot be parsed.
+        Call the LLM to generate structured sub-queries for the decomposition
+        step AND, in the same call, extract any formula the question defines
+        inline (see _SYSTEM_PROMPT and _validate_llm_formula). One call does
+        both jobs -- no separate LLM round-trip for formula understanding.
+
+        Returns (steps, formula); either half is None on its own terms (no
+        formula defined → formula is None; LLM unavailable or its output
+        couldn't be parsed at all → both are None).
         """
         client = self._get_llm_client()
         if not client:
-            return None
+            return None, None
 
         # Build a concise context block for the LLM
         context_lines = [f"Question: {query}"]
@@ -207,11 +322,12 @@ class QueryDecomposer:
                     ],
                     # Reasoning models spend part of this budget on
                     # invisible internal reasoning tokens before the JSON
-                    # output -- 512 (fine for gpt-4o-mini's direct output)
-                    # can be entirely consumed by reasoning alone, leaving
-                    # an empty message. Generous since these tokens are
-                    # free under the daily complimentary-token allowance.
-                    "max_completion_tokens": 512 if not reasoning else 2000,
+                    # output -- can be entirely consumed by reasoning alone,
+                    # leaving an empty message. Generous since these tokens
+                    # are free under the daily complimentary-token
+                    # allowance. Raised from 512 now that a reply can also
+                    # carry a formula object alongside the sub-query array.
+                    "max_completion_tokens": 768 if not reasoning else 2000,
                 }
                 if not reasoning:
                     create_kwargs["temperature"] = 0
@@ -227,36 +343,41 @@ class QueryDecomposer:
                 record_usage(self._llm_model, "decomposer", getattr(response, "usage_metadata", None), len(full_prompt))
                 raw = getattr(response, "text", "") or ""
 
-            # Extract JSON array from the response
-            json_match = re.search(r'\[.*?\]', raw, re.DOTALL)
+            # Extract the JSON object from the response (the prompt asks for
+            # {"sub_queries": [...], "formula": {...}|null} specifically so
+            # this is an object, not the bare array the prompt used before).
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
             if not json_match:
-                return None
+                return None, None
 
             parsed = json.loads(json_match.group())
-            if not isinstance(parsed, list):
-                return None
+            if not isinstance(parsed, dict):
+                return None, None
 
-            # Validate and normalise each step
+            raw_steps = parsed.get("sub_queries")
             steps: List[Dict[str, Any]] = []
-            for i, item in enumerate(parsed, 1):
-                if not isinstance(item, dict):
-                    continue
-                q = str(item.get("query", "")).strip()
-                if not q:
-                    continue
-                steps.append({
-                    "step": item.get("step", i),
-                    "type": "retrieval",
-                    "query": q,
-                    "target_metric": item.get("target_metric") or None,
-                    "target_year": str(item.get("target_year", "")).strip() or None,
-                    "source": "llm",
-                })
+            if isinstance(raw_steps, list):
+                for i, item in enumerate(raw_steps, 1):
+                    if not isinstance(item, dict):
+                        continue
+                    q = str(item.get("query", "")).strip()
+                    if not q:
+                        continue
+                    steps.append({
+                        "step": item.get("step", i),
+                        "type": "retrieval",
+                        "query": q,
+                        "target_metric": item.get("target_metric") or None,
+                        "target_year": str(item.get("target_year", "")).strip() or None,
+                        "source": "llm",
+                    })
 
-            return steps if steps else None
+            formula = _validate_llm_formula(parsed.get("formula"))
+
+            return (steps if steps else None), formula
 
         except Exception:
-            return None
+            return None, None
 
     def suggest_narrative_topic_query(self, query: str, entity: str) -> Optional[str]:
         """
@@ -395,8 +516,12 @@ class QueryDecomposer:
         target_metrics: Optional[List[str]] = None,
         years: Optional[List[str]] = None,
         entity: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Decompose a financial query into ordered retrieval + computation steps."""
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """Decompose a financial query into ordered retrieval + computation
+        steps, and (second return value) any formula the question defines
+        inline, extracted by the same LLM call -- see _llm_decompose. None
+        when the LLM path didn't run (unavailable, or fell back to rule-based
+        decomposition) or the question doesn't define one of its own."""
         # ── Normalise inputs ──────────────────────────────────────────────────
         if not years:
             years = sorted(set(re.findall(r'(?:FY)?(20\d\d)', query)))
@@ -406,7 +531,7 @@ class QueryDecomposer:
         target_metrics = list(target_metrics or [])
         entity = (entity or "").strip()
 
-        llm_steps = self._llm_decompose(query, entity, target_metrics, years)
+        llm_steps, llm_formula = self._llm_decompose(query, entity, target_metrics, years)
 
         if llm_steps:
             retrieval_steps = llm_steps
@@ -414,6 +539,7 @@ class QueryDecomposer:
         else:
             retrieval_steps = self._rule_decompose(query, target_metrics, years, entity)
             decompose_source = "rule"
+            llm_formula = None  # the rule-based path has no formula-understanding ability
 
         # ── Renumber steps sequentially ───────────────────────────────────────
         for i, s in enumerate(retrieval_steps, 1):
@@ -429,4 +555,4 @@ class QueryDecomposer:
             "source": decompose_source,
         })
 
-        return retrieval_steps
+        return retrieval_steps, llm_formula
