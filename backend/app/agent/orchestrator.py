@@ -241,12 +241,21 @@ class FinAgentRAGOrchestrator:
         # evidence needed for trend calculations, causing fallback answers.
         retrieval_years = _with_implied_trend_year(classification["years"], query.lower())
         query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
+        # A formula the question defines inline, extracted by the decomposer's
+        # own LLM call below (never a separate call) -- see decomposer.py's
+        # _SYSTEM_PROMPT / _validate_llm_formula. Stays None whenever
+        # formula_entry above already matched (the registered library always
+        # takes precedence and is never second-guessed by this) or the
+        # question simply doesn't define one; passed down to
+        # pot_reasoner.generate_and_execute() as a same-shaped fallback for
+        # when ITS OWN detect_formula() call also finds nothing registered.
+        dynamic_formula_entry = None
         if formula_entry:
             sub_questions = self._build_formula_subquestions(
                 formula_entry, query_entity, retrieval_years
             )
         elif answer_mode == "NUMERIC":
-            sub_questions = self.decomposer.decompose(
+            sub_questions, dynamic_formula_entry = self.decomposer.decompose(
                 query,
                 target_metrics=classification["target_metrics"],
                 years=retrieval_years,
@@ -509,7 +518,8 @@ class FinAgentRAGOrchestrator:
                         ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
                     context_window.append(ev_enriched)
                 pot_res = self.pot_reasoner.generate_and_execute(
-                    query, context_window, entity=classification["entity"]
+                    query, context_window, entity=classification["entity"],
+                    dynamic_formula_entry=dynamic_formula_entry,
                 )
                 iter_trace["pot_code"] = pot_res["code"]
                 iter_trace["sandbox_output"] = pot_res["output_log"]

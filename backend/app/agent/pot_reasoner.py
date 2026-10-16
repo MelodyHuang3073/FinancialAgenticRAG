@@ -3867,6 +3867,64 @@ def _apply_inventory_turnover_convention_override(
     return {**avg_entry, "formula_key": "inventory_turnover_avg"}
 
 
+_MARGIN_RESULT_LABEL_RE = re.compile(r'\bmargin\b', re.IGNORECASE)
+_GROWTH_OUTPUT_LOG_RE = re.compile(r'(?:YoY Growth|CAGR)[^:]*:\s*-?[0-9.]+%\s*$')
+
+
+def _check_ratio_plausibility(
+    result_value: Optional[float],
+    result_unit: str,
+    formula_entry: Optional[Dict[str, Any]],
+    output_log: str,
+) -> Optional[str]:
+    """A percentage-denominated ratio result outside a structurally
+    plausible range is a strong signal the calculation resolved against the
+    wrong evidence row (e.g. a same-captioned line from an unrelated
+    segment/quarterly sub-table, rather than the consolidated statement)
+    rather than a genuinely unusual but real figure.
+
+    General, not metric-specific: the SAME bound applies to every formula
+    whose own result_label names it a "margin" (gross/operating/net/EBITDA
+    margin, etc.) -- in the ordinary course of business, revenue minus a
+    non-negative cost cannot exceed revenue, so these cannot legitimately
+    exceed 100%. A separate, much wider bound applies to the generic
+    YoY/CAGR growth-rate output (detected structurally from its own printed
+    "... Growth (y1->y2): X%" / "... CAGR (...): X%" shape, since that path
+    has no formula_entry of its own) -- a real year-over-year change in the
+    thousands of percent would be an extraordinary outlier for any filer.
+
+    Returns a human-readable reason (for the verifier to reject and retry
+    on) when implausible, None otherwise -- including whenever there's
+    nothing to check (no numeric result, or a non-percentage unit).
+    """
+    if result_value is None:
+        return None
+    # Prefer the unit the MATCHED formula itself declares over result_unit:
+    # result_unit can get silently overwritten to "$" by an unrelated
+    # fallback extraction path (e.g. a free-text grab that found some other
+    # dollar-denominated line when formula-guided extraction failed) even
+    # though the question matched a percentage-denominated formula -- that
+    # mislabeling is itself part of what this check exists to catch, so it
+    # must not suppress the check.
+    expected_unit = (formula_entry.get("unit") if formula_entry else None) or result_unit
+    if expected_unit != "%":
+        return None
+    if formula_entry and _MARGIN_RESULT_LABEL_RE.search(formula_entry.get("result_label", "")):
+        if abs(result_value) > 100:
+            return (
+                f"{formula_entry.get('result_label')} 計算結果為 {result_value}%，"
+                "超出毛利率/營業利益率等比率在正常營運下不可能超過100%的合理範圍，"
+                "可能是抓到同名但不相關列(例如分部/分期拆表)的資料。"
+            )
+        return None
+    if _GROWTH_OUTPUT_LOG_RE.search(output_log or "") and abs(result_value) > 1000:
+        return (
+            f"年增率/CAGR 計算結果為 {result_value}%，"
+            "遠超過一般公司規模下合理的成長率範圍，可能是分母抓錯(例如抓到極小的數值)。"
+        )
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Reasoner
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3879,7 +3937,8 @@ class ProgramOfThoughtReasoner:
     """
 
     def generate_and_execute(
-        self, query: str, evidence_list: List[Dict[str, Any]], entity: str = ""
+        self, query: str, evidence_list: List[Dict[str, Any]], entity: str = "",
+        dynamic_formula_entry: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         q_lower = query.lower()
 
@@ -3932,6 +3991,27 @@ class ProgramOfThoughtReasoner:
         # ── Step 1: Detect formula intent ────────────────────────────────────
         formula_entry = detect_formula(query)
         formula_entry = _apply_inventory_turnover_convention_override(formula_entry, entity, evidence_list)
+        # Fallback only: the static library didn't recognize this metric at
+        # all (not merely "matched but couldn't resolve a value" -- that
+        # case is handled further down by the PATH-1→PATH-2 fallthrough).
+        # `dynamic_formula_entry` is parsed by the decomposer's own LLM call
+        # (the SAME call that already produces this question's retrieval
+        # sub-queries) directly out of a formula the question spells out
+        # inline ("X is defined as: A / B", or "X (A / B)") -- see
+        # decomposer.py's _SYSTEM_PROMPT and _validate_llm_formula. Using it
+        # here, instead of falling all the way through to a no-computation
+        # single-value lookup, lets this SAME extraction/codegen engine
+        # (_extract_formula_guided / _gen_formula_code) run it exactly as if
+        # it had been pre-registered in FORMULA_LIBRARY, without duplicating
+        # any of that engine's logic.
+        if formula_entry is None:
+            formula_entry = dynamic_formula_entry
+        # Kept across the PATH-1/PATH-2 fallback below (which nulls out
+        # formula_entry itself once formula-guided extraction fails) so the
+        # plausibility check at the end still knows the QUESTION asked for a
+        # margin even when the actual number came from the generic
+        # extracted-table path instead.
+        _originally_matched_formula_entry = formula_entry
 
         # Determine whether a referenced percent-of-sales metric increased or decreased
         # when no explicit formula is available; fall back to a generic year-over-year
@@ -4195,6 +4275,15 @@ class ProgramOfThoughtReasoner:
                 for v in extracted_table.values()
             }
 
+        _result_unit = (
+            (formula_entry.get("unit", "") if formula_entry else "")
+            or (detected_unit[0] if detected_unit else "")
+            # The generic YoY/CAGR branches print "... Growth (y1->y2): 8.27%"
+            # without a formula entry, so no unit was attached and the card
+            # showed a bare 8.2721.
+            or ("%" if re.search(r"(?:YoY Growth|CAGR)[^:]*:\s*-?[0-9.]+%\s*$", stdout_err or "") else "")
+        )
+
         return {
             "code": code_str,
             "success": success,
@@ -4209,15 +4298,11 @@ class ProgramOfThoughtReasoner:
             "result_series": result_series,
             "result_delta": result_delta,
             "result_direction": result_direction,
-            "result_unit": (
-                (formula_entry.get("unit", "") if formula_entry else "")
-                or (detected_unit[0] if detected_unit else "")
-                # The generic YoY/CAGR branches print "... Growth (y1->y2): 8.27%"
-                # without a formula entry, so no unit was attached and the card
-                # showed a bare 8.2721.
-                or ("%" if re.search(r"(?:YoY Growth|CAGR)[^:]*:\s*-?[0-9.]+%\s*$", stdout_err or "") else "")
-            ),
+            "result_unit": _result_unit,
             "is_comparison_answer": is_cf_activity_comparison,
             "is_qualitative_characterization": is_qualitative_characterization,
             "used_evidence_ids": _collect_used_evidence_ids(resolved_formula_meta, evidence_list),
+            "implausible_result_reason": _check_ratio_plausibility(
+                res_val, _result_unit, _originally_matched_formula_entry, stdout_err
+            ),
         }
