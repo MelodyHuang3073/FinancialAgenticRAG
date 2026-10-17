@@ -513,6 +513,27 @@ FORMULA_LIBRARY: Dict[str, Dict[str, Any]] = {
         },
         "result_label": "Capital Intensity Ratio",
         "unit": "x",
+        # A capital-intensity judgment rests on several standard indicators,
+        # not this one ratio (see the accounting conventions in the answer
+        # prompt): each is computed alongside it with the same engine,
+        # shown in the given display unit.
+        "supporting_formulas": {
+            "roa": "%",
+            "capex_to_revenue": "%",
+            "fixed_assets_to_total_assets": "%",
+        },
+    },
+    "fixed_assets_to_total_assets": {
+        "keywords_en": ["fixed assets to total assets", "fixed assets / total assets",
+                         "fixed asset ratio"],
+        "formula_expr": "ppe / total_assets",
+        "required_vars": {
+            "ppe":          ["property, plant and equipment, net", "property and equipment, net",
+                             "net property, plant and equipment", "property, plant and equipment"],
+            "total_assets": ["total assets", "assets"],
+        },
+        "result_label": "Fixed Assets / Total Assets",
+        "unit": "%",
     },
     "cash_conversion_cycle": {
         # Register this formula before inventory_turnover/receivables_turnover/dpo.

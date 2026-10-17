@@ -184,6 +184,16 @@ def _no_calculation_path(q_lower: str) -> bool:
     )
 
 
+def is_no_calculation_question(query: str) -> bool:
+    """True for a question shape with no single computed answer (selection,
+    guidance, group comparison, existence, category threshold): its answer
+    is read from the filing's text, so generate_and_execute skips the
+    calculation and the orchestrator also retrieves with the question's own
+    wording."""
+    q_lower = query.lower()
+    return bool(_CATEGORY_THRESHOLD_QUERY_RE.search(q_lower) or _no_calculation_path(q_lower))
+
+
 #: Not every filer states its dividend rate as a clean standalone
 #: "Dividends declared per share" table row — many
 #: only ever state it in a narrative sentence (e.g. "we paid dividends
@@ -3033,8 +3043,11 @@ def _pick_best_in_group(
     if not items:
         return None
     aliases = _CANONICAL_TO_ALIASES.get(canonical, [canonical])
+    value_counts: Dict[float, int] = {}
+    for it in items:
+        value_counts[it["val"]] = value_counts.get(it["val"], 0) + 1
 
-    def sort_key(x: Dict) -> Tuple[int, int, int, int, int, float]:
+    def sort_key(x: Dict) -> Tuple[int, int, int, int, int, int, int, float]:
         score = _score_row_match(x["item"], aliases)
         year_match = 1 if preferred_year and x["year"] == preferred_year else 0
         is_net = 1 if _NET_QUALIFIER_RE.search(x["item"].lower()) else 0
@@ -3049,7 +3062,11 @@ def _pick_best_in_group(
         # to a total metric.
         is_total = 1 if aliases and aliases[0].startswith("total") and aliases[0] in x["item"].lower() else 0
         on_home = 1 if _on_home_statement(canonical, x.get("section")) else 0
-        return (score, year_match, on_home, is_total, is_net, -len(x["item"]), magnitude)
+        # Corroboration, as in the formula-guided resolver: a value the
+        # filing prints in more than one place outranks a one-off row that
+        # merely shares the label.
+        corroboration = value_counts.get(x["val"], 0)
+        return (score, year_match, on_home, is_total, is_net, corroboration, -len(x["item"]), magnitude)
 
     return max(items, key=sort_key)
 
@@ -3231,6 +3248,44 @@ def _library_formula_from_table(
             "average balance the metric's definition calls for."
         )
     return True
+
+
+def _supporting_metric_lines(
+    formula_entry: Optional[Dict[str, Any]],
+    extracted_table: Dict[str, Dict],
+    preferred_year: Optional[str],
+    query_years: Optional[List[str]],
+    q_lower: str,
+) -> List[str]:
+    """Code for the indicators a library formula lists under
+    `supporting_formulas` ({formula_key: display unit}): each is computed
+    from the table-extracted values with the same engine as any library
+    formula (_library_formula_from_table) and printed after the main result.
+    Their own result variables are renamed so the main `result` is left
+    untouched. A supporting indicator whose inputs are not in the evidence
+    is simply omitted."""
+    supporting = (formula_entry or {}).get("supporting_formulas") or {}
+    if not supporting or not extracted_table:
+        return []
+    groups = _group_by_canonical(extracted_table)
+    out: List[str] = []
+    for key, display_unit in supporting.items():
+        entry = FORMULA_LIBRARY.get(key)
+        if not entry:
+            continue
+        sub: List[str] = []
+        if not _library_formula_from_table(
+            sub, {**entry, "formula_key": key, "unit": display_unit}, groups,
+            extracted_table, preferred_year, query_years, q_lower, None,
+        ):
+            continue
+        out.append(f"# Supporting indicator: {key}")
+        out.extend(
+            re.sub(r"\b(result|_raw|_delta|_direction)\b",
+                   lambda m, k=key: f"_{k}_{m.group(1).lstrip('_')}", line)
+            for line in sub
+        )
+    return out
 
 
 def _emit_multi_year_ratio(
@@ -3635,9 +3690,31 @@ class ProgramOfThoughtReasoner:
         identification happens once, there, and this module receives the
         decision. Standalone callers (tests, tools) may omit it, in which
         case the query is matched here.
-        dynamic_formula_entry: a formula the question defines inline,
-        extracted by the decomposer; used only when the library has none.
+        dynamic_formula_entry: a formula the decomposer's LLM supplied;
+        used only when the library has none. One the question itself spells
+        out is used directly. One the LLM inferred (the standard definition
+        of a metric the question only names) is a fallback: the existing
+        deterministic calculation runs first and its result stands whenever it
+        is reliable, so a question that already computes correctly is not
+        affected by the LLM's formula.
         """
+        if (
+            dynamic_formula_entry is not None
+            and library_formula_entry is None
+            and dynamic_formula_entry.get("stated_in_question") is False
+        ):
+            first = self.generate_and_execute(
+                query, evidence_list, entity,
+                library_formula_entry=None, dynamic_formula_entry=None,
+            )
+            reliable = (
+                first.get("result_value") is not None
+                and "result is not reliable" not in (first.get("output_log") or "")
+                and not first.get("implausible_result_reason")
+            )
+            if reliable or first.get("calculation_skipped"):
+                return first
+            dynamic_formula_entry = {**dynamic_formula_entry, "stated_in_question": True}
         q_lower = query.lower()
 
         # For "which of operations, investing, financing brought in the most/least cash"
@@ -3672,7 +3749,7 @@ class ProgramOfThoughtReasoner:
         # If structured extraction cannot provide per-category shares reliably, skip
         # returning an unverified numeric result and let the textual synthesis enumerate
         # and verify categories instead.
-        if _CATEGORY_THRESHOLD_QUERY_RE.search(q_lower) or _no_calculation_path(q_lower):
+        if is_no_calculation_question(query):
             return {
                 "code": "", "success": True, "result_value": None,
                 "output_log": "", "extracted_variables": {},
@@ -3912,6 +3989,12 @@ class ProgramOfThoughtReasoner:
                     else:
                         code_lines.append("result = 0.0")
 
+
+        # Supporting indicators the matched formula declares (e.g. the
+        # standard ratios a capital-intensity judgment rests on).
+        code_lines.extend(_supporting_metric_lines(
+            _originally_matched_formula_entry, extracted_table, preferred_year, query_years, q_lower,
+        ))
 
         code_str = "\n".join(code_lines)
 

@@ -15,7 +15,9 @@ from typing import Dict, Any, List, Optional
 from app.rag.corpus_store import FinancialCorpusStore
 from app.agent.question_classifier import FinanceBenchClassifier
 from app.agent.decomposer import QueryDecomposer
-from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical
+from app.agent.pot_reasoner import (
+    ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical, is_no_calculation_question,
+)
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import (
@@ -437,6 +439,9 @@ class FinAgentRAGOrchestrator:
                             sub_q.get("step", 0),
                             self._deduplicate_hits(hits, entity=classification.get("entity")),
                         )
+                        if sub_q.get("source") == "original_question":
+                            for hit in hits:
+                                hit["original_question_hit"] = True
 
                         step_hit_infos = []
                         for hit in hits:
@@ -462,6 +467,39 @@ class FinAgentRAGOrchestrator:
                                 f"[{decompose_src}] Query: '{step_query}' → "
                                 f"{len(hits)} passage(s) retrieved"
                             ),
+                        })
+
+                    # A question with no single computed answer (guidance, selection,
+                    # comparison, existence) is answered from the filing's text,
+                    # which is worded like the question rather than like the line
+                    # items the sub-questions target -- so, as on the non-numeric
+                    # path, the question itself is also searched. Computable
+                    # questions keep retrieval targeted on their formula inputs.
+                    if is_no_calculation_question(query) and query not in {sq["query"] for sq in retrieval_steps}:
+                        q_hits = self._tag_subquery(
+                            len(retrieval_steps) + 1,
+                            self._deduplicate_hits(
+                                self.corpus_store.search(
+                                    query, top_k=self.RETRIEVAL_TOP_K,
+                                    exclude_ids=list(retrieved_ids),
+                                    entity=classification.get("entity"),
+                                    statement_type_hint=statement_type_hint,
+                                    query_years=classification.get("years"),
+                                ),
+                                entity=classification.get("entity"),
+                            ),
+                        )
+                        for hit in q_hits:
+                            hit["original_question_hit"] = True
+                            retrieved_ids.add(hit["id"])
+                            evidence_buffer.append(hit)
+                            info = self._build_evidence_info(hit, sub_question=query)
+                            iter_trace["retrieved_passages"].append(info)
+                            evidence_meta.append(info)
+                        trace_steps.append({
+                            "step_name": "Original question",
+                            "type": "step_retrieval",
+                            "detail": f"Query: '{query}' → {len(q_hits)} passage(s) retrieved",
                         })
 
                 else:
