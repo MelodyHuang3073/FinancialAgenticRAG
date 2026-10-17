@@ -111,7 +111,7 @@ def test_inferred_formula_is_used_when_the_deterministic_path_finds_nothing():
 
 
 def test_incurred_cost_directive_fires_only_for_initiative_questions_with_the_sentence():
-    from app.agent.llm_client import _incurred_cost_directive
+    from app.agent.accounting_conventions import incurred_cost_directive as _incurred_cost_directive
     ev = ("We expect to incur costs of approximately $700 million in connection with "
           "separating a unit, of which approximately 90% has been incurred since inception.")
     assert "MUST be YES" in _incurred_cost_directive("Is the company separating any business?", ev)
@@ -136,7 +136,7 @@ def test_original_question_hits_keep_their_slots_in_the_prompt_window():
 
 
 def test_leverage_directive_lists_directions_only_for_percent_of_sales_questions():
-    from app.agent.llm_client import _leverage_directive
+    from app.agent.accounting_conventions import leverage_directive as _leverage_directive
     ev = ("SG&A declined as a percent of net sales, primarily due to leverage of marketing expenses, "
           "partially offset by deleverage of store payroll and\nbenefits due to wage investments.")
     d = _leverage_directive("Did the cost as a percent of net sales increase in FY2023?", ev)
