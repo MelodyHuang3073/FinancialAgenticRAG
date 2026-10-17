@@ -72,3 +72,74 @@ def test_same_label_rows_prefer_the_line_items_primary_statement():
     # Same label, same year: the income-statement row wins over the larger
     # same-labeled row from another table.
     assert _pick_best_in_group([note_row, statement_row], "cost_of_revenue", "2023") is statement_row
+
+
+def _rows(*items):
+    return [{"content": f"Company: ACME | Line Item: {name} | 2023: {val}", "company": "ACME",
+             "type": "table_row", "id": str(i)} for i, (name, val) in enumerate(items)]
+
+
+def test_inferred_formula_does_not_override_a_reliable_deterministic_result():
+    from app.agent.pot_reasoner import ProgramOfThoughtReasoner
+    reasoner = ProgramOfThoughtReasoner()
+    evidence = _rows(("Total assets", "1,000"))
+    query = "What were Acme's total assets in 2023?"
+    inferred = {"formula_key": "llm_extracted", "stated_in_question": False, "unit": "",
+                "formula_expr": "op0 / op1", "result_label": "x",
+                "required_vars": {"op0": ["total assets"], "op1": ["revenue"]}}
+    baseline = reasoner.generate_and_execute(query, evidence, "Acme", library_formula_entry=None)
+    with_inferred = reasoner.generate_and_execute(
+        query, evidence, "Acme", library_formula_entry=None, dynamic_formula_entry=inferred)
+    assert baseline["result_value"] == 1000.0
+    assert with_inferred["result_value"] == baseline["result_value"]
+
+
+def test_inferred_formula_is_used_when_the_deterministic_path_finds_nothing():
+    from app.agent.pot_reasoner import ProgramOfThoughtReasoner
+    reasoner = ProgramOfThoughtReasoner()
+    evidence = _rows(("Widget repurchases fourth quarter", "25"), ("Widget repurchases full year", "100"))
+    query = "What share of Acme's widget repurchases happened in the fourth quarter of 2023?"
+    inferred = {"formula_key": "llm_extracted", "stated_in_question": False, "unit": "%",
+                "formula_expr": "q4 / total", "result_label": "Q4 share",
+                "required_vars": {"q4": ["widget repurchases fourth quarter"],
+                                  "total": ["widget repurchases full year"]}}
+    without = reasoner.generate_and_execute(query, evidence, "Acme", library_formula_entry=None)
+    with_inferred = reasoner.generate_and_execute(
+        query, evidence, "Acme", library_formula_entry=None, dynamic_formula_entry=inferred)
+    assert with_inferred["result_value"] == 25.0
+    assert without["result_value"] != 25.0
+
+
+def test_incurred_cost_directive_fires_only_for_initiative_questions_with_the_sentence():
+    from app.agent.llm_client import _incurred_cost_directive
+    ev = ("We expect to incur costs of approximately $700 million in connection with "
+          "separating a unit, of which approximately 90% has been incurred since inception.")
+    assert "MUST be YES" in _incurred_cost_directive("Is the company separating any business?", ev)
+    how_much = _incurred_cost_directive("How much more will it pay to separate the unit?", ev)
+    assert "777.78" in how_much and "77.78" in how_much and "MUST use" in how_much
+    assert _incurred_cost_directive("What is the dividend per share?", ev) == ""
+    assert _incurred_cost_directive("Is the company separating any business?", "No such sentence.") == ""
+
+
+def test_original_question_hits_keep_their_slots_in_the_prompt_window():
+    from app.agent.evidence_selection import select_with_quota
+    pool = []
+    # Eight sub-queries, each retrieving two strong passages, would fill a 16-slot window by quota alone.
+    for sq in range(8):
+        for k in range(2):
+            pool.append({"id": f"s{sq}_{k}", "subquery_idx": sq, "relevance_score": 60 - sq - k})
+    # The original question's third-best hit scores higher than several quota winners
+    for k in range(4):
+        pool.append({"id": f"o{k}", "subquery_idx": 99, "relevance_score": 45 - k, "original_question_hit": True})
+    ids = {i["id"] for i in select_with_quota(pool, 16)}
+    assert {"o0", "o1", "o2", "o3"} <= ids
+
+
+def test_leverage_directive_lists_directions_only_for_percent_of_sales_questions():
+    from app.agent.llm_client import _leverage_directive
+    ev = ("SG&A declined as a percent of net sales, primarily due to leverage of marketing expenses, "
+          "partially offset by deleverage of store payroll and\nbenefits due to wage investments.")
+    d = _leverage_directive("Did the cost as a percent of net sales increase in FY2023?", ev)
+    assert '"marketing expenses" fell' in d and '"store payroll and benefits" rose' in d
+    assert _leverage_directive("What was the dividend per share?", ev) == ""
+    assert _leverage_directive("Did the cost as a percent of net sales increase?", "No such idiom here.") == ""

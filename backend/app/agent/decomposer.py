@@ -87,9 +87,15 @@ def _validate_llm_formula(raw: Any) -> Optional[Dict[str, Any]]:
     unit = raw.get("unit") if raw.get("unit") in _VALID_FORMULA_UNITS else ""
     result_label = str(raw.get("result_label") or "Computed Ratio").strip() or "Computed Ratio"
     multi_year = bool(raw.get("multi_year"))
+    # True when the question itself spells the formula out; False when the LLM
+    # supplied the standard definition of a metric the question only names.
+    # pot_reasoner treats the second kind as a fallback behind the existing
+    # deterministic calculation path.
+    stated_in_question = raw.get("stated_in_question") is not False
 
     return {
         "formula_key": "llm_extracted",
+        "stated_in_question": stated_in_question,
         "result_label": result_label,
         "unit": unit,
         "formula_expr": formula_expr,
@@ -133,14 +139,16 @@ class QueryDecomposer:
         "Each sub-query must target ONE specific (metric, year) pair.\n"
         "For ratio/margin questions, include sub-queries for BOTH numerator and denominator.\n"
         "\n"
-        "Also check: does the question define its OWN formula inline (e.g. \"X is defined "
-        "as: A / B\", or \"X (A / B)\")? This only applies to a formula the question spells "
-        "out itself in words — not a metric you merely recognize by name (gross margin, ROE, "
-        "etc. without an explicit definition in the question text). If it does, ALSO output a "
-        "\"formula\" object describing exactly that formula, using short variable names (op0, "
-        "op1, ...) for each named financial quantity, so it can be computed later from "
-        "retrieved data. If the question does not define its own formula inline, set "
-        "\"formula\" to null.\n"
+        "Also check: does answering require CALCULATING a number from financial-statement "
+        "figures -- a ratio, a share or percentage of a total, a difference, a growth rate, "
+        "an average? If so, ALSO output a \"formula\" object describing that calculation, "
+        "using short variable names (op0, op1, ...) for each named financial quantity, so a "
+        "program can compute it later from the retrieved data. If the question spells out its "
+        "own definition (e.g. \"X is defined as: A / B\"), the formula must follow that "
+        "definition exactly. If it names a metric without defining it, use the standard "
+        "textbook definition of that metric. If the answer is a single figure that can simply "
+        "be read from a statement or a sentence (an amount, a count, a name, a yes/no fact) "
+        "and needs no arithmetic, set \"formula\" to null.\n"
         "\n"
         "A formula object looks like:\n"
         "{\n"
@@ -149,8 +157,11 @@ class QueryDecomposer:
         "  \"formula_expr\": \"<arithmetic expression using ONLY the variable names below, "
         "+ - * / ( ) and numeric literals — no other text>\",\n"
         "  \"required_vars\": {\"<var_name>\": [\"<line item name this variable refers to>\"]},\n"
-        "  \"multi_year\": true | false\n"
+        "  \"multi_year\": true | false,\n"
+        "  \"stated_in_question\": true | false\n"
         "}\n"
+        "Set stated_in_question to true only if the question itself spells out this formula; "
+        "false if you supplied the standard definition of a metric the question only names.\n"
         "For a quantity that needs the AVERAGE of a line item between two fiscal years (e.g. "
         "\"average total assets between FY2021 and FY2022\"), use TWO variables with the SAME "
         "base name suffixed _old and _new (e.g. op1_old, op1_new, both mapped to the SAME "
