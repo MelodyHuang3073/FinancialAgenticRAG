@@ -37,14 +37,9 @@ sentence could be read another way)
   supporting context; total assets/revenue alone overstates intensity when
   assets are mostly goodwill, intangibles or financial assets.
 - A fiscal year ending in January or February is often named by the calendar
-  year it STARTS in by the company itself (a year ended in early 2023 is the
-  company's "fiscal 2022"), while a question's "FY2023" usually means the
-  year that ENDS in 2023. So when the year asked is labeled differently in
-  the filing, match by the period's end date, not by the number in the label:
-  use the filing's figures for the year ending in the asked year (and its
-  quarters), and state this assumption in one clause. Never conclude a figure
-  is missing before checking the period labeled one year earlier. A December
-  year-end label is unambiguous.
+  year it STARTS in (a year ended in early 2023 is the company's "fiscal 2022"),
+  while a question's "FY2023" means the year that ENDS in 2023: match by the
+  period's end date, not by the number in the label, and say so in one clause.
 - Banks, card issuers and insurers have no cost-of-goods-sold or gross-profit
   line, so gross or operating margin is not how they are measured; if asked,
   say so first and why, then give the closest meaningful measure.

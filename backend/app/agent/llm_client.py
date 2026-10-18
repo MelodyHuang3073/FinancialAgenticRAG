@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.tools.table_parser import is_markdown_separator_row
 from app.agent.evidence_selection import select_with_quota
+from app.agent.answer_directives import question_directives
 from app.agent.accounting_conventions import (
     ACCOUNTING_CONVENTIONS, incurred_cost_directive, leverage_directive,
 )
@@ -257,7 +258,7 @@ class LLMAnswerGenerator:
         # to the model as one never retrieved.
         pool_text = "\n".join(item.get("parent_content") or item.get("content", "") for item in evidence)
         incurred_cost_summary = (
-            incurred_cost_directive(query, pool_text) + leverage_directive(query, pool_text)
+            incurred_cost_directive(query, pool_text) + leverage_directive(query, pool_text) + question_directives(query, pool_text)
         )
 
         verification_summary = ""
@@ -386,10 +387,6 @@ sentence states the conclusion together with its key figure(s) and what they
 measure (metric, period, unit) -- "Yes"/"No" first for a yes/no question, the
 item's name for a "which" question, each period's value for a change. The
 following sentences give the supporting figures or reasons.
-⚠️ CRITICAL: a "best/worst/top" question that does not say whether it means size
-or growth MUST name BOTH in the first sentence: the item with the largest amount
-AND the item with the fastest growth rate (look for the growth percentages in the
-evidence), each with its figure. An answer with only one of the two is wrong.
 Back the verdict with a short quotation (a few words in quotation marks) from
 the filing sentence it rests on.
 
@@ -402,20 +399,19 @@ the filing sentence it rests on.
   period, the answer is Yes, whatever else the filing says about its main
   transaction. If a CRITICAL note above says the verdict MUST be YES, your
   first word is "Yes".
-- ⚠️ CRITICAL: when asked WHICH region, segment or category had the biggest drop
-  or the highest growth, rank only the finest-level rows the table shows (never
-  an aggregate row such as a regional total that is made up of listed sub-rows),
-  compare every one of them, and name the winning row with its figure.
-- A "best/worst/top performer" question with no stated basis: does your answer
-  give BOTH the largest-amount reading AND the fastest-growth reading, each
-  with its figure? If either is missing, add it before answering.
-- Did the question allow more than one reading (for example "best" by size or
-  by growth)? Then answer each reading.
 - Did you list every item the evidence names, including plans and forecasts
   stated without a figure? Check the whole list, not only the items that carry
   numbers.
-- If a change is driven by an acquisition, merger or divestiture, did you name
-  the other company or the deal rather than only "acquisition-related"?
+- ⚠️ CRITICAL: if a change is driven by an acquisition, merger or divestiture,
+  you MUST name the other company or the deal in the first sentence that
+  mentions it, never only "acquisition-related".
+- ⚠️ CRITICAL: asked WHERE a company operates (geographies, regions): build the
+  answer on the regions the filing itself names (typically in its geographic or
+  segment note) and name each one. Do not answer with employee headcount or
+  with a list of individual countries when the filing names regions.
+- ⚠️ CRITICAL: asked which or what companies were acquired: list every company
+  the filing's acquisitions note names for the periods asked, using the note's
+  own names, and add none that the note does not name for those periods.
 - The question may word an item differently from the filing. Match them by
   meaning, then apply the accounting conventions in ⑥ exactly as written.
 """
