@@ -143,3 +143,17 @@ def test_leverage_directive_lists_directions_only_for_percent_of_sales_questions
     assert '"marketing expenses" fell' in d and '"store payroll and benefits" rose' in d
     assert _leverage_directive("What was the dividend per share?", ev) == ""
     assert _leverage_directive("Did the cost as a percent of net sales increase?", "No such idiom here.") == ""
+
+
+def test_question_shape_directives_fire_only_for_their_shapes():
+    from app.agent.answer_directives import (
+        ranking_directive, fiscal_year_directive, question_directives,
+    )
+    assert "BOTH" in ranking_directive("Which product category performed the best in the domestic market?")
+    assert "BOTH" not in ranking_directive("Which category had the highest growth rate?")
+    assert "finest-level" in ranking_directive("Which region had the biggest drop in revenue?")
+    assert ranking_directive("What was net income in 2023?") == ""
+    ev = "52 weeks ended January 28, 2023. During fiscal 2022, the Company repurchased shares."
+    assert "fiscal 2022" in fiscal_year_directive("What share of repurchases was in Q4 of FY2023?", ev)
+    assert fiscal_year_directive("What share was in Q4 of FY2023?", "year ended December 31, 2023") == ""
+    assert question_directives("What was revenue in 2023?", ev) == ""
