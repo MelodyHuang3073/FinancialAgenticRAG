@@ -733,32 +733,32 @@
   },
   {
     "doc_name": "FOOTLOCKER_2025_10K",
-    "question": "What was Foot Locker's total revenue in fiscal 2025 (ended February 1, 2025) compared to fiscal 2024?",
-    "answer": "$7,988 million in fiscal 2025, down from $8,168 million in fiscal 2024, a decrease of approximately 2.2%.",
+    "question": "What was Foot Locker's total revenue in fiscal 2024 (ended February 1, 2025) compared to fiscal 2023?",
+    "answer": "$7,988 million in fiscal 2024, down from $8,168 million in fiscal 2023, a decrease of approximately 2.2%.",
     "question_type": "metrics-generated"
   },
   {
     "doc_name": "FOOTLOCKER_2025_10K",
-    "question": "Did Foot Locker return to profitability in fiscal 2025, and what primarily drove the turnaround?",
-    "answer": "Yes. Net income attributable to Foot Locker was $12 million in fiscal 2025, compared to a net loss of $(330) million in fiscal 2024. The turnaround was primarily driven by \"Other (expense) income, net\" improving dramatically from a $(556) million expense to just $(44) million, a favorable swing of roughly $512 million, even though income from operations actually declined.",
+    "question": "Did Foot Locker return to profitability in fiscal 2024, and what primarily drove the turnaround?",
+    "answer": "Yes. Net income attributable to Foot Locker was $12 million in fiscal 2024, compared to a net loss of $(330) million in fiscal 2023. The turnaround was primarily driven by \"Other (expense) income, net\" improving dramatically from a $(556) million expense to just $(44) million, a favorable swing of roughly $512 million, even though income from operations actually declined.",
     "question_type": "novel-generated"
   },
   {
     "doc_name": "FOOTLOCKER_2025_10K",
-    "question": "What was Foot Locker's income from operations in fiscal 2025 compared to fiscal 2024?",
-    "answer": "$103 million in fiscal 2025, down from $142 million in fiscal 2024, a decrease of approximately 27.5%.",
+    "question": "What was Foot Locker's income from operations in fiscal 2024 compared to fiscal 2023?",
+    "answer": "$103 million in fiscal 2024, down from $142 million in fiscal 2023, a decrease of approximately 27.5%.",
     "question_type": "metrics-generated"
   },
   {
     "doc_name": "FOOTLOCKER_2025_10K",
-    "question": "What were Foot Locker's impairment and other charges in fiscal 2025 compared to fiscal 2024?",
-    "answer": "$97 million in fiscal 2025, up from $80 million in fiscal 2024.",
+    "question": "What were Foot Locker's impairment and other charges in fiscal 2024 compared to fiscal 2023?",
+    "answer": "$97 million in fiscal 2024, up from $80 million in fiscal 2023.",
     "question_type": "domain-relevant"
   },
   {
     "doc_name": "FOOTLOCKER_2025_10K",
-    "question": "What was Foot Locker's diluted EPS in fiscal 2025 compared to fiscal 2024?",
-    "answer": "$0.13 in fiscal 2025, compared to a diluted loss per share of $(3.51) in fiscal 2024.",
+    "question": "What was Foot Locker's diluted EPS in fiscal 2024 compared to fiscal 2023?",
+    "answer": "$0.13 in fiscal 2024, compared to a diluted loss per share of $(3.51) in fiscal 2023.",
     "question_type": "metrics-generated"
   },
   {
