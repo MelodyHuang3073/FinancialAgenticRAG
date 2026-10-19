@@ -206,6 +206,23 @@ class FinAgentRAGOrchestrator:
         if statement_type_hint == "unknown":
             statement_type_hint = None
 
+        # Decided once and used everywhere below: does this question have no single
+        # computed answer (selection, guidance, group comparison, existence, category
+        # threshold)? Such a question is answered from the filing's text, so
+        #   - the calculation is skipped (pot_reasoner), and
+        #   - the question's own wording is also searched.
+        # The test looks at the question's wording only, so it can be true for a
+        # question that ALSO names a library metric (e.g. "is EPS growth expected to
+        # accelerate?"): the no-calculation shape wins. Everything else about the
+        # formula path (the formula's own retrieval sub-queries) is unchanged.
+        #
+        # When the question itself is searched as a query:
+        #   1. numeric question, no library formula   -> always (appended below);
+        #   2. numeric question WITH a library formula -> only when no_calculation;
+        #   3. non-numeric (explanation / assessment)  -> when there is no formula,
+        #      or the question asks what drove a change (prefer_narrative).
+        no_calculation = is_no_calculation_question(query)
+
 
         trace_steps.append({
             "step_name": "FinanceBench Classification",
@@ -469,13 +486,14 @@ class FinAgentRAGOrchestrator:
                             ),
                         })
 
-                    # A question with no single computed answer (guidance, selection,
-                    # comparison, existence) is answered from the filing's text,
-                    # which is worded like the question rather than like the line
-                    # items the sub-questions target -- so, as on the non-numeric
-                    # path, the question itself is also searched. Computable
-                    # questions keep retrieval targeted on their formula inputs.
-                    if is_no_calculation_question(query) and query not in {sq["query"] for sq in retrieval_steps}:
+                    # Rule 2 of the list at the top of this function: a question with
+                    # no single computed answer (guidance, selection, comparison,
+                    # existence) is answered from the filing's text, which is worded
+                    # like the question rather than like the line items the
+                    # sub-questions target -- so, as on the non-numeric path, the
+                    # question itself is also searched. Computable questions keep
+                    # retrieval targeted on their formula inputs.
+                    if no_calculation and query not in {sq["query"] for sq in retrieval_steps}:
                         q_hits = self._tag_subquery(
                             len(retrieval_steps) + 1,
                             self._deduplicate_hits(
@@ -524,6 +542,7 @@ class FinAgentRAGOrchestrator:
                     query, context_window, entity=classification["entity"],
                     library_formula_entry=library_formula,
                     dynamic_formula_entry=dynamic_formula_entry,
+                    no_calculation=no_calculation,
                 )
                 iter_trace["pot_code"] = pot_res["code"]
                 iter_trace["sandbox_output"] = pot_res["output_log"]
@@ -658,6 +677,7 @@ class FinAgentRAGOrchestrator:
                 pot_res = self.pot_reasoner.generate_and_execute(
                     query, context_window, entity=classification["entity"],
                     library_formula_entry=non_numeric_formula,
+                    no_calculation=no_calculation,
                 )
             else:
                 pot_res = {

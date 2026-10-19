@@ -3682,8 +3682,14 @@ class ProgramOfThoughtReasoner:
         self, query: str, evidence_list: List[Dict[str, Any]], entity: str = "",
         library_formula_entry: Any = _MATCH_FROM_QUERY,
         dynamic_formula_entry: Optional[Dict[str, Any]] = None,
+        no_calculation: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Compute the question's numeric answer from `evidence_list`.
+
+        `no_calculation` is the caller's own decision on whether the question has no
+        single computed answer (see is_no_calculation_question); None means decide
+        here from the query. The orchestrator decides once per question and passes
+        the same answer to every place that needs it.
 
         library_formula_entry: the FORMULA_LIBRARY match (or None) the
         orchestrator already made for this question -- formula
@@ -3706,6 +3712,7 @@ class ProgramOfThoughtReasoner:
             first = self.generate_and_execute(
                 query, evidence_list, entity,
                 library_formula_entry=None, dynamic_formula_entry=None,
+                no_calculation=no_calculation,
             )
             reliable = (
                 first.get("result_value") is not None
@@ -3749,7 +3756,7 @@ class ProgramOfThoughtReasoner:
         # If structured extraction cannot provide per-category shares reliably, skip
         # returning an unverified numeric result and let the textual synthesis enumerate
         # and verify categories instead.
-        if is_no_calculation_question(query):
+        if (is_no_calculation_question(query) if no_calculation is None else no_calculation):
             return {
                 "code": "", "success": True, "result_value": None,
                 "output_log": "", "extracted_variables": {},
