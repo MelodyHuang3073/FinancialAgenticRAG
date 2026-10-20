@@ -10,6 +10,7 @@ shapes that need it, so the standing prompt stays short.
   fiscal_year_directive   a question's FY label vs a January/February year-end
 """
 import re
+from typing import Optional, Set
 
 # "performed the best/worst", "top performer": no stated basis -> size AND growth
 _BEST_WORST_RE = re.compile(
@@ -49,14 +50,41 @@ def ranking_directive(query: str) -> str:
     return "\n⚠️ CRITICAL: " + " Also, ".join(parts) if parts else ""
 
 
-def fiscal_year_directive(query: str, evidence_text: str) -> str:
-    """For a fiscal year that ends in January or February: the filing labels it
-    with the year it STARTS in ("fiscal 2022" for the year ended early 2023),
-    while a question's "FY2023" means the year that ENDS in 2023."""
+# "fiscal 2025 ... ended February 1, 2025" and "ended January 31, 2026 (fiscal 2025)":
+# a period's own label next to its January/February end date.
+_LABEL_THEN_END_RE = re.compile(
+    r'\bfiscal\s+(?:year\s+)?(20\d\d)\b[^.]{0,120}?\bended\s+(?:on\s+)?(?:January|February)\s+\d{1,2},\s*(20\d\d)',
+    re.IGNORECASE,
+)
+_END_THEN_LABEL_RE = re.compile(
+    r'\bended\s+(?:on\s+)?(?:January|February)\s+\d{1,2},\s*(20\d\d)[^.]{0,80}?\bfiscal\s+(?:year\s+)?(20\d\d)\b',
+    re.IGNORECASE,
+)
+
+
+def labels_the_filing_uses(evidence_text: str) -> set:
+    """The fiscal-year numbers the filing itself attaches to a period that ends
+    in January or February."""
+    labels = {int(label) for label, _ in _LABEL_THEN_END_RE.findall(evidence_text)}
+    labels |= {int(label) for _, label in _END_THEN_LABEL_RE.findall(evidence_text)}
+    return labels
+
+
+def fiscal_year_directive(query: str, evidence_text: str, filing_labels: Optional[Set[int]] = None) -> str:
+    """For a fiscal year that ends in January or February. The question's year
+    follows the filing's own labels: when the filing names a period with that
+    number, that is the period asked about and nothing is shifted. Only when no
+    period carries the asked number and the year that ENDS in the asked year is
+    labelled with the year before ("fiscal 2022" for the year ended early 2023)
+    is the question's year the year that ends in it. `filing_labels` are the
+    numbers the whole filing attaches to a period (not only the retrieved
+    passages), so a filing that uses the asked number somewhere is never shifted."""
     q_year = _QUESTION_FY_RE.search(query)
     if not q_year:
         return ""
     asked = int(q_year.group(1))
+    if asked in labels_the_filing_uses(evidence_text) or asked in (filing_labels or ()):
+        return ""
     if not any(int(y) == asked for _, y in _EARLY_YEAR_END_RE.findall(evidence_text)):
         return ""
     if not re.search(rf'\bfiscal\s+(?:year\s+)?{asked - 1}\b', evidence_text, re.IGNORECASE):
@@ -69,5 +97,5 @@ def fiscal_year_directive(query: str, evidence_text: str) -> str:
     )
 
 
-def question_directives(query: str, evidence_text: str) -> str:
-    return ranking_directive(query) + fiscal_year_directive(query, evidence_text)
+def question_directives(query: str, evidence_text: str, filing_labels: Optional[Set[int]] = None) -> str:
+    return ranking_directive(query) + fiscal_year_directive(query, evidence_text, filing_labels)

@@ -140,6 +140,38 @@ def _truncate_evidence_content(content: str, max_chars: int = 600, max_table_row
     return "\n".join(out)
 
 
+def _evidence_display_text(item: Dict[str, Any], max_chars: int = 4000) -> str:
+    """The text the answer prompt shows for one retrieved passage.
+
+    A table row is shown with its whole page: a lone row carries no column
+    headers or units, and the calculation needs the table around it.
+    A narrative chunk is shown with its page too, unless the page is longer
+    than the per-passage cap AND the retrieved chunk lies past the point where
+    head-truncation would cut: then the very sentences that were retrieved are
+    lost, so the shown text is a window of the page that contains the whole
+    chunk, centred on it, within the same cap. Every other passage is shown
+    exactly as before.
+    """
+    parent = item.get("parent_content") or ""
+    content = item.get("content", "")
+    if item.get("type") != "text_note" or len(parent) <= max_chars:
+        return parent or content
+    body = content.split("Content:", 1)[-1].strip()
+    pos = parent.find(body[:80]) if body else -1
+    if pos < 0:
+        return parent
+    end = pos + len(body)
+    if end <= max_chars:
+        return parent
+    spare = max_chars - len(body)
+    if spare <= 0:
+        return body[:max_chars]
+    after = min(len(parent) - end, spare // 2)
+    before = min(pos, spare - after)
+    after = min(len(parent) - end, spare - before)
+    return parent[pos - before:end + after]
+
+
 class LLMAnswerGenerator:
     def __init__(self) -> None:
         self._client = None
@@ -187,13 +219,14 @@ class LLMAnswerGenerator:
         sub_questions: Optional[List[Dict[str, Any]]] = None,
         external_context: Optional[List[Dict[str, Any]]] = None,
         understanding: Optional[Dict[str, Any]] = None,
+        filing_labels: Optional[set] = None,
     ) -> Optional[str]:
         client = self._get_client()
         if not client:
             return None
 
-        # Pass parent_content (the full page/table) to the LLM, not just the matched
-        # fragment, so multi-chunk notes/tables are seen in context.
+        # A table row is passed with its whole page (parent_content); a narrative
+        # chunk is passed as the retrieved chunk itself (_evidence_display_text).
         # Sort selected items by retriever relevance_score across sub-queries; do not
         # rely on the concatenated retrieval order. Pin whichever passages the PoT
         # sandbox actually used (pot_res["used_evidence_ids"]) so a passage backing
@@ -213,7 +246,7 @@ class LLMAnswerGenerator:
             effective_cap = RELIABLE_POT_EVIDENCE_CAP
         evidence_text = "\n".join(
             f"- [{item.get('company', 'Company')} / {item.get('table_name', 'Source')}] "
-            f"{_truncate_evidence_content(item.get('parent_content') or item.get('content', ''), max_chars=4000, max_table_rows=30)}"
+            f"{_truncate_evidence_content(_evidence_display_text(item), max_chars=4000, max_table_rows=30)}"
             for item in sorted_evidence[:effective_cap]
         )
 
@@ -258,7 +291,7 @@ class LLMAnswerGenerator:
         # to the model as one never retrieved.
         pool_text = "\n".join(item.get("parent_content") or item.get("content", "") for item in evidence)
         incurred_cost_summary = (
-            incurred_cost_directive(query, pool_text) + leverage_directive(query, pool_text) + question_directives(query, pool_text)
+            incurred_cost_directive(query, pool_text) + leverage_directive(query, pool_text) + question_directives(query, pool_text, filing_labels)
         )
 
         verification_summary = ""
