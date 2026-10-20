@@ -180,10 +180,9 @@ def _ensure_header_row(block: str) -> str:
     return "\n".join([synthetic_header, lines[1], lines[0]] + lines[2:])
 
 
-def _mineru_page_markdown(pdf_path: str) -> Optional[str]:
-    """The markdown for every table block MinerU found on the (single-page)
-    PDF at pdf_path, concatenated, or None if MinerU found no tables there
-    or the call failed/timed out.
+def _mineru_page_blocks(pdf_path: str) -> Optional[List[Dict[str, Any]]]:
+    """The content blocks MinerU found on the (single-page) PDF at pdf_path, in
+    reading order, or None if the call failed or timed out.
 
     Enforced via a worker thread + hard `.result(timeout=...)`, not just a
     try/except around a plain call: a single-page MinerU inference normally
@@ -208,25 +207,129 @@ def _mineru_page_markdown(pdf_path: str) -> Optional[str]:
             content = pool.submit(_call).result(timeout=MINERU_REPAIR_TIMEOUT_SECONDS)
     except Exception:
         return None
-    raw_table_blocks = [
-        block.get("content", "")
-        for page in (content.get("pages") or [])
-        for block in (page.get("blocks") or [])
-        if block.get("type") == "table" and block.get("content")
-    ]
-    # A table block comes back as HTML instead of a Markdown pipe table
-    # whenever it has merged cells (colspan/rowspan) -- see
-    # _html_tables_to_markdown's docstring. Each block is independently
-    # HTML or Markdown; check per block rather than assuming one shape for
-    # the whole page.
+    return [block for page in (content.get("pages") or []) for block in (page.get("blocks") or [])]
+
+
+def _table_block_to_markdown(raw: str) -> str:
+    """A table block comes back as HTML instead of a Markdown pipe table
+    whenever it has merged cells (colspan/rowspan) -- see
+    _html_tables_to_markdown's docstring. Each block is independently
+    HTML or Markdown; check per block rather than assuming one shape for
+    the whole page."""
+    return _ensure_header_row(_html_tables_to_markdown(raw) if "<table" in raw else raw)
+
+
+def _mineru_page_markdown(pdf_path: str) -> Optional[str]:
+    """The markdown for every table block MinerU found on the (single-page)
+    PDF at pdf_path, concatenated, or None if MinerU found no tables there
+    or the call failed/timed out."""
+    blocks = _mineru_page_blocks(pdf_path)
+    if not blocks:
+        return None
     table_blocks = [
-        _ensure_header_row(_html_tables_to_markdown(b) if "<table" in b else b)
-        for b in raw_table_blocks
+        _table_block_to_markdown(b.get("content", ""))
+        for b in blocks
+        if b.get("type") == "table" and b.get("content")
     ]
     table_blocks = [b for b in table_blocks if b.strip()]
     if not table_blocks:
         return None
     return "\n\n".join(table_blocks)
+
+
+#: Block types that carry no reading content of their own.
+_MINERU_SKIP_BLOCK_TYPES = {"page_number", "header", "footer", "page_footnote", "image"}
+
+
+def _mineru_page_text(pdf_path: str) -> Optional[str]:
+    """The whole page as MinerU read it (headings, paragraphs and tables, in
+    reading order, tables as Markdown pipe tables), or None if the call failed
+    or found nothing."""
+    blocks = _mineru_page_blocks(pdf_path)
+    if not blocks:
+        return None
+    parts: List[str] = []
+    for b in blocks:
+        content = (b.get("content") or "").strip()
+        if not content or b.get("type") in _MINERU_SKIP_BLOCK_TYPES:
+            continue
+        parts.append(_table_block_to_markdown(content) if b.get("type") == "table" else content)
+    text = "\n\n".join(p for p in parts if p.strip())
+    return text or None
+
+
+#: A page whose text layer uses a broken font encoding reads as symbols and digits mixed
+#: into letters ("Net income" comes out as "(;J ?D9EC;"). Its text is unusable, so the
+#: page is read from its picture instead.
+_GARBLE_SYMBOL_RE = re.compile(r"[;?<>@\[\]\^`~]")
+_GARBLE_LETTER_DIGIT_LETTER_RE = re.compile(r"[A-Za-z]\d+[A-Za-z]")
+GARBLED_TOKEN_RATIO = 0.12
+GARBLED_MIN_TOKENS = 25
+
+
+def _token_is_garbled(token: str) -> bool:
+    core = token.strip(".,:()\"'")
+    if len(core) < 3 or not re.search(r"[A-Za-z]", core):
+        return False
+    return bool(_GARBLE_SYMBOL_RE.search(core) or _GARBLE_LETTER_DIGIT_LETTER_RE.search(core))
+
+
+def find_garbled_pages(passages: List[Dict[str, Any]]) -> Set[int]:
+    """Page numbers whose narrative text is mostly garbled tokens."""
+    texts: Dict[int, List[str]] = {}
+    for p in passages:
+        if p.get("type") == "text_note" and p.get("page_number") is not None:
+            texts.setdefault(p["page_number"], []).append((p.get("content") or "").split("Content:", 1)[-1])
+    pages: Set[int] = set()
+    for page_num, parts in texts.items():
+        tokens = " ".join(parts).split()
+        if len(tokens) >= GARBLED_MIN_TOKENS and sum(map(_token_is_garbled, tokens)) / len(tokens) >= GARBLED_TOKEN_RATIO:
+            pages.add(page_num)
+    return pages
+
+
+def repair_garbled_pages(
+    parser: Any,
+    passages: List[Dict[str, Any]],
+    content_bytes: bytes,
+    filename: str,
+    company_name: str,
+) -> List[Dict[str, Any]]:
+    """Best-effort: every page whose text layer is garbled (see find_garbled_pages)
+    is replaced by passages built from MinerU's reading of the page picture. A
+    page MinerU cannot read keeps its old passages. Never raises; returns
+    `passages` itself when nothing was repaired."""
+    garbled = find_garbled_pages(passages)
+    if not garbled or not _mineru_available():
+        return passages
+
+    new_by_page: Dict[int, List[Dict[str, Any]]] = {}
+    with tempfile.TemporaryDirectory(prefix="garbled_repair_") as tmpdir:
+        for page_num in sorted(garbled):
+            single_page_path = os.path.join(tmpdir, f"page_{page_num}.pdf")
+            if not _extract_single_page_pdf(content_bytes, page_num, single_page_path):
+                continue
+            text = _mineru_page_text(single_page_path)
+            if not text or len(text) < 200:
+                continue
+            section = next((p.get("section") for p in passages if p.get("page_number") == page_num and p.get("section")),
+                           "unknown")
+            try:
+                made = parser._make_passages(company_name, filename, page_num, text, section=section)
+            except Exception:
+                continue
+            if made:
+                new_by_page[page_num] = made
+
+    if not new_by_page:
+        return passages
+    result = [p for p in passages if p.get("page_number") not in new_by_page]
+    for page_num, made in new_by_page.items():
+        for p in made:
+            p = dict(p)
+            p["table_repair_source"] = "mineru_ocr"
+            result.append(p)
+    return result
 
 
 def repair_malformed_tables(

@@ -36,10 +36,12 @@ sentence could be read another way)
   means it is not. Capex/revenue and fixed assets/total assets are
   supporting context; total assets/revenue alone overstates intensity when
   assets are mostly goodwill, intangibles or financial assets.
-- A fiscal year ending in January or February is often named by the calendar
-  year it STARTS in (a year ended in early 2023 is the company's "fiscal 2022"),
-  while a question's "FY2023" means the year that ENDS in 2023: match by the
-  period's end date, not by the number in the label, and say so in one clause.
+- A question's fiscal year follows the filing's own labels: if the filing names
+  a period "fiscal N", that period is the question's "FY N" (or "fiscal N"),
+  whichever month it ends in. Only when the filing names no period N, and the
+  year that ends in January or February of N is labelled N-1 (a company that
+  names its year by the calendar year it STARTS in), is the question's FY N
+  that year ending in N: say so in one clause.
 - Banks, card issuers and insurers have no cost-of-goods-sold or gross-profit
   line, so gross or operating margin is not how they are measured; if asked,
   say so first and why, then give the closest meaningful measure.

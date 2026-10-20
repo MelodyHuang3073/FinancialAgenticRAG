@@ -10,7 +10,7 @@ class FinancialCorpusStore:
         self.corpus: List[Dict[str, Any]] = []
         self.retriever: LexicalFinancialRetriever = None
         self.uploaded_files: List[Dict[str, Any]] = []
-        # parent_id -> parent_content (≤1000 chars context)
+        # parent_id -> parent_content (the whole page; can be several thousand chars)
         self.parent_map: Dict[str, str] = {}
 
         if load_sample_data and sample_json_path and os.path.exists(sample_json_path):

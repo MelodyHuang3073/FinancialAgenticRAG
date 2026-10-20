@@ -29,6 +29,9 @@ from app.tools.lexical_retriever import is_attribution_query
 
 
 class FinAgentRAGOrchestrator:
+    # Further attempts a COMPLEX numeric question gets, on top of the caller's budget.
+    COMPLEX_EXTRA_ATTEMPTS = 2
+
     # Chunks per sub-question raised from 3 toward 5.
     # A short alias like "net income" can match multiple differently scoped rows on the
     # same statement, so a larger per-subquestion chunk count helps ensure the correctly
@@ -191,6 +194,11 @@ class FinAgentRAGOrchestrator:
         answer_mode = classification["answer_mode"]
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
+        # A complex question (a change over years, several years or metrics, an
+        # exclusion) has more ways to go wrong than a simple one, so a rejected
+        # check gets more further attempts. The retries are rule-based and call no LLM.
+        if complexity == "COMPLEX":
+            max_iterations += self.COMPLEX_EXTRA_ATTEMPTS
 
         # Entity alignment: match extracted entity against corpus company names.
         # Keep a cleaned human-readable entity for query text and use the raw filename-
@@ -975,6 +983,11 @@ class FinAgentRAGOrchestrator:
                 tl = tok.lower()
                 if tl in corpus_words or tl in q_stop:
                     continue
+                # A short word that is not written as an acronym (such as the "net" of
+                # "net income") is an ordinary word of the question, not an abbreviated
+                # company name: it must not prefix-match a company ("net" -> "netflix").
+                if len(tl) < 5 and not tok.isupper() and not any(ch.isupper() for ch in tok[1:]):
+                    continue
                 if compact_corpus.startswith(tl):
                     score += 3
                 elif (
@@ -1269,6 +1282,7 @@ class FinAgentRAGOrchestrator:
             query=query, answer_mode=answer_mode, evidence=evidence,
             route_res=route_res, pot_res=pot_res,
             verification_res=verifier_res, sub_questions=sub_questions,
+            filing_labels=self._filing_year_labels(evidence),
         )
         if llm_answer:
             return llm_answer
@@ -1277,6 +1291,24 @@ class FinAgentRAGOrchestrator:
         if answer_mode == "NUMERIC":
             return self._synthesize_numeric_concise(query, evidence, pot_res)
         return self._synthesize_qualitative_concise(query, evidence, classification)
+
+    def _filing_year_labels(self, evidence: List[Dict[str, Any]]) -> set:
+        """The fiscal-year numbers the whole filing(s) the evidence comes from attach to a
+        period ending in January or February (see answer_directives)."""
+        from app.agent.answer_directives import labels_the_filing_uses
+        companies = {e.get("company") for e in evidence if e.get("company")}
+        cache = self.__dict__.setdefault("_year_label_cache", {})
+        labels: set = set()
+        for company in companies:
+            key = (company, len(self.corpus_store.corpus))
+            if key not in cache:
+                found: set = set()
+                for passage in self.corpus_store.corpus:
+                    if passage.get("company") == company:
+                        found |= labels_the_filing_uses(passage.get("content") or "")
+                cache[key] = found
+            labels |= cache[key]
+        return labels
 
     # ─── Concise numeric answer (English) ────────────────────────
     def _synthesize_numeric_concise(
