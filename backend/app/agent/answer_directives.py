@@ -58,7 +58,7 @@ def ranking_directive(query: str) -> str:
 # "fiscal 2025 ... ended February 1, 2025" and "ended January 31, 2026 (fiscal 2025)":
 # a period's own label next to its January/February end date.
 _LABEL_THEN_END_RE = re.compile(
-    r'\bfiscal\s+(?:year\s+)?(20\d\d)\b[^.]{0,120}?\bended\s+(?:on\s+)?(?:January|February)\s+\d{1,2},\s*(20\d\d)',
+    r'\bfiscal\s+(?:year\s+)?(20\d\d)\b(?:(?!\bfiscal\b)[^.]){0,120}?\bended\s+(?:on\s+)?(?:January|February)\s+\d{1,2},\s*(20\d\d)',
     re.IGNORECASE,
 )
 _END_THEN_LABEL_RE = re.compile(
@@ -112,11 +112,11 @@ class FilingPeriods:
 
 
 _LABEL_END_DATE_RE = re.compile(
-    r'\bfiscal\s+(?:year\s+)?(20\d\d)\b[^.]{0,120}?\bended\s+(?:on\s+)?((?:January|February)\s+\d{1,2},\s*(20\d\d))',
+    r'\bfiscal\s+(?:year\s+)?(20\d\d)\b(?:(?!\bfiscal\b)[^.]){0,120}?\bended\s+(?:on\s+)?((?:January|February)\s+\d{1,2},\s*(20\d\d))',
     re.IGNORECASE,
 )
 _END_DATE_LABEL_RE = re.compile(
-    r'\bended\s+(?:on\s+)?((?:January|February)\s+\d{1,2},\s*(20\d\d))[^.]{0,80}?\bfiscal\s+(?:year\s+)?(20\d\d)\b',
+    r'\bended\s+(?:on\s+)?((?:January|February)\s+\d{1,2},\s*(20\d\d))(?:(?!\bfiscal\b)[^.]){0,80}?\bfiscal\s+(?:year\s+)?(20\d\d)\b',
     re.IGNORECASE,
 )
 # "fiscal 2023, fiscal 2022 and fiscal 2021": consecutive years named together
@@ -136,7 +136,11 @@ def filing_periods(filing_text: str) -> FilingPeriods:
         seen.setdefault(int(label), Counter())[(int(year), re.sub(r"\s+", " ", date))] += 1
     for date, year, label in _END_DATE_LABEL_RE.findall(filing_text):
         seen.setdefault(int(label), Counter())[(int(year), re.sub(r"\s+", " ", date))] += 1
-    ends = {label: counts.most_common(1)[0][0] for label, counts in seen.items()}
+    ends = {}
+    for label, counts in seen.items():
+        plausible = [(pair, n) for pair, n in counts.most_common() if pair[0] in (label, label + 1)]
+        if plausible:
+            ends[label] = plausible[0][0]
     labels = set(ends)
     for a, b in _LABEL_SERIES_RE.findall(filing_text):
         if int(a) == int(b) + 1:

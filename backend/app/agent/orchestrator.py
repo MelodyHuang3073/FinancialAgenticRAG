@@ -19,7 +19,6 @@ from app.agent.pot_reasoner import (
     ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical, is_no_calculation_question,
 )
 from app.agent.verifier import TriCheckSelfVerifier
-from app.agent.answer_check import check_answer
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import (
     LLMAnswerGenerator, EVIDENCE_PROMPT_CAP, RELIABLE_POT_EVIDENCE_CAP, is_reliable_pot_result,
@@ -582,13 +581,6 @@ class FinAgentRAGOrchestrator:
 
         else:
             # ── Non-numeric path (EXPLANATION / ASSESSMENT / EXCLUSION) ──
-            iteration_count = 1
-            iter_trace = {
-                "iteration": 1, "query": query,
-                "retrieved_passages": [], "pot_code": "", "sandbox_output": "",
-                "verification": {}
-            }
-
             # If a metric matches a registered formula, search for that formula's
             # required variables.
             # The raw question text often omits the derived metric's component line-item
@@ -638,68 +630,104 @@ class FinAgentRAGOrchestrator:
             # construction, instead of two separately-triggered insertions.
             if prefer_narrative and query not in search_queries:
                 search_queries.append(query)
-            new_hits = []
-            for sq_idx, sq in enumerate(search_queries):
-                new_hits.extend(self._tag_subquery(sq_idx, self.corpus_store.search(
-                    # This retrieval block runs for non-numeric answer modes and always
-                    # uses the wider narrative top_k.
-                    # prefer_narrative controls scoring boosts but not how many
-                    # candidates pass the cutoff.
-                    sq, top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
-                    exclude_ids=list(retrieved_ids),
-                    entity=classification.get("entity"),
-                    statement_type_hint=statement_type_hint,  # Step 4
-                    prefer_narrative=prefer_narrative,
-                    query_years=classification.get("years"),
-                )))
-            new_hits = self._deduplicate_hits(new_hits, entity=classification.get("entity"))
-            for hit in new_hits:
-                retrieved_ids.add(hit["id"])
-                evidence_buffer.append(hit)
-                info = self._build_evidence_info(hit)
-                iter_trace["retrieved_passages"].append(info)
-                evidence_meta.append(info)
-
-            # Explains that some explanation/assessment questions still require a
-            # numeric comparison when they match a registered formula; they also need
-            # qualitative framing in the final text.
-            # Notes that previously the pipeline returned an empty numeric result object
-            # so the LLM supplied numbers without any sandbox trace, which can lead to
-            # ungrounded outputs; keep sandbox-backed numeric computation to avoid that.
-            context_window = []
-            for ev in select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT):
-                ev_enriched = dict(ev)
-                parent_id = ev.get("parent_id")
-                if parent_id and not ev_enriched.get("parent_content"):
-                    ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
-                context_window.append(ev_enriched)
-
-            if non_numeric_formula:
-                pot_res = self.pot_reasoner.generate_and_execute(
-                    query, context_window, entity=classification["entity"],
-                    library_formula_entry=non_numeric_formula,
-                    no_calculation=no_calculation,
-                )
-            else:
-                pot_res = {
-                    "code": "", "success": True, "result_value": None,
-                    "output_log": "", "extracted_variables": {},
-                    "answer_mode": answer_mode,
+            iteration_count = 0
+            retry_plan = None
+            while iteration_count < max_iterations:
+                iteration_count += 1
+                iter_trace = {
+                    "iteration": iteration_count, "query": query,
+                    "retrieved_passages": [], "pot_code": "", "sandbox_output": "",
+                    "verification": {}
                 }
-            pot_res["answer_mode"] = answer_mode
-            iter_trace["pot_code"] = pot_res.get("code", "")
-            iter_trace["sandbox_output"] = pot_res.get("output_log", "")
-            iter_trace["result_value"] = pot_res.get("result_value")
+                if iteration_count == 1:
+                    new_hits = []
+                    for sq_idx, sq in enumerate(search_queries):
+                        new_hits.extend(self._tag_subquery(sq_idx, self.corpus_store.search(
+                            # This retrieval block runs for non-numeric answer modes and always
+                            # uses the wider narrative top_k.
+                            # prefer_narrative controls scoring boosts but not how many
+                            # candidates pass the cutoff.
+                            sq, top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
+                            exclude_ids=list(retrieved_ids),
+                            entity=classification.get("entity"),
+                            statement_type_hint=statement_type_hint,  # Step 4
+                            prefer_narrative=prefer_narrative,
+                            query_years=classification.get("years"),
+                        )))
+                    new_hits = self._deduplicate_hits(new_hits, entity=classification.get("entity"))
+                    for hit in new_hits:
+                        retrieved_ids.add(hit["id"])
+                        evidence_buffer.append(hit)
+                        info = self._build_evidence_info(hit)
+                        iter_trace["retrieved_passages"].append(info)
+                        evidence_meta.append(info)
 
-            verification_res = self.verifier.verify(
-                query, self._top_evidence(evidence_buffer), pot_res, entity=classification.get("entity")
-            )
-            iter_trace["verification"] = verification_res
-            trace_steps.append({
-                "step_name": "Evidence Retrieval & Analysis",
-                "type": "retrieval",
-                "data": iter_trace
-            })
+                else:
+                    # ── Attempt 2+: the retry plan chosen from the last REJECT ──
+                    self._run_retry_plan(
+                        retry_plan, iteration_count, classification, statement_type_hint,
+                        retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
+                    )
+
+                # Explains that some explanation/assessment questions still require a
+                # numeric comparison when they match a registered formula; they also need
+                # qualitative framing in the final text.
+                # Notes that previously the pipeline returned an empty numeric result object
+                # so the LLM supplied numbers without any sandbox trace, which can lead to
+                # ungrounded outputs; keep sandbox-backed numeric computation to avoid that.
+                context_window = []
+                for ev in select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT):
+                    ev_enriched = dict(ev)
+                    parent_id = ev.get("parent_id")
+                    if parent_id and not ev_enriched.get("parent_content"):
+                        ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
+                    context_window.append(ev_enriched)
+
+                if non_numeric_formula:
+                    pot_res = self.pot_reasoner.generate_and_execute(
+                        query, context_window, entity=classification["entity"],
+                        library_formula_entry=non_numeric_formula,
+                        no_calculation=no_calculation,
+                    )
+                else:
+                    pot_res = {
+                        "code": "", "success": True, "result_value": None,
+                        "output_log": "", "extracted_variables": {},
+                        "answer_mode": answer_mode,
+                    }
+                pot_res["answer_mode"] = answer_mode
+                iter_trace["pot_code"] = pot_res.get("code", "")
+                iter_trace["sandbox_output"] = pot_res.get("output_log", "")
+                iter_trace["result_value"] = pot_res.get("result_value")
+
+                verification_res = self.verifier.verify(
+                    query, self._top_evidence(evidence_buffer), pot_res, entity=classification.get("entity")
+                )
+                iter_trace["verification"] = verification_res
+                trace_steps.append({
+                    "step_name": "Evidence Retrieval & Analysis",
+                    "type": "retrieval",
+                    "data": iter_trace
+                })
+
+                if verification_res["decision"] == "ACCEPT" or iteration_count >= max_iterations:
+                    break
+
+                # REJECT -> the same retry controller as the numeric path.
+                retry_plan = self._plan_retry(
+                    query, verification_res, non_numeric_formula,
+                    query_entity, retrieval_years, classification, iteration_count,
+                    evidence_buffer,
+                )
+                trace_steps.append({
+                    "step_name": f"Retry plan #{iteration_count}",
+                    "type": "refinement",
+                    "detail": (
+                        f"REJECT ({retry_plan['failure']}) -> {retry_plan['action']}: "
+                        f"{retry_plan['queries']}"
+                    ),
+                })
+
 
         # ── Step 4: Final Answer Synthesis ──
         final_context = self._top_evidence(evidence_buffer)
@@ -707,53 +735,6 @@ class FinAgentRAGOrchestrator:
             query, final_context, pot_res or {}, verification_res or {},
             classification, sub_questions
         )
-        # ── Answer check: the same 3-attempt budget as the numeric loop, spent
-        # on the finished answer (see answer_check). A failed check searches
-        # again, excluding passages already seen, and writes the answer again;
-        # no new passages means nothing could change, so it stops there.
-        answer_check_trail: List[Dict[str, Any]] = []
-        while iteration_count < max_iterations:
-            failure = check_answer(
-                query, final_answer, final_context, pot_res, classification.get("entity")
-            )
-            if not failure:
-                break
-            if failure["failure"] == "wrong_company":
-                # The filing itself was the wrong pick: more passages from it cannot help.
-                answer_check_trail.append({**failure, "attempt": iteration_count, "new_passages": 0})
-                break
-            iteration_count += 1
-            before = len(evidence_buffer)
-            iter_trace = {
-                "iteration": iteration_count, "query": query, "retrieved_passages": [],
-                "pot_code": "", "sandbox_output": "", "verification": {},
-            }
-            plan = {
-                "failure": failure["failure"], "action": "broaden",
-                "queries": list(dict.fromkeys(
-                    list(classification.get("retrieval_queries") or []) + [query]
-                )),
-                "top_k": self.RETRIEVAL_TOP_K_NARRATIVE,
-            }
-            self._run_retry_plan(
-                plan, iteration_count, classification, statement_type_hint,
-                retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
-            )
-            added = len(evidence_buffer) - before
-            answer_check_trail.append({**failure, "attempt": iteration_count, "new_passages": added})
-            trace_steps.append({
-                "step_name": f"Answer check #{iteration_count}",
-                "type": "refinement",
-                "detail": f"{failure['failure']} ({failure['detail']}) → {added} new passage(s)",
-                "data": iter_trace,
-            })
-            if not added:
-                break
-            final_context = self._top_evidence(evidence_buffer)
-            final_answer = self._synthesize_final_answer(
-                query, final_context, pot_res or {}, verification_res or {},
-                classification, sub_questions
-            )
         # Mirrors llm_client.generate_answer's own effective_cap exactly --
         # same three conditions (RELIABLE_POT_EVIDENCE_CAP>0, NUMERIC,
         # is_reliable_pot_result) -- so evidence_sources below reports the
@@ -791,7 +772,6 @@ class FinAgentRAGOrchestrator:
                 else (pot_res.get("result_value") if pot_res else None)
             ),
             "verification": verification_res,
-            "answer_check": answer_check_trail,
             # Whether the final attempt passed Tri-Check, and if not, why --
             # an answer that never passed is returned flagged, not hidden.
             "verified": bool(verification_res) and verification_res.get("decision") == "ACCEPT",
