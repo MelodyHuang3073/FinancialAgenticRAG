@@ -29,9 +29,6 @@ from app.tools.lexical_retriever import is_attribution_query
 
 
 class FinAgentRAGOrchestrator:
-    # Further attempts a COMPLEX numeric question gets, on top of the caller's budget.
-    COMPLEX_EXTRA_ATTEMPTS = 2
-
     # Chunks per sub-question raised from 3 toward 5.
     # A short alias like "net income" can match multiple differently scoped rows on the
     # same statement, so a larger per-subquestion chunk count helps ensure the correctly
@@ -194,11 +191,6 @@ class FinAgentRAGOrchestrator:
         answer_mode = classification["answer_mode"]
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
-        # A complex question (a change over years, several years or metrics, an
-        # exclusion) has more ways to go wrong than a simple one, so a rejected
-        # check gets more further attempts. The retries are rule-based and call no LLM.
-        if complexity == "COMPLEX":
-            max_iterations += self.COMPLEX_EXTRA_ATTEMPTS
 
         # Entity alignment: match extracted entity against corpus company names.
         # Keep a cleaned human-readable entity for query text and use the raw filename-

@@ -2183,7 +2183,7 @@ def _adjust_working_capital_for_financing_items(
     resolved: Dict[str, float],
     resolved_series: Optional[Dict[str, List[Tuple[float, str]]]],
     extracted_table: Dict[str, Dict],
-) -> None:
+) -> Optional[Dict[str, str]]:
     """
     Operating working capital: current_assets minus cash (+ short-term
     investments), and current_liabilities minus short-term debt / the
@@ -2191,7 +2191,8 @@ def _adjust_working_capital_for_financing_items(
     for when this applies. No-op if either side's deduction is zero (a
     plain current_assets - current_liabilities is then already correct),
     same guard pattern as _adjust_working_capital_for_custodial_funds.
-    Mutates `resolved` (and `resolved_series`, if given) in place.
+    Mutates `resolved` (and `resolved_series`, if given) in place and returns
+    {placeholder: note} describing each adjustment ({} / None if none).
     """
     if "current_assets" not in resolved or "current_liabilities" not in resolved:
         return
@@ -2254,6 +2255,17 @@ def _adjust_working_capital_for_financing_items(
     if not ca_deduction and not cl_deduction:
         return
 
+    notes = {}
+    if ca_deduction:
+        notes["current_assets"] = (
+            f"operating basis: the balance-sheet total {resolved['current_assets']:g} "
+            f"less cash and short-term investments {ca_deduction:g}"
+        )
+    if cl_deduction:
+        notes["current_liabilities"] = (
+            f"operating basis: the balance-sheet total {resolved['current_liabilities']:g} "
+            f"less short-term debt and current portion of long-term debt {cl_deduction:g}"
+        )
     resolved["current_assets"] = resolved["current_assets"] - ca_deduction
     resolved["current_liabilities"] = resolved["current_liabilities"] - cl_deduction
     if resolved_series:
@@ -2267,6 +2279,7 @@ def _adjust_working_capital_for_financing_items(
                 ((val - cl_deduction) if yr == cl_year else val, yr)
                 for val, yr in resolved_series["current_liabilities"]
             ]
+    return notes
 
 
 _PREPAID_CURRENT_ASSET_RE = re.compile(r'\bprepaid', re.IGNORECASE)
@@ -2581,7 +2594,14 @@ def _gen_formula_code(
         )
         explicit_plain_definition = bool(_EXPLICIT_PLAIN_WORKING_CAPITAL_RE.search(q_lower))
         if not custodial_applied and not is_regulated_utility and not explicit_plain_definition:
-            _adjust_working_capital_for_financing_items(resolved, resolved_series, extracted_table)
+            # The adjusted inputs no longer equal the balance-sheet totals the
+            # source label names, so say how they were derived; otherwise the
+            # answer step sees a mismatch with the filing and drops the result.
+            for ph, note in (_adjust_working_capital_for_financing_items(
+                    resolved, resolved_series, extracted_table) or {}).items():
+                meta = (resolved_meta or {}).get(ph)
+                if meta is not None:
+                    meta["source_detail"] = f"{meta.get('source_detail') or ''} ({note})".strip()
 
     if fk == "quick_ratio":
         _adjust_quick_ratio_for_prepaid_and_other(resolved, resolved_series, extracted_table)

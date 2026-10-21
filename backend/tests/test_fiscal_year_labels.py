@@ -36,3 +36,14 @@ def test_start_year_naming_is_shifted_when_no_period_has_the_asked_number():
 
 def test_no_year_end_information_means_no_directive():
     assert fiscal_year_directive("What was net income in FY2023?", "Revenue was higher in 2023.") == ""
+
+
+def test_a_52_53_week_calendar_year_ending_in_early_january_is_not_shifted():
+    # the year that ended January 2, 2022 is the company's calendar 2021: no directive
+    ev = "The fiscal year ended January 2, 2022 (fiscal 2021) and the fiscal year ended January 3, 2021 (fiscal 2020)."
+    assert fiscal_year_directive("What drove the gross margin change in FY2022?", ev) == ""
+
+
+def test_a_year_ending_in_late_january_is_still_shifted():
+    ev = "52 weeks ended January 28, 2023 (fiscal 2022). The prior year was fiscal 2021."
+    assert fiscal_year_directive("What drove the gross margin change in FY2023?", ev) != ""
