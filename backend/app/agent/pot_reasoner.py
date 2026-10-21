@@ -3681,6 +3681,27 @@ def _check_ratio_plausibility(
     return None
 
 
+#: Balance-sheet items that cannot be below zero (equity can, so it is absent).
+_NON_NEGATIVE_STOCK_RE = re.compile(
+    r'^(?:accounts_receivable|ar_(?:new|old)|ap_(?:new|old)|cash|current_assets|current_liabilities|'
+    r'inventory(?:_new|_old)?|inv_(?:new|old)|ppe(?:_new|_old)?|total_assets(?:_new|_old)?|'
+    r'short_term_investments)$'
+)
+
+
+def _check_stock_signs(resolved: Optional[Dict[str, Any]]) -> Optional[str]:
+    """A balance-sheet stock (receivables, inventory, cash, assets ...) that resolved
+    to a negative number was almost certainly read from a cash-flow "change in" row or
+    a sign-flipped line rather than the balance-sheet amount."""
+    for name, value in (resolved or {}).items():
+        if _NON_NEGATIVE_STOCK_RE.match(name) and isinstance(value, (int, float)) and value < 0:
+            return (
+                f"變數 {name} 取到負值 {value},資產負債表的存量(應收帳款、存貨、現金、資產等)"
+                "不會是負數,可能抓到現金流量表的「變動」列或正負號被翻轉的列。"
+            )
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Reasoner
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4123,5 +4144,5 @@ class ProgramOfThoughtReasoner:
             "used_evidence_ids": _collect_used_evidence_ids(resolved_formula_meta, evidence_list),
             "implausible_result_reason": _check_ratio_plausibility(
                 res_val, _result_unit, _originally_matched_formula_entry, stdout_err
-            ),
+            ) or (_check_stock_signs(resolved_formula) if formula_entry and resolved_formula else None),
         }

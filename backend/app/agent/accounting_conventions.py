@@ -27,13 +27,21 @@ sentence could be read another way)
   still being incurred; this needs no calculation.
 - "Leverage" of an expense means it fell as a percent of net sales;
   "deleverage" means it rose.
-- "Operational" or "constant-currency" figures exclude currency translation
-  and are the basis for judging underlying growth; "reported" and plain
-  "adjusted" figures include it. A verdict on whether growth speeds up or
-  slows down is judged on that underlying basis: compare the outlook's
-  operational growth with the prior year's growth as the filing prints it (if
-  the prior year is printed only on the reported or adjusted basis, use that
-  figure and say so), and give the other basis's outlook as context.
+- Currency effects: "operational" or "constant-currency" figures EXCLUDE currency
+  translation; "reported" and plain "adjusted" figures INCLUDE it, so a reported
+  growth rate = underlying (operational) growth + the currency effect. Only
+  like-for-like rates can be compared: reported with reported, operational with
+  operational. Whether growth speeds up or slows down is a question about the
+  business, so it is judged on the operational basis, and a reported-basis
+  speed-up that comes only from currency turning from a headwind to a tailwind
+  is not an underlying speed-up. If the filing prints the prior year's growth
+  only on the reported basis, do not compare it blindly with an operational
+  outlook: use the filing's statement about that year's currency effect. When
+  currency was a headwind that year (reported growth below operational
+  growth), the prior year's operational growth was at least the reported
+  figure, so an operational outlook at or below it is a slowdown. Give the
+  verdict, the basis it rests on, and the outlook on every other basis with
+  its own verdict.
 - Capital intensity is judged primarily by return on assets (ROA): a low ROA
   (well under about 10%) means the business needs a large asset base for
   the profit it earns (capital-intensive); a healthy ROA (about 10% or more)

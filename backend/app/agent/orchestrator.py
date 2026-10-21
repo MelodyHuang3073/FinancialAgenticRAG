@@ -19,6 +19,7 @@ from app.agent.pot_reasoner import (
     ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical, is_no_calculation_question,
 )
 from app.agent.verifier import TriCheckSelfVerifier
+from app.agent.answer_check import check_answer
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import (
     LLMAnswerGenerator, EVIDENCE_PROMPT_CAP, RELIABLE_POT_EVIDENCE_CAP, is_reliable_pot_result,
@@ -706,6 +707,53 @@ class FinAgentRAGOrchestrator:
             query, final_context, pot_res or {}, verification_res or {},
             classification, sub_questions
         )
+        # ── Answer check: the same 3-attempt budget as the numeric loop, spent
+        # on the finished answer (see answer_check). A failed check searches
+        # again, excluding passages already seen, and writes the answer again;
+        # no new passages means nothing could change, so it stops there.
+        answer_check_trail: List[Dict[str, Any]] = []
+        while iteration_count < max_iterations:
+            failure = check_answer(
+                query, final_answer, final_context, pot_res, classification.get("entity")
+            )
+            if not failure:
+                break
+            if failure["failure"] == "wrong_company":
+                # The filing itself was the wrong pick: more passages from it cannot help.
+                answer_check_trail.append({**failure, "attempt": iteration_count, "new_passages": 0})
+                break
+            iteration_count += 1
+            before = len(evidence_buffer)
+            iter_trace = {
+                "iteration": iteration_count, "query": query, "retrieved_passages": [],
+                "pot_code": "", "sandbox_output": "", "verification": {},
+            }
+            plan = {
+                "failure": failure["failure"], "action": "broaden",
+                "queries": list(dict.fromkeys(
+                    list(classification.get("retrieval_queries") or []) + [query]
+                )),
+                "top_k": self.RETRIEVAL_TOP_K_NARRATIVE,
+            }
+            self._run_retry_plan(
+                plan, iteration_count, classification, statement_type_hint,
+                retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
+            )
+            added = len(evidence_buffer) - before
+            answer_check_trail.append({**failure, "attempt": iteration_count, "new_passages": added})
+            trace_steps.append({
+                "step_name": f"Answer check #{iteration_count}",
+                "type": "refinement",
+                "detail": f"{failure['failure']} ({failure['detail']}) → {added} new passage(s)",
+                "data": iter_trace,
+            })
+            if not added:
+                break
+            final_context = self._top_evidence(evidence_buffer)
+            final_answer = self._synthesize_final_answer(
+                query, final_context, pot_res or {}, verification_res or {},
+                classification, sub_questions
+            )
         # Mirrors llm_client.generate_answer's own effective_cap exactly --
         # same three conditions (RELIABLE_POT_EVIDENCE_CAP>0, NUMERIC,
         # is_reliable_pot_result) -- so evidence_sources below reports the
@@ -743,6 +791,7 @@ class FinAgentRAGOrchestrator:
                 else (pot_res.get("result_value") if pot_res else None)
             ),
             "verification": verification_res,
+            "answer_check": answer_check_trail,
             # Whether the final attempt passed Tri-Check, and if not, why --
             # an answer that never passed is returned flagged, not hidden.
             "verified": bool(verification_res) and verification_res.get("decision") == "ACCEPT",
@@ -1284,23 +1333,25 @@ class FinAgentRAGOrchestrator:
             return self._synthesize_numeric_concise(query, evidence, pot_res)
         return self._synthesize_qualitative_concise(query, evidence, classification)
 
-    def _filing_year_labels(self, evidence: List[Dict[str, Any]]) -> set:
-        """The fiscal-year numbers the whole filing(s) the evidence comes from attach to a
-        period ending in January or February (see answer_directives)."""
-        from app.agent.answer_directives import labels_the_filing_uses
+    def _filing_year_labels(self, evidence: List[Dict[str, Any]]):
+        """What the whole filing(s) the evidence comes from say about their own fiscal years
+        (see answer_directives.filing_periods); computed once per filing."""
+        from app.agent.answer_directives import FilingPeriods, filing_periods
         companies = {e.get("company") for e in evidence if e.get("company")}
         cache = self.__dict__.setdefault("_year_label_cache", {})
-        labels: set = set()
+        merged = FilingPeriods()
         for company in companies:
             key = (company, len(self.corpus_store.corpus))
             if key not in cache:
-                found: set = set()
-                for passage in self.corpus_store.corpus:
-                    if passage.get("company") == company:
-                        found |= labels_the_filing_uses(passage.get("content") or "")
-                cache[key] = found
-            labels |= cache[key]
-        return labels
+                cache[key] = filing_periods("\n".join(
+                    passage.get("content") or ""
+                    for passage in self.corpus_store.corpus if passage.get("company") == company
+                ))
+            merged.labels |= cache[key].labels
+            merged.end_years |= cache[key].end_years
+            for label, end in cache[key].ends.items():
+                merged.ends.setdefault(label, end)
+        return merged
 
     # ─── Concise numeric answer (English) ────────────────────────
     def _synthesize_numeric_concise(
