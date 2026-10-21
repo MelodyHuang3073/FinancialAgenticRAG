@@ -86,7 +86,101 @@ def _early_year_end_years(evidence_text: str) -> set:
     return years
 
 
-def fiscal_year_directive(query: str, evidence_text: str, filing_labels: Optional[Set[int]] = None) -> str:
+class FilingPeriods:
+    """What a whole filing says about its own fiscal years.
+
+    labels  the fiscal-year numbers the filing names for its periods
+    ends    {label: (year of the period's end date, "Month d, yyyy")} for the periods the
+            filing ties to an end date in a sentence ("fiscal 2025 ... ended January 31, 2026")
+    end_years  years in which the filing says a period ended in January or February
+    """
+
+    def __init__(self, labels: Optional[Set[int]] = None, ends: Optional[dict] = None,
+                 end_years: Optional[Set[int]] = None):
+        self.labels = set(labels or ())
+        self.ends = dict(ends or {})
+        self.end_years = set(end_years or ())
+
+    def __contains__(self, year: int) -> bool:
+        return year in self.labels
+
+    def __iter__(self):
+        return iter(self.labels)
+
+    def __bool__(self) -> bool:
+        return bool(self.labels or self.ends)
+
+
+_LABEL_END_DATE_RE = re.compile(
+    r'\bfiscal\s+(?:year\s+)?(20\d\d)\b[^.]{0,120}?\bended\s+(?:on\s+)?((?:January|February)\s+\d{1,2},\s*(20\d\d))',
+    re.IGNORECASE,
+)
+_END_DATE_LABEL_RE = re.compile(
+    r'\bended\s+(?:on\s+)?((?:January|February)\s+\d{1,2},\s*(20\d\d))[^.]{0,80}?\bfiscal\s+(?:year\s+)?(20\d\d)\b',
+    re.IGNORECASE,
+)
+# "fiscal 2023, fiscal 2022 and fiscal 2021": consecutive years named together
+_LABEL_SERIES_RE = re.compile(
+    r'\bfiscal\s+(?:year\s+)?(20\d\d)\b[^.\n]{0,40}?\bfiscal\s+(?:year\s+)?(20\d\d)\b', re.IGNORECASE
+)
+# a table row key as the extractor prints it: "| 2024: 103"
+_ROW_YEAR_RE = re.compile(r'\|\s*(20\d\d):')
+
+
+def filing_periods(filing_text: str) -> FilingPeriods:
+    """Read a filing's own fiscal-year naming from its whole text (any filing: it
+    finds nothing when no period ends in January or February)."""
+    from collections import Counter
+    seen: dict = {}
+    for label, date, year in _LABEL_END_DATE_RE.findall(filing_text):
+        seen.setdefault(int(label), Counter())[(int(year), re.sub(r"\s+", " ", date))] += 1
+    for date, year, label in _END_DATE_LABEL_RE.findall(filing_text):
+        seen.setdefault(int(label), Counter())[(int(year), re.sub(r"\s+", " ", date))] += 1
+    ends = {label: counts.most_common(1)[0][0] for label, counts in seen.items()}
+    labels = set(ends)
+    for a, b in _LABEL_SERIES_RE.findall(filing_text):
+        if int(a) == int(b) + 1:
+            labels |= {int(a), int(b)}
+    # Table columns headed by the company's own names: the newest column's year is
+    # BEFORE the year the newest period ended in, so the headings are not end years.
+    row_counts = Counter(int(y) for y in _ROW_YEAR_RE.findall(filing_text))
+    ended = _early_year_end_years(filing_text)
+    if row_counts and ended:
+        # the columns of the annual statements head hundreds of rows; a forecast or
+        # maturity table heads a few, so they do not set the newest column year
+        columns = {y for y, n in row_counts.items() if n >= max(row_counts.values()) / 2}
+        if max(columns) < max(ended):
+            labels |= columns
+    return FilingPeriods(labels, ends, ended)
+
+
+def fiscal_column_directive(query: str, periods: Optional[FilingPeriods]) -> str:
+    """The filing names a period "fiscal N" but that period ends in a later year, and its
+    tables are headed by dates, which the extractor turns into the end date's year: the
+    column headed N is then the year BEFORE fiscal N. Says which column is which."""
+    if not isinstance(periods, FilingPeriods) or not periods.ends:
+        return ""
+    q_year = _QUESTION_FY_RE.search(query)
+    if not q_year:
+        return ""
+    asked = int(q_year.group(1))
+    end = periods.ends.get(asked)
+    if not end or end[0] == asked:
+        return ""
+    prior = periods.ends.get(asked - 1)
+    prior_text = f" (fiscal {asked - 1} ended {prior[1]})" if prior else ""
+    return (
+        f"\n⚠️ CRITICAL: in this filing \"fiscal {asked}\" is the period ended {end[1]}{prior_text}. "
+        f"The extracted tables head date-headed columns with the YEAR OF THE END DATE, so fiscal "
+        f"{asked} is the column headed {end[0]} and fiscal {asked - 1} is the column headed "
+        f"{end[0] - 1}; the column headed {asked} is fiscal {asked - 1}. Answer a fiscal {asked} "
+        f"question from the column headed {end[0]}. (A table whose headings print \"fiscal\" "
+        f"names is read by those names; the newest column of an annual table is the newest "
+        f"fiscal year.)"
+    )
+
+
+def fiscal_year_directive(query: str, evidence_text: str, filing_labels=None) -> str:
     """For a fiscal year that ends in January or February. The question's year
     follows the filing's own labels: when the filing names a period with that
     number, that is the period asked about and nothing is shifted. Only when no
@@ -101,7 +195,12 @@ def fiscal_year_directive(query: str, evidence_text: str, filing_labels: Optiona
     asked = int(q_year.group(1))
     if asked in labels_the_filing_uses(evidence_text) or asked in (filing_labels or ()):
         return ""
-    if asked not in _early_year_end_years(evidence_text):
+    if isinstance(filing_labels, FilingPeriods) and asked in filing_labels.ends:
+        return ""
+    # The end dates come from the whole filing, not only from the passages retrieved
+    # this time: which passages are retrieved varies, the filing's fiscal year does not.
+    whole_filing = filing_labels.end_years if isinstance(filing_labels, FilingPeriods) else set()
+    if asked not in (_early_year_end_years(evidence_text) | whole_filing):
         return ""
     if not re.search(rf'\bfiscal\s+(?:year\s+)?{asked - 1}\b', evidence_text, re.IGNORECASE):
         return ""
@@ -127,9 +226,15 @@ def acceleration_directive(query: str) -> str:
     return (
         "\n⚠️ CRITICAL: this question compares a growth rate with the rate before it. If the "
         "evidence gives the outlook on more than one basis (for example reported, adjusted, "
-        "operational or constant-currency), state, for EACH basis, the outlook growth (midpoint "
-        "if a range) and the prior year's growth on that same basis, and say whether the "
-        "verdict is the same on every basis. Never answer from one basis only."
+        "operational or constant-currency), list the outlook growth (midpoint if a range) of "
+        "EACH basis, never only one, and compare each with the prior year's growth on the SAME "
+        "basis. Reported and operational growth differ by the currency effect, so a verdict "
+        "about speeding up or slowing down is judged on the operational basis (currency "
+        "excluded). If the prior year's growth is printed on only one basis, reason from the "
+        "filing's own statement of that year's currency effect (a headwind means the prior "
+        "year's operational growth was at least its reported growth) and state that this "
+        "comparison is across bases. Give the verdict, the basis it rests on, and the other "
+        "bases' verdicts."
     )
 
 
@@ -165,10 +270,11 @@ def customer_concentration_directive(query: str, evidence_text: str) -> str:
     )
 
 
-def question_directives(query: str, evidence_text: str, filing_labels: Optional[Set[int]] = None) -> str:
+def question_directives(query: str, evidence_text: str, filing_labels=None) -> str:
     return (
         ranking_directive(query)
         + acceleration_directive(query)
         + customer_concentration_directive(query, evidence_text)
         + fiscal_year_directive(query, evidence_text, filing_labels)
+        + fiscal_column_directive(query, filing_labels)
     )
