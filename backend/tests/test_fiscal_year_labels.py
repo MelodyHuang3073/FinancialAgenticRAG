@@ -90,3 +90,18 @@ def test_year_end_date_comes_from_the_whole_filing_not_only_the_retrieved_passag
     retrieved = "During the fourth quarter of fiscal 2022 the Company repurchased shares."
     assert fiscal_year_directive("What share of repurchases was in Q4 of FY2023?", retrieved) == ""
     assert "fiscal 2022" in fiscal_year_directive("What share of repurchases was in Q4 of FY2023?", retrieved, periods)
+
+
+def test_a_label_is_not_paired_with_another_periods_end_date():
+    from app.agent.answer_directives import filing_periods
+    text = ("We ended fiscal 2022 and our fiscal year ended January 29, 2022 was strong. "
+            "The year ended January 28, 2023 (fiscal 2022) grew. The year ended January 29, 2022 (fiscal 2021) grew.")
+    periods = filing_periods(text)
+    assert periods.ends[2022][0] == 2023 and periods.ends[2021][0] == 2022
+
+
+def test_a_label_cannot_end_before_its_own_year():
+    from app.agent.answer_directives import filing_periods
+    text = "the first fiscal quarter of fiscal 2026 table: Fiscal Year Ended January 31, 2025 and fiscal 2025 ended January 31, 2025"
+    periods = filing_periods(text)
+    assert 2026 not in periods.ends and periods.ends[2025][0] == 2025

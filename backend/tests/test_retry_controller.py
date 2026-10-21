@@ -178,3 +178,46 @@ def test_customer_concentration_sentence_becomes_the_headline_fact():
     assert "represented 40%" in out and "MUST name" in out
     assert customer_concentration_directive("What was net income?", ev) == ""
     assert customer_concentration_directive("Who are the primary customers?", "No such sentence here.") == ""
+
+
+class _StubStore:
+    """A corpus store whose every search returns one new passage, so a retry always finds something."""
+
+    def __init__(self):
+        self.corpus = [{"id": "seed", "company": "ACME_2023_10K", "content": "ACME revenue", "type": "text_note"}]
+        self.uploaded_files = [{"filename": "ACME_2023_10K.pdf", "company": "ACME_2023_10K", "passage_count": 1}]
+        self.parent_map = {}
+        self.searches = 0
+
+    def search(self, query, top_k=5, exclude_ids=None, **kwargs):
+        self.searches += 1
+        return [{
+            "id": f"hit{self.searches}", "company": "ACME_2023_10K", "table_name": "ACME_2023_10K.pdf (Page 3)",
+            "content": f"ACME operating margin changed because of mix, passage {self.searches}",
+            "type": "text_note", "relevance_score": 5.0,
+        }]
+
+    def get_parent_content(self, parent_id):
+        return ""
+
+
+def test_non_numeric_question_retries_after_a_rejected_verification(monkeypatch):
+    from app.agent import llm_client, decomposer
+    for key in ("OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY"):
+        monkeypatch.setenv(key, "")
+    monkeypatch.setattr(llm_client.LLMAnswerGenerator, "_get_client", lambda self: None)
+    monkeypatch.setattr(decomposer.QueryDecomposer, "_get_llm_client", lambda self: None)
+    orch = FinAgentRAGOrchestrator(corpus_store=_StubStore())
+    real, calls = orch.verifier.verify, []
+
+    def verify(query, evidence, pot, entity=None):
+        calls.append(query)
+        result = real(query, evidence, pot, entity=entity)
+        if len(calls) < 3:
+            result = {**result, "decision": "REJECT", "failure_type": "no_relevant_data"}
+        return result
+
+    monkeypatch.setattr(orch.verifier, "verify", verify)
+    result = orch.process_query("What drove the change in ACME's operating margin?")
+    assert result["answer_mode"] != "NUMERIC"
+    assert len(calls) == 3 and result["total_iterations"] == 3
