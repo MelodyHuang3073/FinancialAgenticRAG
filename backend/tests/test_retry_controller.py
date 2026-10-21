@@ -153,7 +153,28 @@ def test_question_shape_directives_fire_only_for_their_shapes():
     assert "BOTH" not in ranking_directive("Which category had the highest growth rate?")
     assert "finest-level" in ranking_directive("Which region had the biggest drop in revenue?")
     assert ranking_directive("What was net income in 2023?") == ""
+    # a word between "worst" and "performance" is still a best/worst question
+    assert "BOTH" in ranking_directive("Which region had the worst topline performance last year?")
+    assert "BOTH" not in ranking_directive("Which region had the worst sales growth performance?")
     ev = "52 weeks ended January 28, 2023. During fiscal 2022, the Company repurchased shares."
     assert "fiscal 2022" in fiscal_year_directive("What share of repurchases was in Q4 of FY2023?", ev)
     assert fiscal_year_directive("What share was in Q4 of FY2023?", "year ended December 31, 2023") == ""
     assert question_directives("What was revenue in 2023?", ev) == ""
+
+
+def test_acceleration_questions_ask_for_every_guidance_basis():
+    from app.agent.answer_directives import acceleration_directive
+    assert "EACH basis" in acceleration_directive("Is growth in adjusted EPS expected to accelerate next year?")
+    assert "EACH basis" in acceleration_directive("Will sales growth slow down in 2024?")
+    assert acceleration_directive("What was net income in 2023?") == ""
+
+
+def test_customer_concentration_sentence_becomes_the_headline_fact():
+    from app.agent.answer_directives import customer_concentration_directive
+    ev = ("Revenues from the Acme government (including allied sales through the Acme government), "
+          "primarily recorded at the Defense unit, represented 40%, 49% and 51% of consolidated "
+          "revenues for 2022, 2021 and 2020. Revenue by location: Home $120 of $300.")
+    out = customer_concentration_directive("Who are the primary customers of Acme as of FY2022?", ev)
+    assert "represented 40%" in out and "MUST name" in out
+    assert customer_concentration_directive("What was net income?", ev) == ""
+    assert customer_concentration_directive("Who are the primary customers?", "No such sentence here.") == ""

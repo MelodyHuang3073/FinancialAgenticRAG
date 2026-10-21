@@ -29,7 +29,11 @@ sentence could be read another way)
   "deleverage" means it rose.
 - "Operational" or "constant-currency" figures exclude currency translation
   and are the basis for judging underlying growth; "reported" and plain
-  "adjusted" figures include it.
+  "adjusted" figures include it. A verdict on whether growth speeds up or
+  slows down is judged on that underlying basis: compare the outlook's
+  operational growth with the prior year's growth as the filing prints it (if
+  the prior year is printed only on the reported or adjusted basis, use that
+  figure and say so), and give the other basis's outlook as context.
 - Capital intensity is judged primarily by return on assets (ROA): a low ROA
   (well under about 10%) means the business needs a large asset base for
   the profit it earns (capital-intensive); a healthy ROA (about 10% or more)

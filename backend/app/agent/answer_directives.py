@@ -14,7 +14,8 @@ from typing import Optional, Set
 
 # "performed the best/worst", "top performer": no stated basis -> size AND growth
 _BEST_WORST_RE = re.compile(
-    r'\bperform\w*\s+(?:the\s+)?(?:best|worst)\b|\b(?:top|best|worst)[\s-]perform\w*',
+    r'\bperform\w*\s+(?:the\s+)?(?:best|worst)\b|\b(?:top|best|worst)[\s-]perform\w*'
+    r'|\b(?:best|worst)\s+(?:\w+\s+){0,2}perform\w*',
     re.IGNORECASE,
 )
 _GROWTH_WORD_RE = re.compile(r'\b(?:growth|grew|grow|increase\w*|decline\w*|drop\w*|decrease\w*)\b', re.IGNORECASE)
@@ -27,7 +28,11 @@ _WHICH_RANK_RE = re.compile(
 )
 
 # a fiscal year ending in January/February, and the question's own FY label
-_EARLY_YEAR_END_RE = re.compile(r'\bended\s+(January|February)\s+\d{1,2},\s*(20\d\d)', re.IGNORECASE)
+_EARLY_YEAR_END_RE = re.compile(r'\bended\s+(January|February)\s+(\d{1,2}),\s*(20\d\d)', re.IGNORECASE)
+# A 52/53-week year of a calendar-year company ends on the day nearest December 31,
+# so it can end in the first days of January; that is still its calendar year, not a
+# January/February fiscal year.
+_CALENDAR_YEAR_SPILL_LAST_DAY = 10
 _QUESTION_FY_RE = re.compile(r'\b(?:FY|fiscal\s+(?:year\s+)?)\s*(20\d\d)\b', re.IGNORECASE)
 
 
@@ -70,6 +75,17 @@ def labels_the_filing_uses(evidence_text: str) -> set:
     return labels
 
 
+def _early_year_end_years(evidence_text: str) -> set:
+    """Years in which the filing says a period ended in January or February, leaving
+    out the first days of January (the end of a 52/53-week calendar year)."""
+    years = set()
+    for month, day, year in _EARLY_YEAR_END_RE.findall(evidence_text):
+        if month.lower() == "january" and int(day) <= _CALENDAR_YEAR_SPILL_LAST_DAY:
+            continue
+        years.add(int(year))
+    return years
+
+
 def fiscal_year_directive(query: str, evidence_text: str, filing_labels: Optional[Set[int]] = None) -> str:
     """For a fiscal year that ends in January or February. The question's year
     follows the filing's own labels: when the filing names a period with that
@@ -85,7 +101,7 @@ def fiscal_year_directive(query: str, evidence_text: str, filing_labels: Optiona
     asked = int(q_year.group(1))
     if asked in labels_the_filing_uses(evidence_text) or asked in (filing_labels or ()):
         return ""
-    if not any(int(y) == asked for _, y in _EARLY_YEAR_END_RE.findall(evidence_text)):
+    if asked not in _early_year_end_years(evidence_text):
         return ""
     if not re.search(rf'\bfiscal\s+(?:year\s+)?{asked - 1}\b', evidence_text, re.IGNORECASE):
         return ""
@@ -97,5 +113,62 @@ def fiscal_year_directive(query: str, evidence_text: str, filing_labels: Optiona
     )
 
 
+# "is growth expected to accelerate / slow down": a verdict about the direction of a rate
+_ACCELERATION_RE = re.compile(
+    r'\b(?:accelerat\w*|decelerat\w*|slow(?:s|ing)?\s+down|speed(?:s|ing)?\s+up)\b', re.IGNORECASE
+)
+
+
+def acceleration_directive(query: str) -> str:
+    """Guidance is often printed on more than one basis (reported, adjusted,
+    operational / constant-currency), and the verdict can differ between them."""
+    if not _ACCELERATION_RE.search(query):
+        return ""
+    return (
+        "\n⚠️ CRITICAL: this question compares a growth rate with the rate before it. If the "
+        "evidence gives the outlook on more than one basis (for example reported, adjusted, "
+        "operational or constant-currency), state, for EACH basis, the outlook growth (midpoint "
+        "if a range) and the prior year's growth on that same basis, and say whether the "
+        "verdict is the same on every basis. Never answer from one basis only."
+    )
+
+
+# A filer's own customer-concentration disclosure: "Revenues from <customer> ... represented
+# N% of consolidated revenues". Scanned over the whole retrieved pool, because the page that
+# holds it is not always among the passages that fit the prompt.
+_CUSTOMER_CONCENTRATION_RE = re.compile(
+    r'[Rr]evenues?\s+from\s+(?:the\s+)?([^,()\n]{2,80}?)(?:\s*\([^)]{0,160}\))?[^.]{0,120}?'
+    r'\brepresented\s+(\d+(?:\.\d+)?)\s*%[^.]{0,120}?consolidated\s+revenues?',
+    re.IGNORECASE,
+)
+
+
+def customer_concentration_directive(query: str, evidence_text: str) -> str:
+    """For a "who are the customers" question: when the filing states how much of its
+    consolidated revenue one customer represents, that sentence is the answer's headline
+    fact, not a revenue split across the company's own segments or locations."""
+    if "customer" not in query.lower():
+        return ""
+    found = _CUSTOMER_CONCENTRATION_RE.search(evidence_text)
+    if not found:
+        return ""
+    sentence = " ".join(found.group(0).split())[:300]
+    return (
+        "\n⚠️ CRITICAL: the evidence explicitly states \"" + sentence + "\" -- the filer's own "
+        "customer-concentration disclosure and the direct answer to a \"who are the customers\" "
+        "question. You MUST name that customer and give its share of consolidated revenue, "
+        + found.group(2) + "% (the first figure listed is the latest year), as a headline fact, "
+        "and also name the other customer groups the filing identifies. "
+        "A different percentage for the same customer in a segment table, or a share that "
+        "describes how revenue splits across the company's own segments, products or "
+        "locations, is not the company-wide share and must not replace it."
+    )
+
+
 def question_directives(query: str, evidence_text: str, filing_labels: Optional[Set[int]] = None) -> str:
-    return ranking_directive(query) + fiscal_year_directive(query, evidence_text, filing_labels)
+    return (
+        ranking_directive(query)
+        + acceleration_directive(query)
+        + customer_concentration_directive(query, evidence_text)
+        + fiscal_year_directive(query, evidence_text, filing_labels)
+    )
