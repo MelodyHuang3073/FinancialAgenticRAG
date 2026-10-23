@@ -42,6 +42,7 @@ Thumbs.db
 
 # Project Specific (e.g. sample data, uploaded files, logs)
 *.log
+*.err
 backend/uploaded_files/
 .llm_daily_usage.json
 
