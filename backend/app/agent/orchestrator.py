@@ -10,6 +10,7 @@ Main flow:
 """
 
 import re
+from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 
 from app.rag.corpus_store import FinancialCorpusStore
@@ -26,6 +27,26 @@ from app.agent.llm_client import (
 from app.agent.evidence_selection import select_with_quota
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
 from app.tools.lexical_retriever import is_attribution_query
+
+
+@dataclass
+class QueryPlan:
+    """What to search for, decided once per question (see _plan_queries).
+
+    sub_questions: every planned step, each tagged with its "source" (formula /
+        llm / original_question / narrative_topic). The numeric path searches
+        its retrieval steps; both paths record it in the trace and hand it to
+        the answer generator.
+    search_queries: the queries the non-numeric path searches (empty for numeric).
+    dynamic_formula_entry: a formula the question defines inline, found by the
+        decomposer's LLM call; used by PoT only when no library formula matched.
+    prefer_narrative: non-numeric only -- the answer lives in prose, not in the
+        formula's own numeric variables.
+    """
+    sub_questions: List[Dict[str, Any]]
+    search_queries: List[str] = field(default_factory=list)
+    dynamic_formula_entry: Optional[Dict[str, Any]] = None
+    prefer_narrative: bool = False
 
 
 class FinAgentRAGOrchestrator:
@@ -176,6 +197,106 @@ class FinAgentRAGOrchestrator:
                 iter_trace["retrieved_passages"].append(info)
                 evidence_meta.append(info)
 
+    def _plan_queries(
+        self, query: str, classification: Dict[str, Any], answer_mode: str,
+        library_formula: Optional[Dict[str, Any]], query_entity: str,
+        retrieval_years: List[str],
+    ) -> QueryPlan:
+        """Decide which queries to search, in three steps:
+
+          1. Base queries -- does the question match a library formula?
+               YES -> one query per formula variable (deterministic, built from
+                      the formula's own aliases, so retrieval and extraction look
+                      for the same thing).
+               NO  -> numeric:     the decomposer's LLM split (it may also hand
+                                   back a formula the question defines itself);
+                      non-numeric: the classifier's own queries.
+          2. The question itself as one more query, when the base queries may
+             miss its wording:
+               numeric, no formula          -> always;
+               non-numeric                  -> when the answer is in prose
+                                               (no formula, or "what drove...").
+             (A numeric question with a formula whose shape has no computed
+             answer is searched with the question later, at retrieval time.)
+          3. One extra LLM-suggested "which filing section holds this" query:
+               numeric     -> unless both calc_type and target_metrics matched
+                              (alias-matched ratio rows are already targeted and
+                              an extra generic query displaced correct rows);
+               non-numeric -> when there is no formula.
+        """
+        numeric = answer_mode == "NUMERIC"
+
+        # ── 1. base queries ──
+        dynamic_formula_entry = None
+        search_queries: List[str] = []
+        if numeric:
+            if library_formula:
+                sub_questions = self._build_formula_subquestions(
+                    library_formula, query_entity, retrieval_years
+                )
+            else:
+                sub_questions, dynamic_formula_entry = self.decomposer.decompose(
+                    query,
+                    target_metrics=classification["target_metrics"],
+                    years=retrieval_years,
+                    entity=classification["entity"],
+                )
+        else:
+            sub_questions = self._build_non_numeric_subquestions(
+                query, answer_mode, classification.get("target_metrics")
+            )
+            if library_formula:
+                search_queries = [
+                    step["query"] for step in self._build_formula_subquestions(
+                        library_formula, query_entity, classification["years"]
+                    )
+                ]
+            else:
+                search_queries = classification["retrieval_queries"]
+
+        # ── 2. the question itself ──
+        # Evaluated against the ORIGINAL question (not a keyword-stuffed
+        # sub-query), see lexical_retriever.is_attribution_query.
+        prefer_narrative = False
+        if numeric:
+            if not library_formula:
+                sub_questions.append({
+                    "step": len(sub_questions) + 1,
+                    "type": "retrieval",
+                    "query": query,
+                    "target_metric": "",
+                    "target_year": "",
+                    "source": "original_question",
+                })
+        else:
+            prefer_narrative = library_formula is None or is_attribution_query(query)
+
+        # ── 3. LLM topic query ──
+        if numeric:
+            if not (classification.get("calc_type") and classification.get("target_metrics")):
+                topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
+                if topic_terms:
+                    sub_questions.append({
+                        "step": len(sub_questions) + 1,
+                        "type": "retrieval",
+                        "query": f"{query_entity} {topic_terms}".strip(),
+                        "target_metric": "",
+                        "target_year": "",
+                        "source": "narrative_topic",
+                    })
+        elif not library_formula:
+            topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
+            if topic_terms:
+                search_queries = search_queries + [
+                    f"{classification['entity']} {topic_terms}".strip()
+                ]
+        # Non-numeric step 2 is applied last so the question lands after the topic
+        # query, exactly where the search order has always put it.
+        if prefer_narrative and query not in search_queries:
+            search_queries.append(query)
+
+        return QueryPlan(sub_questions, search_queries, dynamic_formula_entry, prefer_narrative)
+
     def process_query(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
         """Answer `query` from the single best-matching filing."""
         return self._process_query_once(query, max_iterations)
@@ -263,71 +384,11 @@ class FinAgentRAGOrchestrator:
         # evidence needed for trend calculations, causing fallback answers.
         retrieval_years = _with_implied_trend_year(classification["years"], query.lower())
         query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
-        # A formula the question defines inline, extracted by the decomposer's
-        # own LLM call below (never a separate call) -- see decomposer.py's
-        # _SYSTEM_PROMPT / _validate_llm_formula. Stays None whenever
-        # formula_entry above already matched (the registered library always
-        # takes precedence and is never second-guessed by this) or the
-        # question simply doesn't define one; passed down to
-        # pot_reasoner.generate_and_execute() as a same-shaped fallback used
-        # only when library_formula is None.
-        dynamic_formula_entry = None
-        if formula_entry:
-            sub_questions = self._build_formula_subquestions(
-                formula_entry, query_entity, retrieval_years
-            )
-        elif answer_mode == "NUMERIC":
-            sub_questions, dynamic_formula_entry = self.decomposer.decompose(
-                query,
-                target_metrics=classification["target_metrics"],
-                years=retrieval_years,
-                entity=classification["entity"],
-            )
-        else:
-            sub_questions = self._build_non_numeric_subquestions(
-                query, answer_mode, classification.get("target_metrics")
-            )
-
-        # Both NUMERIC sub-question builders above search only on the target line
-        # item's own alias vocabulary, which finds the structured statement row
-        # but not a filing's plain-English sentence stating the same fact in
-        # different words. For direct-amount/lookup questions (calc_type empty)
-        # one extra, additive query built by the LLM suggester covers that
-        # prose. Skipped for computed-ratio questions that matched a real
-        # target_metric (both calc_type and target_metrics set): their
-        # alias-matched multi-row retrieval already targets the exact line items,
-        # and an extra generic query there displaced correct evidence rows.
-        # A ratio question that matched NO target_metric (calc_type set but
-        # target_metrics empty) has no alias-matched retrieval to protect --
-        # its components are as likely to be plain-English sentences as a
-        # direct-lookup question's, so it still gets the narrative bonus query.
-        # LLM-decomposed sub-queries vary run to run and can drop the user's own
-        # key terms; the original question is always kept as one extra query so
-        # retrieval never depends on the decomposition alone (standard
-        # multi-query practice; the non-numeric path already does the same).
-        if answer_mode == "NUMERIC" and not formula_entry:
-            sub_questions.append({
-                "step": len(sub_questions) + 1,
-                "type": "retrieval",
-                "query": query,
-                "target_metric": "",
-                "target_year": "",
-                "source": "original_question",
-            })
-
-        if answer_mode == "NUMERIC" and not (
-            classification.get("calc_type") and classification.get("target_metrics")
-        ):
-            topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
-            if topic_terms:
-                sub_questions.append({
-                    "step": len(sub_questions) + 1,
-                    "type": "retrieval",
-                    "query": f"{query_entity} {topic_terms}".strip(),
-                    "target_metric": "",
-                    "target_year": "",
-                    "source": "narrative_topic",
-                })
+        plan = self._plan_queries(
+            query, classification, answer_mode, library_formula, query_entity, retrieval_years,
+        )
+        sub_questions = plan.sub_questions
+        dynamic_formula_entry = plan.dynamic_formula_entry
 
         trace_steps.append({
             "step_name": "Query Decomposition",
@@ -586,50 +647,8 @@ class FinAgentRAGOrchestrator:
             # The raw question text often omits the derived metric's component line-item
             # names.
             non_numeric_formula = library_formula
-            # Evaluated against the ORIGINAL question, not each individual
-            # sub-query below (a keyword-stuffed sub-query that just
-            # concatenates the entity name with metric keywords never
-            # repeats "what drove" phrasing even when the overall question
-            # plainly is an attribution question) -- see
-            # lexical_retriever.is_attribution_query's docstring.
-            is_attribution = is_attribution_query(query)
-            # Single combined signal, computed once up front: do we need prose/
-            # narrative evidence at all for this question? True whenever there's no
-            # registered formula to search structured values with, OR the question
-            # asks WHY/WHAT DROVE something (causal narrative, never captured by a
-            # formula's own numeric-variable aliases even when a formula DID match).
-            # Drives both decisions below (whether to widen scoring toward prose,
-            # and whether the raw question itself needs to be one of the search
-            # queries) from the same boolean, rather than two separately-reasoned
-            # conditions that happened to overlap.
-            prefer_narrative = (non_numeric_formula is None or is_attribution)
-            if non_numeric_formula:
-                formula_query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
-                search_queries = [
-                    step["query"] for step in
-                    self._build_formula_subquestions(non_numeric_formula, formula_query_entity, classification["years"])
-                ]
-            else:
-                search_queries = classification["retrieval_queries"]
-                # Additive: one extra query from the LLM suggester (which filing
-                # section/vocabulary would hold this answer). A failed or empty
-                # response leaves the classifier's own queries unchanged.
-                llm_topic_terms = self.decomposer.suggest_narrative_topic_query(
-                    query, clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
-                )
-                if llm_topic_terms:
-                    search_queries = search_queries + [
-                        f"{classification['entity']} {llm_topic_terms}".strip()
-                    ]
-            # _build_formula_subquestions() emits one query per placeholder only, and
-            # never the raw question itself -- a formula-matched question that also
-            # needs prose (prefer_narrative) must get it added explicitly. The
-            # template branch above already includes the raw question in
-            # classification["retrieval_queries"] (its own built-in fallback), so
-            # this is a no-op there -- one rule, applied uniformly after query
-            # construction, instead of two separately-triggered insertions.
-            if prefer_narrative and query not in search_queries:
-                search_queries.append(query)
+            search_queries = plan.search_queries
+            prefer_narrative = plan.prefer_narrative
             iteration_count = 0
             retry_plan = None
             while iteration_count < max_iterations:
