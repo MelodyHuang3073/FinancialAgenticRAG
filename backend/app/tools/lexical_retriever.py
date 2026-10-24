@@ -37,14 +37,9 @@ def _extract_years(text: str) -> "set[str]":
     return years
 
 
-#: Detects questions asking what caused a metric change and flags them
-#: as attribution-style queries.
-#: Used so retriever/orchestrator can boost passages containing explicit causal phrasing;
-#: check the original full question text when deciding boosts.
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Query-topic detectors (attribution / geography / legal) -- decide whether
-# to apply that topic's dedicated evidence-scoring boost below
+# Query-intent detector used by the orchestrator: an attribution question
+# ("what drove X") needs narrative evidence even when a formula matched
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ATTRIBUTION_QUERY_RE = re.compile(
@@ -55,139 +50,6 @@ _ATTRIBUTION_QUERY_RE = re.compile(
 
 def is_attribution_query(text: str) -> bool:
     return bool(_ATTRIBUTION_QUERY_RE.search(text))
-
-
-#: Detects questions asking which geographies a filer operates in.
-#: Used to prefer the filing's geographic-disclosure note over similar segment text;
-#: evaluate this guard against the original question text.
-_GEOGRAPHY_QUERY_RE = re.compile(r'\bgeograph(?:y|ies|ic(?:al)?)\b', re.IGNORECASE)
-#: Matches literal section headings that indicate a geographic breakdown
-#: (e.g., headings containing "Geographic Operations" or "Geographic Information").
-#: Narrow phrasing reduces false positives from generic words like "areas" or "segments."
-_GEOGRAPHIC_SECTION_RE = re.compile(
-    r'geographic\s+(?:operations|information)\b', re.IGNORECASE
-)
-
-#: Catches geographic answers that do not use the word "geographic" by
-#: looking for multiple distinct region names in the same passage.
-#: Require at least three different region names close together to qualify.
-_GEOGRAPHIC_REGION_NAME_RE = re.compile(
-    r'\b(?:north america|latin america|south america|asia pacific|'
-    r'middle east|south asia|africa|europe|australia|new zealand)\b',
-    re.IGNORECASE,
-)
-
-
-def _geographic_region_name_count(content: str) -> int:
-    return len({m.group(0).lower() for m in _GEOGRAPHIC_REGION_NAME_RE.finditer(content)})
-
-
-def _has_dense_geographic_region_names(content: str, min_distinct: int = 3) -> bool:
-    return _geographic_region_name_count(content) >= min_distinct
-
-
-def is_geography_query(text: str) -> bool:
-    return bool(_GEOGRAPHY_QUERY_RE.search(text))
-
-
-#: Identifies litigation questions that should be answered from the
-#: standard "Legal Proceedings" section present in filings.
-#: Use the standardized section heading as a strong structural signal for ranking.
-_LEGAL_QUERY_RE = re.compile(
-    r'\blegal\s+(?:battle|proceeding|matter)s?\b|\blitigation\b|\blawsuit\b',
-    re.IGNORECASE,
-)
-_LEGAL_PROCEEDINGS_SECTION_RE = re.compile(
-    r'(?i:item\s*3\.?\s*legal\s+proceedings)|'
-    # Handles multi-part legal proceedings sections where relevant content
-    # appears under later sub-headings within the same Item 3 block: a
-    # filer's own named litigation category ("PBM Litigation and
-    # Investigations", "Antitrust Litigation", "Controlled Substances
-    # Litigation, Audits and Subpoenas", ...) renders as a short,
-    # title-cased, standalone heading line -- the same structural shape
-    # _ACQUISITION_SUBHEADING_RE below matches for acquisition sub-headings
-    # -- so detect that SHAPE (a trigger word inside a short standalone
-    # heading line, with up to a few leading/trailing words of its own
-    # category name) rather than any one filer's own category names, which
-    # vary filer to filer and would otherwise only ever match the specific
-    # filing(s) a particular wording was copied from. Verified against a
-    # real filing's extracted text: matches every one of its actual
-    # litigation sub-headings (including ones with trailing continuations
-    # like ", Audits and Subpoenas") with no false positives on unrelated
-    # headings.
-    r'\n[A-Z][A-Za-z,/\'\-]*(?:\s+[A-Za-z,/\'\-]+){0,10}?\s+'
-    r'(?:Litigation|Lawsuits?|Proceedings?|Investigations?)\b'
-    r'[A-Za-z,/\'\- ]{0,40}\n'
-)
-
-
-def is_legal_query(text: str) -> bool:
-    return bool(_LEGAL_QUERY_RE.search(text))
-
-
-#: Identifies questions asking which companies a filer acquired. Used to boost a
-#: filing's own acquisitions-note company sub-headings over other passages that
-#: merely mention "acquisition" in passing -- see _ACQUISITION_SUBHEADING_RE.
-_ACQUISITION_QUERY_RE = re.compile(
-    r'\bacqui(?:sition|red)\b|\bcompanies\s+acquired\b|\bbusiness\s+combinations?\b',
-    re.IGNORECASE,
-)
-#: A filing's own acquisitions note names each acquired company as a short
-#: sub-heading immediately followed by a dated "we acquired / completed the
-#: acquisition of ..." sentence -- the same structural shape
-#: decomposer.suggest_narrative_topic_query's answer-synthesis counterpart
-#: (llm_client._ACQUISITION_SUBHEADING_RE) already extracts a company list
-#: from, duplicated here as a RETRIEVAL-time ranking signal: a chunk matching
-#: this shape is close to certainly part of the acquisitions note itself, not
-#: a passing mention, and multi-chunk pages (an acquisitions note spanning
-#: several thousand characters splits into several overlapping chunks) can
-#: otherwise leave one acquired company's own chunk just outside the
-#: retrieval top-k while a neighboring chunk from the same note makes it in --
-#: confirmed real case: a filing's note split so that only ONE of two
-#: adjacent chunks (each naming a different acquired company) ranked inside
-#: the top 15 for every query actually used, so the company named in the
-#: other chunk was never shown to the model at all, even though both chunks
-#: are equally part of the same note.
-_ACQUISITION_SUBHEADING_RE = re.compile(
-    r'\n[A-Z][A-Za-z0-9&.,\' \-]{1,40}\n\s*On\s+\w+\s+\d{1,2},\s*\d{4},\s*we\s+'
-    r'(?:acquired|completed\s+the\s+acquisition\s+of)',
-)
-
-
-def is_acquisition_query(text: str) -> bool:
-    return bool(_ACQUISITION_QUERY_RE.search(text))
-
-
-#: "Which segment/division/business unit had the highest/lowest ..." is a
-#: NUMERIC-mode question (the classifier still routes it as such --
-#: pot_reasoner.py's own _SELECTION_QUERY_RE recognizes the identical
-#: phrasing to skip PoT computation entirely), so it never gets the
-#: prefer_narrative-gated boosts above; this is threaded independently
-#: into the NUMERIC retrieval path instead. Deliberately scoped to
-#: segment/division/business-unit wording only (not the more general
-#: "region/category/type" a plain ranking question might also use) since
-#: the boost below targets a specific 10-Q/10-K structural feature -- a
-#: consolidated segment-results table, not any ranking table.
-_SEGMENT_COMPARISON_QUERY_RE = re.compile(
-    r'\bwhich\b[^.?]{0,120}\b(?:segment|division|business\s+unit)s?\b[^.?]{0,80}'
-    r'\b(?:highest|lowest|largest|biggest|smallest|greatest|fewest|most|least|best|worst)\b'
-    r'|\b(?:highest|lowest|largest|biggest|smallest)\b[^.?]{0,80}\b(?:segment|division|business\s+unit)s?\b',
-    re.IGNORECASE,
-)
-
-#: Notes that a filer may print a consolidated, multi-segment results table with a
-#: section heading directly above it; such pages can answer cross-segment comparison
-#: queries but may be ranked lower by retrieval when many single-segment narrative pages
-#: match query terms more tightly.
-#: This is a retrieval-ranking issue rather than a table-parsing error; expect rank gaps
-#: when short, focused prose pages dominate term-overlap signals.
-_SEGMENT_RESULTS_SECTION_RE = re.compile(
-    r'segment\s+results\b|results?\s+by\s+segment\b', re.IGNORECASE
-)
-
-
-def is_segment_comparison_query(text: str) -> bool:
-    return bool(_SEGMENT_COMPARISON_QUERY_RE.search(text))
 
 
 #: A config expands a formula query for inventory-related ratios with composition-
@@ -260,37 +122,18 @@ def _get_alias_groups() -> List[List[str]]:
 # apply to a candidate passage, named so each one can be reported
 # (applied_rules on a result), individually disabled
 # (DISABLE_RULE_MULTIPLIERS_EXCEPT), or ablated as a whole
-# (DISABLE_RULE_MULTIPLIERS) for the paper's ablation experiments. Values and
-# trigger conditions are UNCHANGED from before this registry existed -- this
-# only names and centralizes them; search() still applies them in the same
-# order with the same if/elif gating. Two rules are NOT here because their
-# value isn't a fixed constant -- they call a scoring method instead:
-# "company_match" (_company_match_score) and "line_item_match"
-# (_line_item_match_score). The geographic region-density rule
-# ("geographic_region_density") also isn't a flat constant (it scales with
-# how many distinct regions a passage names), so only its base/step/cap are
-# listed here; see search()'s own geographic_region_density branch for the
-# formula. See tests/tools/dump_retrieval_rules.py for a human-readable
-# dump of every rule (including the two scoring-method-based ones).
+# (DISABLE_RULE_MULTIPLIERS) for the paper's ablation experiments. Only rules
+# with a measured contribution in the leave-one-out ablation are kept; rules
+# with none were removed. Two rules are NOT here because their value isn't a
+# fixed constant -- they call a scoring method instead: "company_match"
+# (_company_match_score) and "line_item_match" (_line_item_match_score). See
+# tests/tools/dump_retrieval_rules.py for a human-readable dump of every rule.
 RULE_MULTIPLIERS: Dict[str, float] = {
     "total_row_boost": 1.3,
-    "narrative_text_note_boost": 1.5,
-    "causal_language_boost": 1.4,
-    "geographic_section_boost": 1.4,
-    "geographic_region_density_base": 1.4,
-    "geographic_region_density_step": 0.3,
-    "geographic_region_density_cap": 2.9,
-    "legal_proceedings_boost": 1.5,
-    "acquisition_subheading_boost": 1.5,
-    "segment_comparison_boost": 2.0,
     "inventory_composition_boost": 3.0,
     "preferred_filing_year_boost": 1.3,
     "low_confidence_column_penalty": 0.5,
-    "restricted_row_penalty": 0.6,
     "year_match_boost": 1.4,
-    "recent_year_mismatch_penalty": 0.6,
-    "quarter_match_boost": 1.3,
-    "section_mismatch_penalty": 0.05,
     "statement_type_hint_boost": 1.5,
 }
 
@@ -305,21 +148,6 @@ RULE_DESCRIPTIONS: Dict[str, str] = {
         "line-item name patterns (_line_item_match_score).",
     "total_row_boost": "1.3x for a real statement 'Total X' row whose own label shares a "
         "stem with the query, when not in narrative-preference mode.",
-    "narrative_text_note_boost": "1.5x for prose (text_note) passages in narrative-preference "
-        "mode, to counter BM25's length bias toward short table rows.",
-    "causal_language_boost": "1.4x for passages containing causal language (\"driven by\", "
-        "\"primarily due to\", ...) on attribution-style (\"what drove X\") questions.",
-    "geographic_section_boost": "1.4x for passages under a 'Geographic Operations/Information' "
-        "heading on geography questions.",
-    "geographic_region_density": "Up to 2.9x (1.4 base + 0.3 per region past 3) for passages "
-        "enumerating several distinct geographic regions without an explicit heading, "
-        "mutually exclusive with geographic_section_boost (elif).",
-    "legal_proceedings_boost": "1.5x for passages under an Item 3 Legal Proceedings heading "
-        "or one of its own litigation-category sub-headings, on legal questions.",
-    "acquisition_subheading_boost": "1.5x for passages matching a filing's own "
-        "acquisition-note sub-heading shape, on acquisition-list questions.",
-    "segment_comparison_boost": "2.0x for passages with a side-by-side multi-segment results "
-        "table, on segment-comparison questions (active even outside narrative mode).",
     "inventory_composition_boost": "3.0x for passages labeled with inventory-composition "
         "line items (raw materials/WIP/finished goods), when the query asks about "
         "inventory composition.",
@@ -327,15 +155,7 @@ RULE_DESCRIPTIONS: Dict[str, str] = {
         "string) whose document year matches the latest year named in the query.",
     "low_confidence_column_penalty": "0.5x for passages whose column header the parser "
         "flagged as low-confidence (e.g. an ambiguous repeated-year table).",
-    "restricted_row_penalty": "0.6x for a combined 'X, X equivalents and restricted X' row "
-        "when the query itself never mentions \"restricted\".",
-    "year_match_boost": "1.4x when the document's own year(s) intersect the query's year(s); "
-        "mutually exclusive with recent_year_mismatch_penalty (if/else).",
-    "recent_year_mismatch_penalty": "0.6x when the query names year(s) but the document's own "
-        "recent year(s) (2021-2025) don't intersect them.",
-    "quarter_match_boost": "1.3x when the document mentions a quarter the query also names.",
-    "section_mismatch_penalty": "0.05x when a legacy section label is set and the document's "
-        "own tagged section disagrees with it.",
+    "year_match_boost": "1.4x when the document's own year(s) intersect the query's year(s).",
     "statement_type_hint_boost": "1.5x when the document's statement type (or a core line "
         "item it contains) matches the classifier's statement_type_hint.",
 }
@@ -346,7 +166,7 @@ RULE_DESCRIPTIONS: Dict[str, str] = {
 # match, company match, the topic detectors above)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class HybridFinancialRetriever:
+class LexicalFinancialRetriever:
     """BM25 lexical retrieval with keyword-overlap scoring and rule-based
     re-weighting (no dense retrieval)."""
 
@@ -414,12 +234,6 @@ class HybridFinancialRetriever:
     #: Do not exclude these rows outright — they can still be sole evidence for a line
     #: item but should be treated cautiously.
     _LOW_CONFIDENCE_COLUMN_RE = re.compile(r'\bCol\d+:')
-
-    _CAUSAL_LANGUAGE_RE = re.compile(
-        r'\bdriven\s+by\b|\bprimarily\s+due\s+to\b|\bmainly\s+due\s+to\b|'
-        r'\bas\s+a\s+result\s+of\b|\battributable\s+to\b|\bresulted\s+from\b',
-        re.IGNORECASE,
-    )
 
     #: Table-row label is often a stronger indicator of its statement than a coarse page-
     #: level section tag assigned at ingestion.
@@ -711,14 +525,8 @@ class HybridFinancialRetriever:
         top_k: int = 5,
         exclude_ids: Optional[List[str]] = None,
         entity: Optional[str] = None,
-        section: Optional[str] = None,
         statement_type_hint: Optional[str] = None,
         prefer_narrative: bool = False,
-        is_attribution: bool = False,
-        is_geography: bool = False,
-        is_legal: bool = False,
-        is_acquisition: bool = False,
-        is_segment_comparison: bool = False,
         query_years: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Search the corpus with BM25 plus overlap scoring.
@@ -728,17 +536,12 @@ class HybridFinancialRetriever:
             top_k: max results to return
             exclude_ids: passage IDs to skip
             entity: company filter (soft via _company_match_score)
-            section: legacy section label (mismatch gives a small penalty)
             statement_type_hint: hint for statement type (income_statement | balance_sheet | cash_flow | notes | unknown); matching docs get a boost
-            prefer_narrative: True for qualitative/narrative questions (defaults False); when True, apply behaviors that favor paragraph narrative over short table rows
-            is_attribution: True when the original question asks what caused a change; caller must set this explicitly
-            is_geography: True when the original question asks about geographies/regions
-            is_acquisition: True when the original question asks which companies were acquired
+            prefer_narrative: True for qualitative/narrative questions (defaults False); disables the total-row boost, which only makes sense for a numeric lookup
             query_years: years extracted from the original question; used to disambiguate among multiple filings for the same company
 
         Behavior notes:
             Matching statement types receive a positive boost; non-matching documents are not penalized.
-            prefer_narrative changes ranking to avoid short table rows systematically outranking prose for narrative questions.
             query_years help prefer documents covering the requested period when entity names lack year information.
         """
         exclude_ids = set(exclude_ids or [])
@@ -750,18 +553,9 @@ class HybridFinancialRetriever:
         # versus calling self._idf() fresh per document per token.
         query_idf = {t: self._idf(t) for t in set(query_tokens)}
         query_years = _extract_years(query)
-        query_quarters = set(re.findall(r'q[1-4]', query.lower()))
         # Computed ONCE per search() call, not per candidate document --
         # see _query_line_item_candidates's docstring.
         query_patterns = self._query_line_item_candidates(query)
-        # OR'd with this call's own query text so a direct, single-query
-        # caller (a diagnostic script, a future call site) still gets the
-        # boost without needing to pass is_attribution/is_geography explicitly.
-        attribution_active = is_attribution or is_attribution_query(query)
-        geography_active = is_geography or is_geography_query(query)
-        legal_active = is_legal or is_legal_query(query)
-        acquisition_active = is_acquisition or is_acquisition_query(query)
-        segment_comparison_active = is_segment_comparison or is_segment_comparison_query(query)
         # No caller flag for this one -- "Finished Goods" appearing in the
         # query text IS the signal (see _INVENTORY_COMPOSITION_QUERY_RE's
         # docstring), always auto-detected.
@@ -831,95 +625,6 @@ class HybridFinancialRetriever:
                     multiplier *= RULE_MULTIPLIERS["total_row_boost"]
                     applied_rules.append("total_row_boost")
 
-            # ── Narrative-content boost (only when prefer_narrative) ──────────
-            # Counteracts BM25's inherent length bias: a table row chunk
-            # is typically a handful of tokens, so even one matching term
-            # dominates its score, while a full prose paragraph needs
-            # several matches to reach the same magnitude purely because
-            # of the doc_len normalization in _bm25_score. For a question
-            # this module has already determined has no financial-metric
-            # or formula match at all, the answer is almost certainly in
-            # prose, not a table row, so this compensates rather than
-            # relying on raw BM25 alone to surface it.
-            if self._rule_active("narrative_text_note_boost") and prefer_narrative and doc.get("type") == "text_note":
-                multiplier *= RULE_MULTIPLIERS["narrative_text_note_boost"]
-                applied_rules.append("narrative_text_note_boost")
-
-            # Apply a causal-language relevance boost only for attribution-style
-            # questions and only when narrative-preference is enabled.
-            # This boost is never used for purely numeric or formula-driven retrieval
-            # paths.
-            if (
-                self._rule_active("causal_language_boost")
-                and prefer_narrative and attribution_active and self._CAUSAL_LANGUAGE_RE.search(content)
-            ):
-                multiplier *= RULE_MULTIPLIERS["causal_language_boost"]
-                applied_rules.append("causal_language_boost")
-
-            # ── Geographic-section boost (geography questions only) ───────────
-            # Only ever active alongside prefer_narrative -- see
-            # _GEOGRAPHIC_SECTION_RE's docstring: a sibling "Reportable
-            # Operating Segments" sub-section can score close enough on
-            # plain BM25 to edge out the real "Geographic Operations"
-            # table otherwise, since both share most of their vocabulary.
-            if (
-                self._rule_active("geographic_section_boost")
-                and prefer_narrative and geography_active and _GEOGRAPHIC_SECTION_RE.search(content)
-            ):
-                multiplier *= RULE_MULTIPLIERS["geographic_section_boost"]
-                applied_rules.append("geographic_section_boost")
-            # Boost passages that enumerate distinct geographic regions when the passage
-            # does not use explicit geography headings.
-            # Scale the boost by the number of distinct regions found so stronger multi-
-            # region lists receive higher weight than borderline lists.
-            elif (
-                self._rule_active("geographic_region_density")
-                and prefer_narrative and geography_active and _has_dense_geographic_region_names(content)
-            ):
-                region_count = _geographic_region_name_count(content)
-                multiplier *= min(
-                    RULE_MULTIPLIERS["geographic_region_density_base"]
-                    + RULE_MULTIPLIERS["geographic_region_density_step"] * (region_count - 3),
-                    RULE_MULTIPLIERS["geographic_region_density_cap"],
-                )
-                applied_rules.append("geographic_region_density")
-
-            # Apply a stronger boost for passages that appear under legal-proceedings
-            # section headings, since those headings are standardized and reliable
-            # signals.
-            # Use this boost for legal questions to prefer section-heading matches over
-            # bag-of-words topic matches.
-            if (
-                self._rule_active("legal_proceedings_boost")
-                and prefer_narrative and legal_active and _LEGAL_PROCEEDINGS_SECTION_RE.search(content)
-            ):
-                multiplier *= RULE_MULTIPLIERS["legal_proceedings_boost"]
-                applied_rules.append("legal_proceedings_boost")
-
-            # Boost chunks matching a filing's own acquisitions-note sub-heading shape
-            # (see _ACQUISITION_SUBHEADING_RE) for acquisition questions. An acquisitions
-            # note spanning several thousand characters splits into multiple overlapping
-            # chunks, and without this boost one acquired company's own chunk can rank
-            # just outside the retrieval cutoff while a neighboring chunk from the same
-            # note (naming a different acquired company) ranks comfortably inside it.
-            if (
-                self._rule_active("acquisition_subheading_boost")
-                and prefer_narrative and acquisition_active and _ACQUISITION_SUBHEADING_RE.search(content)
-            ):
-                multiplier *= RULE_MULTIPLIERS["acquisition_subheading_boost"]
-                applied_rules.append("acquisition_subheading_boost")
-
-            # Boost documents that contain side-by-side segment results for segment-
-            # comparison questions; this applies even when narrative preference is off.
-            # This ensures multi-segment summary pages rank above multiple single-
-            # segment pages that individually have high overlap.
-            if (
-                self._rule_active("segment_comparison_boost")
-                and segment_comparison_active and _SEGMENT_RESULTS_SECTION_RE.search(content)
-            ):
-                multiplier *= RULE_MULTIPLIERS["segment_comparison_boost"]
-                applied_rules.append("segment_comparison_boost")
-
             # Boost label matches that indicate inventory composition when retrieving
             # inputs for inventory-turnover formulas; applies in numeric retrieval mode.
             # This helps surface the composition row over shorter, generic inventory
@@ -951,48 +656,14 @@ class HybridFinancialRetriever:
                 multiplier *= RULE_MULTIPLIERS["low_confidence_column_penalty"]
                 applied_rules.append("low_confidence_column_penalty")
 
-            # Avoid answering "X and equivalents" from a combined "Total X, X
-            # equivalents and restricted X" row.
-            # This prevents returning an aggregated total when the question requests the
-            # plain row.
-            if (
-                self._rule_active("restricted_row_penalty")
-                and doc.get("type") == "table_row"
-                and re.search(r'Line Item:[^|]*\brestricted\b', content, re.IGNORECASE)
-                and "restricted" not in query.lower()
-            ):
-                multiplier *= RULE_MULTIPLIERS["restricted_row_penalty"]
-                applied_rules.append("restricted_row_penalty")
-
-            # ── Year / quarter boost ───────────────────────────────────────
-            doc_period = str(doc.get('period', '')) + " " + content
-            if query_years:
-                # Normalise FY prefix for comparison
-                doc_years_found = _extract_years(doc_period)
-                if self._rule_active("year_match_boost") and query_years & doc_years_found:
+            # ── Year boost ─────────────────────────────────────────────────
+            if self._rule_active("year_match_boost") and query_years:
+                doc_period = str(doc.get('period', '')) + " " + content
+                if query_years & _extract_years(doc_period):
                     multiplier *= RULE_MULTIPLIERS["year_match_boost"]
                     applied_rules.append("year_match_boost")
-                elif self._rule_active("recent_year_mismatch_penalty"):
-                    # Penalise docs with completely different recent years
-                    recent_years = {'2021', '2022', '2023', '2024', '2025'}
-                    if doc_years_found & recent_years:
-                        multiplier *= RULE_MULTIPLIERS["recent_year_mismatch_penalty"]
-                        applied_rules.append("recent_year_mismatch_penalty")
 
-            if self._rule_active("quarter_match_boost") and query_quarters:
-                if any(q in doc_period.lower() for q in query_quarters):
-                    multiplier *= RULE_MULTIPLIERS["quarter_match_boost"]
-                    applied_rules.append("quarter_match_boost")
-
-            # ── Step 3: section anchoring (soft filter / penalty) ─────────────
-            if self._rule_active("section_mismatch_penalty") and section:
-                doc_section = doc.get("section", "")  # empty = untagged old passage
-                if doc_section and doc_section != section:
-                    # Wrong section: heavy penalty but not hard exclusion
-                    multiplier *= RULE_MULTIPLIERS["section_mismatch_penalty"]
-                    applied_rules.append("section_mismatch_penalty")
-
-            # ── Step 4: statement_type_hint boost (soft preference) ──────────
+            # ── statement_type_hint boost (soft preference) ──────────────────
             # Use 'statement_type' field (set during ingestion by parser/table_parser).
             # A matching document gets a 1.5x boost; non-matching docs are unchanged.
             if (

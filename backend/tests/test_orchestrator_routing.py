@@ -1,7 +1,7 @@
 """FinAgentRAGOrchestrator's file-routing helpers (app/agent/orchestrator.py):
 the company-key extracted from a corpus doc name, and the tie-break that picks
-the most recent filing for a forward-looking separation/spin-off cost
-question naming no year at all."""
+the most recent filing for a forward-looking question naming no year at
+all."""
 import os
 import sys
 
@@ -17,9 +17,9 @@ def test_company_key():
     assert key("company") == ""
 
 
-def test_separation_cost_question_routes_to_most_recent_filing():
+def test_forward_looking_question_routes_to_most_recent_filing():
     """No year is named, so the plain-annual-10-K default must not win when the
-    question is a forward-looking separation/spin-off cost question."""
+    question asks about a current expectation."""
     class _FakeVS:
         uploaded_files = [
             {"company": "ACME_2021_10K"},
@@ -28,8 +28,8 @@ def test_separation_cost_question_routes_to_most_recent_filing():
         corpus = []
 
     orch = FinAgentRAGOrchestrator.__new__(FinAgentRAGOrchestrator)
-    orch.vector_store = _FakeVS()
+    orch.corpus_store = _FakeVS()
     resolved = orch._match_entity_to_corpus(
-        "Acme", "How much more will Acme expect to spend on separating its unit, in USD million?"
+        "Acme", "How much capital expenditure does Acme expect to make, in USD million?"
     )
     assert resolved == "Acme_2023Q2_10Q"

@@ -65,7 +65,7 @@ def main():
     vs = _build_indexed_store()
     print(f"Indexing took {time.time() - t0:.1f}s, total passages: {len(vs.corpus)}")
 
-    orchestrator = FinAgentRAGOrchestrator(vector_store=vs)
+    orchestrator = FinAgentRAGOrchestrator(corpus_store=vs)
 
     results = []
     for i, qa in enumerate(runnable, 1):

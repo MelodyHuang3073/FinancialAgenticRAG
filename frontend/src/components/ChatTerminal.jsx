@@ -736,7 +736,7 @@ function LoadingBubble() {
         boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
       }}>
         <Sparkles size={14} style={{ animation: 'blink 1s step-end infinite' }} />
-        FinAgent-RAG 執行 Query Decompose → Hybrid Retrieval → PoT Sandbox → Tri-Check...
+        FinAgent-RAG 執行 Query Decompose → Lexical Retrieval → PoT Sandbox → Tri-Check...
       </div>
     </div>
   );

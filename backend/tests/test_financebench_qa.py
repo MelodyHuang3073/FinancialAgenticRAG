@@ -40,7 +40,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.rag.vector_store import FinancialVectorStoreManager
+from app.rag.corpus_store import FinancialCorpusStore
 from app.rag.parser import FinancialFileParser
 from app.agent.orchestrator import FinAgentRAGOrchestrator
 
@@ -174,7 +174,7 @@ _NUM_RE = re.compile(r"-?\$?-?\d[\d,]*\.?\d*")
 #: answer citing "FY22"/"FY21" throughout never produces a literal 2022
 #: for _numbers_in to find. Expanding the shorthand to its 4-digit form
 #: BEFORE extraction (same fix already applied to retrieval scoring in
-#: hybrid_retriever._extract_years) removes this false negative without
+#: lexical_retriever._extract_years) removes this false negative without
 #: touching how real dollar/percent figures are compared.
 _FY_SHORT_RE = re.compile(r"\bFY\s*(\d{2})\b", re.IGNORECASE)
 
@@ -315,8 +315,8 @@ def _percent_numbers_in(text: str) -> list:
 #: index of its own.
 _LIST_MARKER_RE = re.compile(
     r"\(\d{1,2}\)(?=\s+[A-Z])"
-    # a lowercase item introduced by ":" ";" "," or "and" ("... are: (1) usual and
-    # customary pricing ...; (2) PBM litigation ...; and (3) controlled ...") is a
+    # a lowercase item introduced by ":" ";" "," or "and" ("... are: (1) <item> ...;
+    # (2) <item> ...; and (3) <item> ...") is a
     # list marker too; the lookbehind keeps accounting negatives like "(6) million"
     # (which are not preceded by these) untouched
     r"|(?:(?<=[:;,]\s)|(?<=\sand\s))\(\d{1,2}\)(?=\s+[a-z])"
@@ -707,7 +707,7 @@ def _available_doc_names() -> set:
     }
 
 
-def _build_indexed_store() -> FinancialVectorStoreManager:
+def _build_indexed_store() -> FinancialCorpusStore:
     """Parse every real 10-K PDF this project ships a fixture for (per
     DOC_TO_FILE) with the project's actual parser and index them exactly
     the way the real upload flow does (FinancialFileParser ->
@@ -715,7 +715,7 @@ def _build_indexed_store() -> FinancialVectorStoreManager:
     not a shortcut. doc_names with no matching PDF are silently skipped
     here (see _available_doc_names) — their questions are individually
     skipped by the test, not treated as a fatal setup error."""
-    vs = FinancialVectorStoreManager()
+    vs = FinancialCorpusStore()
     parser = FinancialFileParser()
     for doc_name, (filename, _label) in DOC_TO_FILE.items():
         path = os.path.join(FIXTURES_DIR, filename)
@@ -755,7 +755,7 @@ def run_financebench_subset(verbose: bool = True):
 
     print("Indexing real 10-K PDFs through the actual parser/upload path...")
     vs = _build_indexed_store()
-    orchestrator = FinAgentRAGOrchestrator(vector_store=vs)
+    orchestrator = FinAgentRAGOrchestrator(corpus_store=vs)
 
     available_docs = _available_doc_names()
     results = []
@@ -845,7 +845,7 @@ def test_financebench_question(qa):
     if qa["doc_name"] not in _available_doc_names():
         pytest.skip(f"no PDF fixture for {qa['doc_name']} in tests/financebench_pdfs/")
     vs = _get_shared_store()
-    orchestrator = FinAgentRAGOrchestrator(vector_store=vs)
+    orchestrator = FinAgentRAGOrchestrator(corpus_store=vs)
     res = orchestrator.process_query(qa["question"])
     model_answer = res.get("final_answer", "") or ""
 

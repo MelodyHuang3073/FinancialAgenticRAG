@@ -31,8 +31,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.dirname(__file__))
 
 from test_financebench_qa import QA_PATH, _check_numeric, _check_contains_facts, _available_doc_names
-from app.rag.vector_store import FinancialVectorStoreManager
-from app.tools.hybrid_retriever import HybridFinancialRetriever
+from app.rag.corpus_store import FinancialCorpusStore
+from app.tools.lexical_retriever import LexicalFinancialRetriever
 from app.agent.orchestrator import FinAgentRAGOrchestrator
 
 CACHE_PATH = os.path.join(os.path.dirname(__file__), "original_corpus_cache.pkl")
@@ -54,7 +54,7 @@ CHECK_KIND_LABELS = {
 }
 
 
-def _build_indexed_store_from_cache() -> FinancialVectorStoreManager:
+def _build_indexed_store_from_cache() -> FinancialCorpusStore:
     if not os.path.exists(CACHE_PATH):
         raise SystemExit(
             f"Missing {CACHE_PATH}. Run tests/build_original_corpus_cache.py first "
@@ -62,11 +62,11 @@ def _build_indexed_store_from_cache() -> FinancialVectorStoreManager:
         )
     with open(CACHE_PATH, "rb") as f:
         cached = pickle.load(f)
-    vs = FinancialVectorStoreManager()
+    vs = FinancialCorpusStore()
     vs.corpus = cached["corpus"]
     vs.parent_map = cached["parent_map"]
     vs.uploaded_files = cached["uploaded_files"]
-    vs.retriever = HybridFinancialRetriever(vs.corpus)
+    vs.retriever = LexicalFinancialRetriever(vs.corpus)
     for uf in vs.uploaded_files:
         print(f"  loaded {uf['filename']} ({uf['company']}): {uf['passage_count']} passages")
     return vs
@@ -95,7 +95,7 @@ def main():
         missing_docs = sorted({qa["doc_name"] for qa in skipped})
         print(f"  SKIP {len(skipped)} question(s) — no PDF fixture cached for: {', '.join(missing_docs)}")
 
-    orchestrator = FinAgentRAGOrchestrator(vector_store=vs)
+    orchestrator = FinAgentRAGOrchestrator(corpus_store=vs)
 
     results_by_type = {k: [] for k in RESULTS_FILENAMES}
     for i, qa in enumerate(runnable, 1):

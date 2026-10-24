@@ -3,19 +3,22 @@
 Main flow:
   1. question classification
   2. multi-step decomposition
-  3. hybrid retrieval (vector + sparse)
+  3. lexical retrieval (BM25 + rule-based re-weighting)
   4. chain-of-thought style reasoning in a sandbox
   5. verification passes and iterative refinement
   6. final answer synthesis via LLM client
 """
 
 import re
+from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 
-from app.rag.vector_store import FinancialVectorStoreManager
+from app.rag.corpus_store import FinancialCorpusStore
 from app.agent.question_classifier import FinanceBenchClassifier
 from app.agent.decomposer import QueryDecomposer
-from app.agent.pot_reasoner import ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical
+from app.agent.pot_reasoner import (
+    ProgramOfThoughtReasoner, _with_implied_trend_year, _get_canonical, is_no_calculation_question,
+)
 from app.agent.verifier import TriCheckSelfVerifier
 from app.agent.refiner import QueryRefiner
 from app.agent.llm_client import (
@@ -23,35 +26,27 @@ from app.agent.llm_client import (
 )
 from app.agent.evidence_selection import select_with_quota
 from app.agent.financial_formula_library import detect_formula, get_variable_aliases
-from app.tools.hybrid_retriever import (
-    is_attribution_query, is_geography_query, is_legal_query, is_acquisition_query,
-    is_segment_comparison_query,
-)
+from app.tools.lexical_retriever import is_attribution_query
 
 
-#: llm_client.py's own "CRITICAL: you MUST quote this exact PoT result
-#: number" instruction is worded strongly enough that the model sometimes
-#: prints the bare result_value a SECOND time, as its own trailing
-#: paragraph, in addition to already using it correctly in prose -- e.g.
-#: "...raised guidance by **1 percentage point** (from 8% to 9%).\n\n1" or
-#: "...paid a dividend of **$0.55 per share**.\n\nNumeric answer: **0.55**".
-#: The number and prose sentence are both already correct; only this
-#: redundant echo is wrong, so it is safe to strip mechanically -- but only
-#: when it's the LAST paragraph, contains NOTHING but a number (optionally
-#: bold-marked, optionally "Numeric answer:"-prefixed), and the answer has
-#: other substantive content before it (never strips a genuinely one-line
-#: numeric-only answer).
-_TRAILING_BARE_NUMBER_RE = re.compile(
-    r'^\s*(?:numeric\s+answer:?\s*)?\*{0,2}-?\$?[\d,]*\.?\d+\*{0,2}%?\s*$',
-    re.IGNORECASE,
-)
+@dataclass
+class QueryPlan:
+    """What to search for, decided once per question (see _plan_queries).
 
-
-def _strip_trailing_bare_number(answer: str) -> str:
-    paragraphs = re.split(r'\n\s*\n', answer.strip())
-    if len(paragraphs) >= 2 and _TRAILING_BARE_NUMBER_RE.match(paragraphs[-1]):
-        return '\n\n'.join(paragraphs[:-1]).strip()
-    return answer
+    sub_questions: every planned step, each tagged with its "source" (formula /
+        llm / original_question / narrative_topic). The numeric path searches
+        its retrieval steps; both paths record it in the trace and hand it to
+        the answer generator.
+    search_queries: the queries the non-numeric path searches (empty for numeric).
+    dynamic_formula_entry: a formula the question defines inline, found by the
+        decomposer's LLM call; used by PoT only when no library formula matched.
+    prefer_narrative: non-numeric only -- the answer lives in prose, not in the
+        formula's own numeric variables.
+    """
+    sub_questions: List[Dict[str, Any]]
+    search_queries: List[str] = field(default_factory=list)
+    dynamic_formula_entry: Optional[Dict[str, Any]] = None
+    prefer_narrative: bool = False
 
 
 class FinAgentRAGOrchestrator:
@@ -71,8 +66,8 @@ class FinAgentRAGOrchestrator:
     # retrieved earlier, so ensure final limit preserves diversity across subqueries.
     CONTEXT_CHUNK_LIMIT = 30
 
-    def __init__(self, vector_store: FinancialVectorStoreManager):
-        self.vector_store = vector_store
+    def __init__(self, corpus_store: FinancialCorpusStore):
+        self.corpus_store = corpus_store
         self.classifier = FinanceBenchClassifier()
         self.decomposer = QueryDecomposer()
         self.pot_reasoner = ProgramOfThoughtReasoner()
@@ -101,7 +96,7 @@ class FinAgentRAGOrchestrator:
         """
         parent_id = hit.get("parent_id", "")
         parent_content = hit.get("parent_content") or (
-            self.vector_store.get_parent_content(parent_id) if parent_id else ""
+            self.corpus_store.get_parent_content(parent_id) if parent_id else ""
         )
         info = {
             "id": hit.get("id", ""),
@@ -120,58 +115,193 @@ class FinAgentRAGOrchestrator:
             info["sub_question"] = sub_question
         return info
 
-    #: Opening words of an answer that says the chosen file lacks the fact.
-    _REFUSAL_HEAD_RE = re.compile(
-        r"(?:cannot|can't|can not|unable to|not able to)\s+(?:conclusively\s+)?"
-        r"(?:determine|confirm|calculate|compute|identify|say|answer|tell|find)"
-        r"|(?:do(?:es)?\s+not|don't|doesn't)\s+(?:include|disclose|contain|provide|state|show|say)"
-        r"|(?:not|isn't|aren't)\s+(?:disclosed|included|provided|available|stated)"
-        r"|insufficient (?:evidence|data|information)|no (?:such )?(?:data|information) (?:in|is)",
-        re.IGNORECASE,
-    )
+    def _plan_retry(
+        self, query: str, verification_res: Dict[str, Any],
+        formula_entry: Optional[Dict[str, Any]], query_entity: str,
+        retrieval_years: List[str], classification: Dict[str, Any],
+        attempt: int, evidence_so_far: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """The single retry controller: map the verifier's structured
+        failure type to the next retrieval.
 
-    def _looks_like_refusal(self, answer: str) -> bool:
-        return bool(answer) and bool(self._REFUSAL_HEAD_RE.search(answer[:220]))
+          no_evidence            -> broaden: the classifier's general queries
+          missing_years          -> targeted: the formula's variables for the
+                                    missing years
+          duplicate_placeholder  -> targeted: the two variables that collided
+          implausible_result,
+          no_relevant_data,
+          calculation_failed     -> targeted: every formula variable again,
+                                    with a wider window over unseen passages
+          anything else, or no
+          formula to target      -> refine: rule-based query refinement
 
-    def _alternate_company_docs(self, resolved: str, query: str, limit: int = 2) -> List[str]:
-        """Other files of the SAME company as `resolved`, best guess first
-        (a year the question names, then plain annual filings, then more
-        recent). Each is tried on its own -- one file per attempt."""
-        import re as _re
-        def _base(name: str) -> str:
-            return _re.split(r"_(?:19|20)\d{2}", name or "", maxsplit=1)[0].lower()
-        def _year(name: str) -> str:
-            m = _re.search(r"(?<!\d)((?:19|20)\d{2})(?!\d)", name or "")
-            return m.group(1) if m else ""
-        q_years = set(_re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", query))
-        base = _base(resolved)
-        cands = []
-        for uf in self.vector_store.uploaded_files:
-            name = uf.get("company", "")
-            if not name or name == resolved or _base(name) != base:
-                continue
-            has_q = bool(_re.search(r"(?<!\d)(?:19|20)\d{2}q[1-4]", name, _re.IGNORECASE)) or "earnings" in name.lower()
-            cands.append((1 if _year(name) in q_years else 0, 0 if has_q else 1, _year(name), name))
-        cands.sort(reverse=True)
-        return [c[3] for c in cands[:limit]]
+        Every action excludes passages already retrieved, so each attempt
+        brings in new evidence. The attempt budget is the caller's loop bound.
+        """
+        failure = verification_res.get("failure_type")
+        if failure == "no_evidence":
+            return {
+                "failure": failure, "action": "broaden",
+                "queries": list(classification.get("retrieval_queries") or [query]),
+                "top_k": self.RETRIEVAL_TOP_K,
+            }
+        if formula_entry:
+            steps: List[Dict[str, Any]] = []
+            if failure == "missing_years" and verification_res.get("missing_years"):
+                steps = self._build_formula_subquestions(
+                    formula_entry, query_entity, verification_res["missing_years"]
+                )
+            elif failure == "duplicate_placeholder" and verification_res.get("duplicate_placeholder_pair"):
+                pair = verification_res["duplicate_placeholder_pair"]
+                steps = [
+                    st for st in self._build_formula_subquestions(formula_entry, query_entity, retrieval_years)
+                    if st["target_metric"] in pair
+                ]
+            elif failure in ("implausible_result", "no_relevant_data", "calculation_failed"):
+                steps = self._build_formula_subquestions(formula_entry, query_entity, retrieval_years)
+            if steps:
+                return {
+                    "failure": failure, "action": "targeted",
+                    "queries": [st["query"] for st in steps],
+                    "top_k": self.RETRIEVAL_TOP_K_NARRATIVE,
+                }
+        refined = self.refiner.refine(
+            query, verification_res, attempt,
+            target_metrics=classification.get("target_metrics"),
+            evidence_so_far=evidence_so_far,
+        )
+        return {"failure": failure, "action": "refine", "queries": [refined], "top_k": self.RETRIEVAL_TOP_K}
+
+    def _run_retry_plan(
+        self, plan: Dict[str, Any], attempt: int, classification: Dict[str, Any],
+        statement_type_hint: Optional[str], retrieved_ids: set,
+        evidence_buffer: List[Dict[str, Any]], evidence_meta: List[Dict[str, Any]],
+        iter_trace: Dict[str, Any],
+    ) -> None:
+        """Run a _plan_retry plan's searches, adding new evidence in place."""
+        for k, plan_query in enumerate(plan["queries"]):
+            hits = self.corpus_store.search(
+                plan_query, top_k=plan["top_k"],
+                exclude_ids=list(retrieved_ids),
+                entity=classification.get("entity"),
+                statement_type_hint=statement_type_hint,
+                query_years=classification.get("years"),
+            )
+            for hit in self._tag_subquery(
+                200 + attempt * 10 + k,
+                self._deduplicate_hits(hits, entity=classification.get("entity")),
+            ):
+                retrieved_ids.add(hit["id"])
+                evidence_buffer.append(hit)
+                info = self._build_evidence_info(hit, sub_question=plan_query)
+                iter_trace["retrieved_passages"].append(info)
+                evidence_meta.append(info)
+
+    def _plan_queries(
+        self, query: str, classification: Dict[str, Any], answer_mode: str,
+        library_formula: Optional[Dict[str, Any]], query_entity: str,
+        retrieval_years: List[str],
+    ) -> QueryPlan:
+        """Decide which queries to search, in three steps:
+
+          1. Base queries -- does the question match a library formula?
+               YES -> one query per formula variable (deterministic, built from
+                      the formula's own aliases, so retrieval and extraction look
+                      for the same thing).
+               NO  -> numeric:     the decomposer's LLM split (it may also hand
+                                   back a formula the question defines itself);
+                      non-numeric: the classifier's own queries.
+          2. The question itself as one more query, when the base queries may
+             miss its wording:
+               numeric, no formula          -> always;
+               non-numeric                  -> when the answer is in prose
+                                               (no formula, or "what drove...").
+             (A numeric question with a formula whose shape has no computed
+             answer is searched with the question later, at retrieval time.)
+          3. One extra LLM-suggested "which filing section holds this" query:
+               numeric     -> unless both calc_type and target_metrics matched
+                              (alias-matched ratio rows are already targeted and
+                              an extra generic query displaced correct rows);
+               non-numeric -> when there is no formula.
+        """
+        numeric = answer_mode == "NUMERIC"
+
+        # ── 1. base queries ──
+        dynamic_formula_entry = None
+        search_queries: List[str] = []
+        if numeric:
+            if library_formula:
+                sub_questions = self._build_formula_subquestions(
+                    library_formula, query_entity, retrieval_years
+                )
+            else:
+                sub_questions, dynamic_formula_entry = self.decomposer.decompose(
+                    query,
+                    target_metrics=classification["target_metrics"],
+                    years=retrieval_years,
+                    entity=classification["entity"],
+                )
+        else:
+            sub_questions = self._build_non_numeric_subquestions(
+                query, answer_mode, classification.get("target_metrics")
+            )
+            if library_formula:
+                search_queries = [
+                    step["query"] for step in self._build_formula_subquestions(
+                        library_formula, query_entity, classification["years"]
+                    )
+                ]
+            else:
+                search_queries = classification["retrieval_queries"]
+
+        # ── 2. the question itself ──
+        # Evaluated against the ORIGINAL question (not a keyword-stuffed
+        # sub-query), see lexical_retriever.is_attribution_query.
+        prefer_narrative = False
+        if numeric:
+            if not library_formula:
+                sub_questions.append({
+                    "step": len(sub_questions) + 1,
+                    "type": "retrieval",
+                    "query": query,
+                    "target_metric": "",
+                    "target_year": "",
+                    "source": "original_question",
+                })
+        else:
+            prefer_narrative = library_formula is None or is_attribution_query(query)
+
+        # ── 3. LLM topic query ──
+        if numeric:
+            if not (classification.get("calc_type") and classification.get("target_metrics")):
+                topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
+                if topic_terms:
+                    sub_questions.append({
+                        "step": len(sub_questions) + 1,
+                        "type": "retrieval",
+                        "query": f"{query_entity} {topic_terms}".strip(),
+                        "target_metric": "",
+                        "target_year": "",
+                        "source": "narrative_topic",
+                    })
+        elif not library_formula:
+            topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
+            if topic_terms:
+                search_queries = search_queries + [
+                    f"{classification['entity']} {topic_terms}".strip()
+                ]
+        # Non-numeric step 2 is applied last so the question lands after the topic
+        # query, exactly where the search order has always put it.
+        if prefer_narrative and query not in search_queries:
+            search_queries.append(query)
+
+        return QueryPlan(sub_questions, search_queries, dynamic_formula_entry, prefer_narrative)
 
     def process_query(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
-        """Answer from the best-guess file; if that answer says the file lacks
-        the fact, try the same company's other files one at a time (each
-        attempt uses a single file) and keep the first non-refusing answer."""
-        result = self._process_query_once(query, max_iterations)
-        if not self._looks_like_refusal(result.get("final_answer", "")):
-            return result
-        for alt in self._alternate_company_docs(result.get("resolved_entity", ""), query):
-            alt_result = self._process_query_once(query, max_iterations, _entity_override=alt)
-            if not self._looks_like_refusal(alt_result.get("final_answer", "")):
-                alt_result["retried_from"] = result.get("resolved_entity", "")
-                return alt_result
-        return result
+        """Answer `query` from the single best-matching filing."""
+        return self._process_query_once(query, max_iterations)
 
-    def _process_query_once(
-        self, query: str, max_iterations: int = 3, _entity_override: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def _process_query_once(self, query: str, max_iterations: int = 3) -> Dict[str, Any]:
         trace_steps = []
         evidence_buffer: List[Dict[str, Any]] = []  # full evidence objects
         evidence_meta: List[Dict[str, Any]] = []    # per-item sub_question metadata
@@ -182,29 +312,37 @@ class FinAgentRAGOrchestrator:
         answer_mode = classification["answer_mode"]
         complexity = classification["complexity"]
         retrieval_strategy = classification["retrieval_strategy"]
-        # "Which segment had the highest/lowest X" stays NUMERIC (see
-        # hybrid_retriever.is_segment_comparison_query's docstring) so this
-        # is computed here, not alongside is_attribution/is_geography/
-        # is_legal below (those are only ever used on the non-numeric
-        # branch further down).
-        is_segment_comparison = is_segment_comparison_query(query)
 
         # Entity alignment: match extracted entity against corpus company names.
         # Keep a cleaned human-readable entity for query text and use the raw filename-
         # stem form only for the corpus filter; fused filename tokens can lose retrieval
         # signal if used directly in the query.
         clean_entity = classification["entity"]
-        classification["entity"] = _entity_override or self._match_entity_to_corpus(
-            classification["entity"], query
-        )
-        if not _entity_override:
-            clean_entity = self._readable_company_name(classification["entity"], query) or clean_entity
+        classification["entity"] = self._match_entity_to_corpus(classification["entity"], query)
+        clean_entity = self._readable_company_name(classification["entity"], query) or clean_entity
 
         # statement_type_hint: from question_classifier (income_statement / balance_sheet /
-        # cash_flow / notes).  Used for 1.5x boost in hybrid_retriever.
+        # cash_flow / notes).  Used for 1.5x boost in lexical_retriever.
         statement_type_hint = classification.get("statement_type_hint") or None
         if statement_type_hint == "unknown":
             statement_type_hint = None
+
+        # Decided once and used everywhere below: does this question have no single
+        # computed answer (selection, guidance, group comparison, existence, category
+        # threshold)? Such a question is answered from the filing's text, so
+        #   - the calculation is skipped (pot_reasoner), and
+        #   - the question's own wording is also searched.
+        # The test looks at the question's wording only, so it can be true for a
+        # question that ALSO names a library metric (e.g. "is EPS growth expected to
+        # accelerate?"): the no-calculation shape wins. Everything else about the
+        # formula path (the formula's own retrieval sub-queries) is unchanged.
+        #
+        # When the question itself is searched as a query:
+        #   1. numeric question, no library formula   -> always (appended below);
+        #   2. numeric question WITH a library formula -> only when no_calculation;
+        #   3. non-numeric (explanation / assessment)  -> when there is no formula,
+        #      or the question asks what drove a change (prefer_narrative).
+        no_calculation = is_no_calculation_question(query)
 
 
         trace_steps.append({
@@ -234,69 +372,23 @@ class FinAgentRAGOrchestrator:
         # sheer sampling variance). Deriving sub-queries from the
         # formula's own aliases guarantees retrieval searches for
         # exactly what extraction will later look for, deterministically.
-        formula_entry = detect_formula(query) if answer_mode == "NUMERIC" else None
+        # Formula identification happens once per question, here: the same
+        # library match drives retrieval sub-queries (numeric and non-numeric
+        # paths alike) and is handed to the PoT module, which does not
+        # re-match the query itself.
+        library_formula = detect_formula(query)
+        formula_entry = library_formula if answer_mode == "NUMERIC" else None
         # If a question asks whether a metric is improving/declining as of year Y, treat
         # it as implying a comparison to year Y-1.
         # Without this implied prior-year fetch, retrieval may lack the earlier-year
         # evidence needed for trend calculations, causing fallback answers.
         retrieval_years = _with_implied_trend_year(classification["years"], query.lower())
         query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
-        if formula_entry:
-            sub_questions = self._build_formula_subquestions(
-                formula_entry, query_entity, retrieval_years
-            )
-        elif answer_mode == "NUMERIC":
-            sub_questions = self.decomposer.decompose(
-                query,
-                target_metrics=classification["target_metrics"],
-                years=retrieval_years,
-                entity=classification["entity"],
-            )
-        else:
-            sub_questions = self._build_non_numeric_subquestions(
-                query, answer_mode, classification.get("target_metrics")
-            )
-
-        # Both NUMERIC sub-question builders above search only on the target line
-        # item's own alias vocabulary, which finds the structured statement row
-        # but not a filing's plain-English sentence stating the same fact in
-        # different words. For direct-amount/lookup questions (calc_type empty)
-        # one extra, additive query built by the LLM suggester covers that
-        # prose. Skipped for computed-ratio questions that matched a real
-        # target_metric (both calc_type and target_metrics set): their
-        # alias-matched multi-row retrieval already targets the exact line items,
-        # and an extra generic query there displaced correct evidence rows.
-        # A ratio question that matched NO target_metric (calc_type set but
-        # target_metrics empty) has no alias-matched retrieval to protect --
-        # its components are as likely to be plain-English sentences as a
-        # direct-lookup question's, so it still gets the narrative bonus query.
-        # LLM-decomposed sub-queries vary run to run and can drop the user's own
-        # key terms; the original question is always kept as one extra query so
-        # retrieval never depends on the decomposition alone (standard
-        # multi-query practice; the non-numeric path already does the same).
-        if answer_mode == "NUMERIC" and not formula_entry:
-            sub_questions.append({
-                "step": len(sub_questions) + 1,
-                "type": "retrieval",
-                "query": query,
-                "target_metric": "",
-                "target_year": "",
-                "source": "original_question",
-            })
-
-        if answer_mode == "NUMERIC" and not (
-            classification.get("calc_type") and classification.get("target_metrics")
-        ):
-            topic_terms = self.decomposer.suggest_narrative_topic_query(query, query_entity)
-            if topic_terms:
-                sub_questions.append({
-                    "step": len(sub_questions) + 1,
-                    "type": "retrieval",
-                    "query": f"{query_entity} {topic_terms}".strip(),
-                    "target_metric": "",
-                    "target_year": "",
-                    "source": "narrative_topic",
-                })
+        plan = self._plan_queries(
+            query, classification, answer_mode, library_formula, query_entity, retrieval_years,
+        )
+        sub_questions = plan.sub_questions
+        dynamic_formula_entry = plan.dynamic_formula_entry
 
         trace_steps.append({
             "step_name": "Query Decomposition",
@@ -311,22 +403,19 @@ class FinAgentRAGOrchestrator:
         pot_res = None
 
         if answer_mode == "NUMERIC":
-            current_query = query
-            is_first_iteration = True
 
             while iteration_count < max_iterations:
                 iteration_count += 1
                 iter_trace = {
                     "iteration": iteration_count,
-                    "query": current_query,
+                    "query": query,
                     "retrieved_passages": [],
                     "pot_code": "",
                     "sandbox_output": "",
                     "verification": {}
                 }
 
-                if is_first_iteration:
-                    is_first_iteration = False
+                if iteration_count == 1:
 
                     # ── Step-by-step retrieval: one search per decomposed sub-question ──
                     retrieval_steps = [
@@ -417,18 +506,20 @@ class FinAgentRAGOrchestrator:
                             if sub_q.get("source") == "narrative_topic"
                             else self.RETRIEVAL_TOP_K
                         )
-                        hits = self.vector_store.search(
+                        hits = self.corpus_store.search(
                             step_query, top_k=step_top_k,
                             exclude_ids=list(retrieved_ids),
                             entity=classification.get("entity"),
                             statement_type_hint=effective_hint,
-                            is_segment_comparison=is_segment_comparison,
                             query_years=classification.get("years"),
                         )
                         hits = self._tag_subquery(
                             sub_q.get("step", 0),
                             self._deduplicate_hits(hits, entity=classification.get("entity")),
                         )
+                        if sub_q.get("source") == "original_question":
+                            for hit in hits:
+                                hit["original_question_hit"] = True
 
                         step_hit_infos = []
                         for hit in hits:
@@ -456,46 +547,46 @@ class FinAgentRAGOrchestrator:
                             ),
                         })
 
-                    # ── Fallback: if zero evidence collected, use classifier retrieval_queries ──
-                    if not evidence_buffer:
-                        for fb_idx, sq in enumerate(classification["retrieval_queries"]):
-                            hits = self.vector_store.search(
-                                sq, top_k=self.RETRIEVAL_TOP_K,
-                                exclude_ids=list(retrieved_ids),
+                    # Rule 2 of the list at the top of this function: a question with
+                    # no single computed answer (guidance, selection, comparison,
+                    # existence) is answered from the filing's text, which is worded
+                    # like the question rather than like the line items the
+                    # sub-questions target -- so, as on the non-numeric path, the
+                    # question itself is also searched. Computable questions keep
+                    # retrieval targeted on their formula inputs.
+                    if no_calculation and query not in {sq["query"] for sq in retrieval_steps}:
+                        q_hits = self._tag_subquery(
+                            len(retrieval_steps) + 1,
+                            self._deduplicate_hits(
+                                self.corpus_store.search(
+                                    query, top_k=self.RETRIEVAL_TOP_K,
+                                    exclude_ids=list(retrieved_ids),
+                                    entity=classification.get("entity"),
+                                    statement_type_hint=statement_type_hint,
+                                    query_years=classification.get("years"),
+                                ),
                                 entity=classification.get("entity"),
-                                statement_type_hint=statement_type_hint,  # Step 4
-                                is_segment_comparison=is_segment_comparison,
-                                query_years=classification.get("years"),
-                            )
-                            for hit in self._tag_subquery(
-                                100 + fb_idx,
-                                self._deduplicate_hits(hits, entity=classification.get("entity")),
-                            ):
-                                retrieved_ids.add(hit["id"])
-                                evidence_buffer.append(hit)
-                                info = self._build_evidence_info(hit)
-                                iter_trace["retrieved_passages"].append(info)
-                                evidence_meta.append(info)
+                            ),
+                        )
+                        for hit in q_hits:
+                            hit["original_question_hit"] = True
+                            retrieved_ids.add(hit["id"])
+                            evidence_buffer.append(hit)
+                            info = self._build_evidence_info(hit, sub_question=query)
+                            iter_trace["retrieved_passages"].append(info)
+                            evidence_meta.append(info)
+                        trace_steps.append({
+                            "step_name": "Original question",
+                            "type": "step_retrieval",
+                            "detail": f"Query: '{query}' → {len(q_hits)} passage(s) retrieved",
+                        })
 
                 else:
-                    # ── Subsequent iterations: use refined query ──
-                    new_hits = self._deduplicate_hits(
-                        self.vector_store.search(
-                            current_query, top_k=self.RETRIEVAL_TOP_K,
-                            exclude_ids=list(retrieved_ids),
-                            entity=classification.get("entity"),
-                            statement_type_hint=statement_type_hint,  # Step 4
-                            is_segment_comparison=is_segment_comparison,
-                            query_years=classification.get("years"),
-                        ),
-                        entity=classification.get("entity"),
+                    # ── Attempt 2+: the retry plan chosen from the last REJECT ──
+                    self._run_retry_plan(
+                        retry_plan, iteration_count, classification, statement_type_hint,
+                        retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
                     )
-                    for hit in self._tag_subquery(200 + iteration_count, new_hits):
-                        retrieved_ids.add(hit["id"])
-                        evidence_buffer.append(hit)
-                        info = self._build_evidence_info(hit)
-                        iter_trace["retrieved_passages"].append(info)
-                        evidence_meta.append(info)
 
                 # ── PoT Execution ──
                 # Sort by relevance score so the BEST chunks reach PoT,
@@ -506,10 +597,13 @@ class FinAgentRAGOrchestrator:
                     ev_enriched = dict(ev)
                     parent_id = ev.get("parent_id")
                     if parent_id and not ev_enriched.get("parent_content"):
-                        ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
+                        ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
                     context_window.append(ev_enriched)
                 pot_res = self.pot_reasoner.generate_and_execute(
-                    query, context_window, entity=classification["entity"]
+                    query, context_window, entity=classification["entity"],
+                    library_formula_entry=library_formula,
+                    dynamic_formula_entry=dynamic_formula_entry,
+                    no_calculation=no_calculation,
                 )
                 iter_trace["pot_code"] = pot_res["code"]
                 iter_trace["sandbox_output"] = pot_res["output_log"]
@@ -527,198 +621,132 @@ class FinAgentRAGOrchestrator:
                     "data": iter_trace
                 })
 
-                # Accept or simple → done
-                if verification_res["decision"] == "ACCEPT" or complexity == "SIMPLE":
+                if verification_res["decision"] == "ACCEPT" or iteration_count >= max_iterations:
                     break
 
-                # Reject → targeted retry (if the verifier pinpointed a specific
-                # gap it can name) in addition to the existing generic refine-
-                # and-re-search below, which still runs every time either way.
-                dup_pair = verification_res.get("duplicate_placeholder_pair")
-                if dup_pair and formula_entry:
-                    # The verifier flagged two of this formula's own
-                    # placeholders (e.g. revenue_new/revenue_old) as both
-                    # having resolved via free-text to the identical value --
-                    # re-issue retrieval for exactly those two, using the
-                    # same alias/entity/year query shape the first pass
-                    # built them with (_build_formula_subquestions), rather
-                    # than hoping the single generic refined query below
-                    # happens to surface the real structured row for one of
-                    # them. A wider top_k than the first pass used, since the
-                    # real row not ranking in the original window at all is
-                    # exactly the failure this is trying to recover from.
-                    targeted_steps = [
-                        step for step in self._build_formula_subquestions(
-                            formula_entry, query_entity, retrieval_years
-                        )
-                        if step["target_metric"] in dup_pair
-                    ]
-                    targeted_queries = []
-                    for step in targeted_steps:
-                        hits = self.vector_store.search(
-                            step["query"], top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
-                            exclude_ids=list(retrieved_ids),
-                            entity=classification.get("entity"),
-                            statement_type_hint=statement_type_hint,
-                            is_segment_comparison=is_segment_comparison,
-                            query_years=classification.get("years"),
-                        )
-                        hits = self._tag_subquery(
-                            400 + iteration_count * 10 + step["step"],
-                            self._deduplicate_hits(hits, entity=classification.get("entity")),
-                        )
-                        targeted_queries.append(step["query"])
-                        for hit in hits:
-                            retrieved_ids.add(hit["id"])
-                            evidence_buffer.append(hit)
-                            info = self._build_evidence_info(hit, sub_question=step["query"])
-                            evidence_meta.append(info)
-                    trace_steps.append({
-                        "step_name": f"Targeted Duplicate-Placeholder Retry #{iteration_count}",
-                        "type": "refinement",
-                        "detail": (
-                            f"REJECT (duplicate_placeholder_pair={dup_pair}) → "
-                            f"targeted re-search: {targeted_queries}"
-                        ),
-                    })
-
-                # Reject → refine and re-search
-                current_query = self.refiner.refine(
-                    query, verification_res, iteration_count,
-                    target_metrics=classification.get("target_metrics"),
-                    evidence_so_far=evidence_buffer,
+                # REJECT → one retry controller: the verifier's structured
+                # failure type picks the next retrieval (see _plan_retry).
+                retry_plan = self._plan_retry(
+                    query, verification_res, formula_entry or dynamic_formula_entry,
+                    query_entity, retrieval_years, classification, iteration_count,
+                    evidence_buffer,
                 )
                 trace_steps.append({
-                    "step_name": f"Query Refinement #{iteration_count}",
+                    "step_name": f"Retry plan #{iteration_count}",
                     "type": "refinement",
-                    "detail": f"REJECT → refined query: '{current_query}'"
+                    "detail": (
+                        f"REJECT ({retry_plan['failure']}) → {retry_plan['action']}: "
+                        f"{retry_plan['queries']}"
+                    ),
                 })
 
         else:
             # ── Non-numeric path (EXPLANATION / ASSESSMENT / EXCLUSION) ──
-            iteration_count = 1
-            iter_trace = {
-                "iteration": 1, "query": query,
-                "retrieved_passages": [], "pot_code": "", "sandbox_output": "",
-                "verification": {}
-            }
-
             # If a metric matches a registered formula, search for that formula's
             # required variables.
             # The raw question text often omits the derived metric's component line-item
             # names.
-            non_numeric_formula = detect_formula(query)
-            # Evaluated against the ORIGINAL question, not each individual
-            # sub-query below (a keyword-stuffed sub-query that just
-            # concatenates the entity name with metric keywords never
-            # repeats "what drove" phrasing even when the overall question
-            # plainly is an attribution question) -- see
-            # hybrid_retriever.is_attribution_query's docstring.
-            is_attribution = is_attribution_query(query)
-            # Single combined signal, computed once up front: do we need prose/
-            # narrative evidence at all for this question? True whenever there's no
-            # registered formula to search structured values with, OR the question
-            # asks WHY/WHAT DROVE something (causal narrative, never captured by a
-            # formula's own numeric-variable aliases even when a formula DID match).
-            # Drives both decisions below (whether to widen scoring toward prose,
-            # and whether the raw question itself needs to be one of the search
-            # queries) from the same boolean, rather than two separately-reasoned
-            # conditions that happened to overlap.
-            prefer_narrative = (non_numeric_formula is None or is_attribution)
-            if non_numeric_formula:
-                formula_query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
-                search_queries = [
-                    step["query"] for step in
-                    self._build_formula_subquestions(non_numeric_formula, formula_query_entity, classification["years"])
-                ]
-            else:
-                search_queries = classification["retrieval_queries"]
-                # Additive: one extra query from the LLM suggester (which filing
-                # section/vocabulary would hold this answer). A failed or empty
-                # response leaves the classifier's own queries unchanged.
-                llm_topic_terms = self.decomposer.suggest_narrative_topic_query(
-                    query, clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
-                )
-                if llm_topic_terms:
-                    search_queries = search_queries + [
-                        f"{classification['entity']} {llm_topic_terms}".strip()
-                    ]
-            # _build_formula_subquestions() emits one query per placeholder only, and
-            # never the raw question itself -- a formula-matched question that also
-            # needs prose (prefer_narrative) must get it added explicitly. The
-            # template branch above already includes the raw question in
-            # classification["retrieval_queries"] (its own built-in fallback), so
-            # this is a no-op there -- one rule, applied uniformly after query
-            # construction, instead of two separately-triggered insertions.
-            if prefer_narrative and query not in search_queries:
-                search_queries.append(query)
-            is_geography = is_geography_query(query)
-            is_legal = is_legal_query(query)
-            is_acquisition = is_acquisition_query(query)
-            new_hits = []
-            for sq_idx, sq in enumerate(search_queries):
-                new_hits.extend(self._tag_subquery(sq_idx, self.vector_store.search(
-                    # This retrieval block runs for non-numeric answer modes and always
-                    # uses the wider narrative top_k.
-                    # prefer_narrative controls scoring boosts but not how many
-                    # candidates pass the cutoff.
-                    sq, top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
-                    exclude_ids=list(retrieved_ids),
-                    entity=classification.get("entity"),
-                    statement_type_hint=statement_type_hint,  # Step 4
-                    prefer_narrative=prefer_narrative,
-                    is_attribution=is_attribution,
-                    is_geography=is_geography,
-                    is_legal=is_legal,
-                    is_acquisition=is_acquisition,
-                    query_years=classification.get("years"),
-                )))
-            new_hits = self._deduplicate_hits(new_hits, entity=classification.get("entity"))
-            for hit in new_hits:
-                retrieved_ids.add(hit["id"])
-                evidence_buffer.append(hit)
-                info = self._build_evidence_info(hit)
-                iter_trace["retrieved_passages"].append(info)
-                evidence_meta.append(info)
-
-            # Explains that some explanation/assessment questions still require a
-            # numeric comparison when they match a registered formula; they also need
-            # qualitative framing in the final text.
-            # Notes that previously the pipeline returned an empty numeric result object
-            # so the LLM supplied numbers without any sandbox trace, which can lead to
-            # ungrounded outputs; keep sandbox-backed numeric computation to avoid that.
-            context_window = []
-            for ev in select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT):
-                ev_enriched = dict(ev)
-                parent_id = ev.get("parent_id")
-                if parent_id and not ev_enriched.get("parent_content"):
-                    ev_enriched["parent_content"] = self.vector_store.get_parent_content(parent_id)
-                context_window.append(ev_enriched)
-
-            if non_numeric_formula:
-                pot_res = self.pot_reasoner.generate_and_execute(
-                    query, context_window, entity=classification["entity"]
-                )
-            else:
-                pot_res = {
-                    "code": "", "success": True, "result_value": None,
-                    "output_log": "", "extracted_variables": {},
-                    "answer_mode": answer_mode,
+            non_numeric_formula = library_formula
+            search_queries = plan.search_queries
+            prefer_narrative = plan.prefer_narrative
+            iteration_count = 0
+            retry_plan = None
+            while iteration_count < max_iterations:
+                iteration_count += 1
+                iter_trace = {
+                    "iteration": iteration_count, "query": query,
+                    "retrieved_passages": [], "pot_code": "", "sandbox_output": "",
+                    "verification": {}
                 }
-            pot_res["answer_mode"] = answer_mode
-            iter_trace["pot_code"] = pot_res.get("code", "")
-            iter_trace["sandbox_output"] = pot_res.get("output_log", "")
-            iter_trace["result_value"] = pot_res.get("result_value")
+                if iteration_count == 1:
+                    new_hits = []
+                    for sq_idx, sq in enumerate(search_queries):
+                        new_hits.extend(self._tag_subquery(sq_idx, self.corpus_store.search(
+                            # This retrieval block runs for non-numeric answer modes and always
+                            # uses the wider narrative top_k.
+                            # prefer_narrative controls scoring boosts but not how many
+                            # candidates pass the cutoff.
+                            sq, top_k=self.RETRIEVAL_TOP_K_NARRATIVE,
+                            exclude_ids=list(retrieved_ids),
+                            entity=classification.get("entity"),
+                            statement_type_hint=statement_type_hint,  # Step 4
+                            prefer_narrative=prefer_narrative,
+                            query_years=classification.get("years"),
+                        )))
+                    new_hits = self._deduplicate_hits(new_hits, entity=classification.get("entity"))
+                    for hit in new_hits:
+                        retrieved_ids.add(hit["id"])
+                        evidence_buffer.append(hit)
+                        info = self._build_evidence_info(hit)
+                        iter_trace["retrieved_passages"].append(info)
+                        evidence_meta.append(info)
 
-            verification_res = self.verifier.verify(
-                query, self._top_evidence(evidence_buffer), pot_res, entity=classification.get("entity")
-            )
-            iter_trace["verification"] = verification_res
-            trace_steps.append({
-                "step_name": "Evidence Retrieval & Analysis",
-                "type": "retrieval",
-                "data": iter_trace
-            })
+                else:
+                    # ── Attempt 2+: the retry plan chosen from the last REJECT ──
+                    self._run_retry_plan(
+                        retry_plan, iteration_count, classification, statement_type_hint,
+                        retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
+                    )
+
+                # Explains that some explanation/assessment questions still require a
+                # numeric comparison when they match a registered formula; they also need
+                # qualitative framing in the final text.
+                # Notes that previously the pipeline returned an empty numeric result object
+                # so the LLM supplied numbers without any sandbox trace, which can lead to
+                # ungrounded outputs; keep sandbox-backed numeric computation to avoid that.
+                context_window = []
+                for ev in select_with_quota(evidence_buffer, self.CONTEXT_CHUNK_LIMIT):
+                    ev_enriched = dict(ev)
+                    parent_id = ev.get("parent_id")
+                    if parent_id and not ev_enriched.get("parent_content"):
+                        ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
+                    context_window.append(ev_enriched)
+
+                if non_numeric_formula:
+                    pot_res = self.pot_reasoner.generate_and_execute(
+                        query, context_window, entity=classification["entity"],
+                        library_formula_entry=non_numeric_formula,
+                        no_calculation=no_calculation,
+                    )
+                else:
+                    pot_res = {
+                        "code": "", "success": True, "result_value": None,
+                        "output_log": "", "extracted_variables": {},
+                        "answer_mode": answer_mode,
+                    }
+                pot_res["answer_mode"] = answer_mode
+                iter_trace["pot_code"] = pot_res.get("code", "")
+                iter_trace["sandbox_output"] = pot_res.get("output_log", "")
+                iter_trace["result_value"] = pot_res.get("result_value")
+
+                verification_res = self.verifier.verify(
+                    query, self._top_evidence(evidence_buffer), pot_res, entity=classification.get("entity")
+                )
+                iter_trace["verification"] = verification_res
+                trace_steps.append({
+                    "step_name": "Evidence Retrieval & Analysis",
+                    "type": "retrieval",
+                    "data": iter_trace
+                })
+
+                if verification_res["decision"] == "ACCEPT" or iteration_count >= max_iterations:
+                    break
+
+                # REJECT -> the same retry controller as the numeric path.
+                retry_plan = self._plan_retry(
+                    query, verification_res, non_numeric_formula,
+                    query_entity, retrieval_years, classification, iteration_count,
+                    evidence_buffer,
+                )
+                trace_steps.append({
+                    "step_name": f"Retry plan #{iteration_count}",
+                    "type": "refinement",
+                    "detail": (
+                        f"REJECT ({retry_plan['failure']}) -> {retry_plan['action']}: "
+                        f"{retry_plan['queries']}"
+                    ),
+                })
+
 
         # ── Step 4: Final Answer Synthesis ──
         final_context = self._top_evidence(evidence_buffer)
@@ -756,10 +784,17 @@ class FinAgentRAGOrchestrator:
             # raw placeholder value.
             "result_value": (
                 None
-                if pot_res and "result is not reliable" in (pot_res.get("output_log") or "")
+                if pot_res and (
+                    "result is not reliable" in (pot_res.get("output_log") or "")
+                    or pot_res.get("implausible_result_reason")
+                )
                 else (pot_res.get("result_value") if pot_res else None)
             ),
             "verification": verification_res,
+            # Whether the final attempt passed Tri-Check, and if not, why --
+            # an answer that never passed is returned flagged, not hidden.
+            "verified": bool(verification_res) and verification_res.get("decision") == "ACCEPT",
+            "verification_failure": (verification_res or {}).get("failure_type"),
             "pot_code": pot_res.get("code") if pot_res else "",
             "sandbox_log": pot_res.get("output_log") if pot_res else "",
             "is_degraded_formula": pot_res.get("is_degraded_formula", False) if pot_res else False,
@@ -828,14 +863,6 @@ class FinAgentRAGOrchestrator:
     _FORWARD_LOOKING_CUE_RE = re.compile(
         r"\bexpected?\s+to\b|\bexpects?\b|\bguidance\b|\boutlook\b|\bforecast\w*|\banticipat\w+"
     )
-    #: If a question about an ongoing multi-period liability names no year, the code
-    #: prefers the most recent filing rather than an older annual filing; otherwise
-    #: cumulative-in-progress percentages can be stale.
-    #: When queries omit a period, ensure selection logic looks for the latest available
-    #: filing for that entity.
-    _SEPARATION_TOPIC_RE = re.compile(
-        r"\bseparat\w+|\bspin[- ]?off\w*|\bdivest\w*", re.IGNORECASE
-    )
 
     @staticmethod
     def _readable_company_name(matched_company: str, query: str) -> str:
@@ -865,7 +892,7 @@ class FinAgentRAGOrchestrator:
         Also handles the case where the classifier returned generic 'company'.
         """
         import re as _re
-        if not self.vector_store.uploaded_files:
+        if not self.corpus_store.uploaded_files:
             return classifier_entity  # no uploads yet — use classifier result as-is
 
         q_lower = query.lower()
@@ -962,7 +989,7 @@ class FinAgentRAGOrchestrator:
         best_tie_key = None
         scored = []
 
-        for uf in self.vector_store.uploaded_files:
+        for uf in self.corpus_store.uploaded_files:
             corpus_company = uf.get("company", "")
             if not corpus_company:
                 continue
@@ -995,6 +1022,11 @@ class FinAgentRAGOrchestrator:
             for tok in abbr_tokens:
                 tl = tok.lower()
                 if tl in corpus_words or tl in q_stop:
+                    continue
+                # A short word that is not written as an acronym (such as the "net" of
+                # "net income") is an ordinary word of the question, not an abbreviated
+                # company name: it must not prefix-match a company ("net" -> "netflix").
+                if len(tl) < 5 and not tok.isupper() and not any(ch.isupper() for ch in tok[1:]):
                     continue
                 if compact_corpus.startswith(tl):
                     score += 3
@@ -1031,15 +1063,12 @@ class FinAgentRAGOrchestrator:
                 1 if (query_quarter is not None and corpus_quarter == query_quarter) else 0,
                 (2 if (forward_year_prior and corpus_year == forward_year_prior)
                  else 1 if corpus_year in query_years else 0),
-                # Refers to a specific regex's behavior: it overrides a higher-tier
-                # default preference for plain annual reports, but only for a narrowly
-                # defined forward-looking separation-cost question shape; it is guarded
-                # so it cannot trigger on unrelated no-year questions and will not
-                # conflict with the higher-tier rule.
+                # A forward-looking question that names no period asks about the
+                # current expectation, which the most recent filing (including an
+                # interim one) states; this overrides the plain-annual default below.
                 1 if (
                     not query_years and corpus_quarter
                     and self._FORWARD_LOOKING_CUE_RE.search(q_lower)
-                    and self._SEPARATION_TOPIC_RE.search(q_lower)
                 ) else 0,
                 0 if corpus_quarter else 1,
                 corpus_year or "",
@@ -1072,7 +1101,7 @@ class FinAgentRAGOrchestrator:
                 ]
                 if len(_terms) >= 2:
                     _counts = {d: 0 for d in tied_docs}
-                    for _p in self.vector_store.corpus:
+                    for _p in self.corpus_store.corpus:
                         _pc = _p.get("company")
                         if _pc in _counts:
                             _low = (_p.get("content") or "").lower()
@@ -1101,7 +1130,7 @@ class FinAgentRAGOrchestrator:
             return classifier_entity
 
         # Last resort: most recently uploaded file
-        return self.vector_store.uploaded_files[-1].get("company", "company")
+        return self.corpus_store.uploaded_files[-1].get("company", "company")
 
     def _infer_entity_from_corpus(self, query: str) -> str:
         """Legacy method — kept for backward compatibility. Delegates to _match_entity_to_corpus."""
@@ -1293,14 +1322,35 @@ class FinAgentRAGOrchestrator:
             query=query, answer_mode=answer_mode, evidence=evidence,
             route_res=route_res, pot_res=pot_res,
             verification_res=verifier_res, sub_questions=sub_questions,
+            filing_labels=self._filing_year_labels(evidence),
         )
         if llm_answer:
-            return _strip_trailing_bare_number(llm_answer)
+            return llm_answer
 
         # ── Fallback: concise rule-based synthesis ──
         if answer_mode == "NUMERIC":
             return self._synthesize_numeric_concise(query, evidence, pot_res)
         return self._synthesize_qualitative_concise(query, evidence, classification)
+
+    def _filing_year_labels(self, evidence: List[Dict[str, Any]]):
+        """What the whole filing(s) the evidence comes from say about their own fiscal years
+        (see answer_directives.filing_periods); computed once per filing."""
+        from app.agent.answer_directives import FilingPeriods, filing_periods
+        companies = {e.get("company") for e in evidence if e.get("company")}
+        cache = self.__dict__.setdefault("_year_label_cache", {})
+        merged = FilingPeriods()
+        for company in companies:
+            key = (company, len(self.corpus_store.corpus))
+            if key not in cache:
+                cache[key] = filing_periods("\n".join(
+                    passage.get("content") or ""
+                    for passage in self.corpus_store.corpus if passage.get("company") == company
+                ))
+            merged.labels |= cache[key].labels
+            merged.end_years |= cache[key].end_years
+            for label, end in cache[key].ends.items():
+                merged.ends.setdefault(label, end)
+        return merged
 
     # ─── Concise numeric answer (English) ────────────────────────
     def _synthesize_numeric_concise(
@@ -1315,6 +1365,12 @@ class FinAgentRAGOrchestrator:
         parts = []
 
         # ── Line 1: Direct answer ──
+        if pot_res.get("implausible_result_reason"):
+            parts.append(
+                f"The figure for **{company}** could not be reliably computed from the filing: "
+                f"{pot_res['implausible_result_reason']}"
+            )
+            return "\n".join(parts)
         if code_val is not None:
             parts.append(f"The calculation result for **{company}** is **`{code_val}`**.")
         else:

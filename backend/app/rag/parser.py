@@ -10,6 +10,13 @@ from typing import List, Dict, Any, Tuple, Optional
 from app.rag.chunker import chunk_text
 from app.tools.table_parser import linearize_financial_table, to_markdown_table, is_markdown_separator_row
 
+#: pdfplumber joins two characters into one word when the gap between them is below a
+#: tolerance, 3 points by default. In a tightly set font a real space is narrower than
+#: that, so whole pages came out with their spaces gone ("Operatingincome"), which no
+#: query for "operating income" can match. The tolerance is therefore a fraction of the
+#: character size: a space is about a quarter of it, the gap inside a word far less.
+_WORD_GAP_RATIO = 0.15
+
 
 class FinancialFileParser:
     """
@@ -42,6 +49,13 @@ class FinancialFileParser:
                 if repaired is not result["passages"]:
                     result["passages"] = repaired
                     result["total_passages"] = len(repaired)
+                from app.rag.table_repair import repair_garbled_pages
+                reread = repair_garbled_pages(
+                    self, result["passages"], content_bytes, filename, company_name
+                )
+                if reread is not result["passages"]:
+                    result["passages"] = reread
+                    result["total_passages"] = len(reread)
             return result
         elif ext == '.csv':
             return self._parse_csv(filename, content_bytes, company_name)
@@ -582,7 +596,7 @@ class FinancialFileParser:
 
     @staticmethod
     def _pdfplumber_words_to_common(pdfplumber_words) -> List[Dict[str, Any]]:
-        """Convert pdfplumber page.extract_words() output into the unified
+        """Convert pdfplumber page.extract_words(x_tolerance_ratio=_WORD_GAP_RATIO) output into the unified
         word format shared with _fitz_words_to_common()."""
         return [
             {"x0": w["x0"], "top": w["top"], "x1": w["x1"], "bottom": w["bottom"], "text": w["text"]}
@@ -1163,7 +1177,7 @@ class FinancialFileParser:
             try:
                 above_probe = (
                     page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
-                    .extract_text() or ""
+                    .extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
                 )
             except Exception:
                 above_probe = ""
@@ -1178,7 +1192,7 @@ class FinancialFileParser:
 
         try:
             above = page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
-            above_text = above.extract_text() or ""
+            above_text = above.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
         except Exception:
             above_text = ""
 
@@ -1283,7 +1297,7 @@ class FinancialFileParser:
             nearby = page.within_bbox(
                 (0, max(0, table_top), page.width, table_top + 60), relative=False
             )
-            nearby_text = nearby.extract_text() or ""
+            nearby_text = nearby.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
         except Exception:
             nearby_text = ""
         for line in nearby_text.split("\n"):
@@ -1331,7 +1345,7 @@ class FinancialFileParser:
             try:
                 above_text = (
                     page.within_bbox((0, 0, page.width, max(0, table_top)), relative=False)
-                    .extract_text() or ""
+                    .extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
                 ) if table_top else ""
             except Exception:
                 above_text = ""
@@ -1486,7 +1500,7 @@ class FinancialFileParser:
                 if x1 <= x0:
                     return None
                 try:
-                    text = page.crop((x0, row_top, x1, row_bottom)).extract_text() or ""
+                    text = page.crop((x0, row_top, x1, row_bottom)).extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
                 except Exception:
                     return None
                 text = " ".join(text.split())
@@ -1610,7 +1624,7 @@ class FinancialFileParser:
 
         # ── Recover rows with no ruled lines at all, via Tier 2 ──────────
         try:
-            leftover_words = self._pdfplumber_words_to_common(filtered_page.extract_words() or [])
+            leftover_words = self._pdfplumber_words_to_common(filtered_page.extract_words(x_tolerance_ratio=_WORD_GAP_RATIO) or [])
             recovered_tables, recovered_prose = self._reconstruct_table_from_word_positions(leftover_words)
         except Exception:
             recovered_tables, recovered_prose = [], None
@@ -1642,15 +1656,15 @@ class FinancialFileParser:
                 # than the one-cell-per-line text the fitz engine produces for
                 # a wide multi-segment table (9 value columns per row).
                 try:
-                    self._last_strip_prose = page.extract_text() or None
+                    self._last_strip_prose = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or None
                 except Exception:
                     self._last_strip_prose = None
             return [], ""
         try:
-            prose = filtered_page.extract_text() or ""
+            prose = filtered_page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
         except Exception:
             try:
-                prose = page.extract_text() or ""
+                prose = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
             except Exception:
                 prose = ""
         return md_tables, prose
@@ -1693,7 +1707,7 @@ class FinancialFileParser:
         multi-page financial tables need to be merged into one block.
         """
         try:
-            probe_text = page.extract_text() or ""
+            probe_text = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
         except Exception:
             probe_text = ""
         try:
@@ -1713,7 +1727,7 @@ class FinancialFileParser:
 
         # ── Tier 2: word-coordinate reconstruction (pdfplumber-native) ──
         try:
-            common_words = self._pdfplumber_words_to_common(page.extract_words() or [])
+            common_words = self._pdfplumber_words_to_common(page.extract_words(x_tolerance_ratio=_WORD_GAP_RATIO) or [])
             word_tables_with_pos, word_prose = self._reconstruct_table_from_word_positions(common_words)
         except Exception:
             word_tables_with_pos, word_prose = [], ""
@@ -1725,7 +1739,7 @@ class FinancialFileParser:
 
         # ── Tier 3: layout-text regex fallback ──
         try:
-            layout_text = page.extract_text(layout=True) or ""
+            layout_text = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO, layout=True) or ""
         except Exception:
             layout_text = ""
         layout_tables, layout_prose = self._layout_text_to_markdown_and_prose(layout_text)
@@ -1733,7 +1747,7 @@ class FinancialFileParser:
             return layout_tables, layout_prose
 
         try:
-            prose = page.extract_text() or ""
+            prose = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
         except Exception:
             prose = ""
         return [], prose
@@ -2075,7 +2089,7 @@ class FinancialFileParser:
         if not any(_has_sparse(md) for md in md_tables):
             return md_tables
         try:
-            words = page.extract_words(x_tolerance=2, y_tolerance=2, keep_blank_chars=False)
+            words = page.extract_words(x_tolerance_ratio=_WORD_GAP_RATIO, y_tolerance=2, keep_blank_chars=False)
         except Exception:
             return md_tables
         lines: Dict[int, list] = {}
@@ -2154,7 +2168,7 @@ class FinancialFileParser:
 
     def _grouped_column_tables(self, page) -> List[str]:
         try:
-            words = page.extract_words(x_tolerance=2, y_tolerance=2, keep_blank_chars=False)
+            words = page.extract_words(x_tolerance_ratio=_WORD_GAP_RATIO, y_tolerance=2, keep_blank_chars=False)
         except Exception:
             return []
         if len(words) < 30:
@@ -2860,7 +2874,7 @@ class FinancialFileParser:
         # Tiers 2 (word-coordinate) and 3 (layout regex) are deliberately
         # NOT computed here: Tier 2 needs to run against whichever engine's
         # OWN page object ends up handling the page (fitz's page.get_text
-        # ("words") vs pdfplumber's page.extract_words() can see different
+        # ("words") vs pdfplumber's page.extract_words(x_tolerance_ratio=_WORD_GAP_RATIO) can see different
         # word/coordinate data for the same PDF), so it's tried per-engine
         # below instead of being pre-computed once. Tier 3 only needs the
         # raw extract_text(layout=True) string, which IS cheap to
@@ -2915,7 +2929,7 @@ class FinancialFileParser:
                         # the ruled fragment and escalate the page to higher-tier
                         # processing.
                         try:
-                            _lt = page.extract_text(layout=True) or ""
+                            _lt = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO, layout=True) or ""
                             _l_tabs, _ = self._layout_text_to_markdown_and_prose(_lt) if _lt else ([], "")
                             _l_rows = self._md_data_rows(_l_tabs)
                             _r_rows = self._md_data_rows(md_tables)
@@ -2928,11 +2942,11 @@ class FinancialFileParser:
                         ruled_prose_by_page[page_idx] = prose
                     elif grouped_tables:
                         ruled_tables_by_page[page_idx] = grouped_tables
-                        ruled_prose_by_page[page_idx] = page.extract_text() or ""
+                        ruled_prose_by_page[page_idx] = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or ""
                     elif getattr(self, "_last_strip_prose", None):
                         strip_prose_by_page[page_idx] = self._last_strip_prose
                     try:
-                        layout_text_by_page[page_idx] = page.extract_text(layout=True) or ""
+                        layout_text_by_page[page_idx] = page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO, layout=True) or ""
                     except Exception:
                         layout_text_by_page[page_idx] = ""
         except Exception as e:
@@ -3075,14 +3089,14 @@ class FinancialFileParser:
                         prose_cleaned = self._clean_text_content(filtered_prose)
                         if not self._is_readable(prose_cleaned, min_alnum=1):
                             # bbox exclusion left nothing usable; fall back to raw text
-                            prose_cleaned = self._clean_text_content(page.extract_text() or "")
+                            prose_cleaned = self._clean_text_content(page.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or "")
                         best_text = self._compose_page_text(prose_cleaned, md_tables)
                     else:
                         for extract_fn in (
-                            lambda p: p.extract_text() or "",
-                            lambda p: p.extract_text(layout=True) or "",
+                            lambda p: p.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO) or "",
+                            lambda p: p.extract_text(x_tolerance_ratio=_WORD_GAP_RATIO, layout=True) or "",
                             lambda p: " ".join(
-                                w.get("text", "") for w in (p.extract_words() or [])
+                                w.get("text", "") for w in (p.extract_words(x_tolerance_ratio=_WORD_GAP_RATIO) or [])
                                 if w.get("text", "").strip()
                             ),
                         ):

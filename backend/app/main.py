@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
-from app.rag.vector_store import FinancialVectorStoreManager
+from app.rag.corpus_store import FinancialCorpusStore
 from app.rag.parser import FinancialFileParser
 from app.agent.orchestrator import FinAgentRAGOrchestrator
 
@@ -18,9 +18,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-vector_store = FinancialVectorStoreManager(load_sample_data=False)
+corpus_store = FinancialCorpusStore(load_sample_data=False)
 file_parser = FinancialFileParser()
-orchestrator = FinAgentRAGOrchestrator(vector_store=vector_store)
+orchestrator = FinAgentRAGOrchestrator(corpus_store=corpus_store)
 
 class ChatRequest(BaseModel):
     query: str
@@ -35,8 +35,8 @@ class UploadDocumentRequest(BaseModel):
 def health_check():
     return {
         "status": "ok",
-        "indexed_documents": len(vector_store.corpus),
-        "uploaded_files_count": len(vector_store.uploaded_files)
+        "indexed_documents": len(corpus_store.corpus),
+        "uploaded_files_count": len(corpus_store.uploaded_files)
     }
 
 @app.get("/api/sample-prompts")
@@ -45,7 +45,7 @@ def get_sample_prompts():
 
 @app.get("/api/uploaded-files")
 def get_uploaded_files():
-    return vector_store.uploaded_files
+    return corpus_store.uploaded_files
 
 @app.post("/api/debug-pdf")
 async def debug_pdf_endpoint(file: UploadFile = File(...)):
@@ -142,14 +142,14 @@ async def upload_file_endpoint(file: UploadFile = File(...), company: Optional[s
                 "filename": file.filename,
                 "company": c_name,
                 "passages_added": 0,
-                "total_indexed": len(vector_store.corpus),
+                "total_indexed": len(corpus_store.corpus),
                 "warning": warning or (
                     f"'{file.filename}' 無法提取有效文字內容，新增 0 個 Chunk。"
                     "請確認檔案格式：可搜尋的 PDF、CSV 或 TXT 效果最佳。"
                 ),
             }
 
-        vector_store.add_parsed_passages(
+        corpus_store.add_parsed_passages(
             filename=file.filename,
             company=c_name,
             passages=parsed_res["passages"]
@@ -160,7 +160,7 @@ async def upload_file_endpoint(file: UploadFile = File(...), company: Optional[s
             "filename": file.filename,
             "company": c_name,
             "passages_added": parsed_res["total_passages"],
-            "total_indexed": len(vector_store.corpus),
+            "total_indexed": len(corpus_store.corpus),
         }
         if warning:
             resp["warning"] = warning
@@ -188,5 +188,5 @@ def chat_endpoint(req: ChatRequest):
 def upload_document(req: UploadDocumentRequest):
     if not req.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty.")
-    doc_id = vector_store.add_custom_document(company=req.company, title=req.title, text=req.content)
-    return {"status": "success", "doc_id": doc_id, "total_indexed": len(vector_store.corpus)}
+    doc_id = corpus_store.add_custom_document(company=req.company, title=req.title, text=req.content)
+    return {"status": "success", "doc_id": doc_id, "total_indexed": len(corpus_store.corpus)}
