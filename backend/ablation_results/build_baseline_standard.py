@@ -15,6 +15,7 @@ order; training = metrics_generated + domain_relevant + novel_generated
 results in that order (50 + 50 + 50).
 Run from backend/:  python ablation_results/build_baseline_standard.py
 """
+import csv
 import json
 import os
 import re
@@ -176,3 +177,25 @@ for k, v in summary.items():
         print("   mechanical(metrics-generated, all):", v["all"]["mechanical_metrics_only"])
         for t, d in v["all"]["by_type"].items():
             print("   ", t, d)
+
+
+def write_csv(path, header, rows):
+    """Excel-friendly (utf-8 with BOM) copy of the same records."""
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+
+
+write_csv(os.path.join(OUT_DIR, "baseline_answers.csv"),
+          ["set", "n", "question_type", "doc_name", "question", "gold", "answer", "answer_source", "label"],
+          [[r["set"], r["n"], r["question_type"], r["doc_name"], r["question"], r["gold"], r["answer"],
+            r["source"], r["label"]] for r in base])
+if HAS_NOPOT:  # side by side, one row per question, for comparing an ablation against the baseline
+    write_csv(os.path.join(OUT_DIR, "comparison_no_pot.csv"),
+              ["set", "n", "question_type", "doc_name", "question", "gold",
+               "baseline_answer", "baseline_source", "baseline_label",
+               "no_pot_answer", "no_pot_source", "no_pot_label"],
+              [[b["set"], b["n"], b["question_type"], b["doc_name"], b["question"], b["gold"],
+                b["answer"], b["source"], b["label"], a["answer"], a["source"], a["label"]]
+               for b, a in zip(base, nopot)])

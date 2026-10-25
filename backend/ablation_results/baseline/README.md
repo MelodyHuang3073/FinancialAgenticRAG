@@ -36,3 +36,16 @@
 - 題號:獨立測試集是 `outsample_results.json` 的順序;訓練集是 metrics、domain、novel 三個結果檔依序串起來(50 + 50 + 50)。
 - 重建:`cd backend && python ablation_results/build_baseline_standard.py`(需要 git 中 HEAD 的結果檔與 `single_pot_*.json`)。
 - 注意:標準答案本身有疑慮的題(例如 Boeing 有效稅率、AWW 股利)已在標籤中照財報判斷,詳見 `baseline_standard.json` 的 `answer` 與 `gold`。
+
+## 檔案說明
+
+| 檔案 | 內容 |
+|---|---|
+| `baseline_standard.json` | 300 題的完整紀錄:題目、標準答案、**基準答案全文**、答案來源(`all-files` 全上傳 252 題、`single-file` 單檔 48 題)、人工標籤。這就是之後消融實驗要比的對象 |
+| `baseline_answers.csv` | 同樣的內容,用 Excel 直接打開、可篩選 |
+| `summary.json` | 各項統計(答對率、依題型、精確度) |
+| `../single_pot_*.json`、`../single_file_candidates_*.json` | 48 題單檔重跑的原始答案與題目清單 |
+| 提交 e7c33c9 的 `*_results.json` | 最新一輪全上傳回歸的原始輸出(訓練集 r9、獨立測試集 r6) |
+
+組成方式:先取最新一輪全上傳回歸的 300 個答案;其中 48 題(歷次全上傳自動評分判不過的題目)用單檔重跑的答案**取代**;單檔答案是在 dev 的程式碼上執行(之後新增的實驗開關預設關閉,行為相同)。
+
