@@ -49,3 +49,11 @@
 
 組成方式:先取最新一輪全上傳回歸的 300 個答案;其中 48 題(歷次全上傳自動評分判不過的題目)用單檔重跑的答案**取代**;單檔答案是在 dev 的程式碼上執行(之後新增的實驗開關預設關閉,行為相同)。
 
+## 後續消融怎麼跑(從 dev 複製程式碼去改)
+
+1. 在新分支加一個環境變數開關(預設關閉、行為不變),只關一個元件。
+2. 全上傳各跑一輪:`python tests/run_full_150_from_cache.py`(訓練集,寫出三個 `*_results.json`)與 `python tests/run_outsample_questions.py`(獨立測試集,寫出 `outsample_results.json`)。跑完把四個結果檔另存到 `ablation_results/<名稱>/`,再用 `git checkout` 還原被覆蓋的主線結果檔。
+3. 48 題單檔各跑一次:`python tests/run_single_file_subset.py --set train --candidates ablation_results/single_file_candidates_train.json --out <輸出檔>`,獨立測試集把 `train` 換成 `out`。
+4. 跟 `baseline_standard.json` 逐題比較:全上傳那 252 題比全上傳答案,48 題比單檔答案;逐題讀答案後標 C/S/P/W,再用 `build_baseline_standard.py` 的做法合併統計。
+5. 在 Windows 用 PowerShell `Start-Process` 在背景執行,先用 1 題冒煙測試,跑前先看 `python -m app.agent.usage_tracker` 的額度(一組全上傳約 450 萬 token,48 題單檔約 70 萬)。
+
