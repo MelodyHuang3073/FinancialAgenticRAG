@@ -15,6 +15,7 @@ Each entry in FORMULA_LIBRARY contains:
 """
 
 import re
+import os
 from typing import Dict, Any, List, Optional
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -939,6 +940,9 @@ def detect_formula(query: str) -> Optional[Dict[str, Any]]:
     English keyword matches require word boundaries to avoid matching short
     abbreviations inside unrelated words; Chinese keywords use plain substring matching.
     """
+    if os.environ.get("ABLATE_DOMAIN") == "1":
+        return None
+
     q_lower = query.lower()
 
     # First pass: Chinese keywords (higher precision)

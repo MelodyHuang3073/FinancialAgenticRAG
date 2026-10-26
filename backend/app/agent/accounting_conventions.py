@@ -10,8 +10,11 @@ The repetition is intentional: a convention stated only once in the middle of a
 long prompt was not followed by the answer model in testing, while a directive
 next to the evidence and a reminder at the end were.
 """
+import os
 import re
 
+
+_ABLATED = os.environ.get("ABLATE_DOMAIN") == "1"
 
 ACCOUNTING_CONVENTIONS = '''⑥ Accounting conventions (definitions -- apply them literally, even where a
 sentence could be read another way)
@@ -58,6 +61,8 @@ sentence could be read another way)
   line, so gross or operating margin is not how they are measured; if asked,
   say so first and why, then give the closest meaningful measure.
 '''
+if _ABLATED:
+    ACCOUNTING_CONVENTIONS = ''
 
 
 #: A question about an initiative's status or remaining cost (a separation,
@@ -85,6 +90,8 @@ def incurred_cost_directive(query: str, evidence_text: str) -> str:
     """The directive for an initiative-cost disclosure found in the evidence
     (see _INCURRED_COST_SENTENCE_RE), or "" when the question or the evidence
     does not match."""
+    if _ABLATED:
+        return ""
     if not _INITIATIVE_QUERY_RE.search(query):
         return ""
     match = _INCURRED_COST_SENTENCE_RE.search(evidence_text)
@@ -135,6 +142,8 @@ _PERCENT_OF_SALES_QUERY_RE = re.compile(r'(percent|%)[^.?]{0,40}\b(sales|revenue
 def leverage_directive(query: str, evidence_text: str) -> str:
     """The directive for "(de)leverage of <item>" sentences in the evidence
     when the question asks about a cost as a percent of sales, else ""."""
+    if _ABLATED:
+        return ""
     if not _PERCENT_OF_SALES_QUERY_RE.search(query):
         return ""
     seen, pairs = set(), []

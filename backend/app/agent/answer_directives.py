@@ -9,6 +9,7 @@ shapes that need it, so the standing prompt stays short.
   ranking_directive       "which X performed best / had the biggest drop"
   fiscal_year_directive   a question's FY label vs a January/February year-end
 """
+import os
 import re
 from typing import Optional, Set
 
@@ -275,6 +276,13 @@ def customer_concentration_directive(query: str, evidence_text: str) -> str:
 
 
 def question_directives(query: str, evidence_text: str, filing_labels=None) -> str:
+    if os.environ.get("ABLATE_DOMAIN") == "1":
+        # Question-type hints removed; the fiscal-year/column mapping stays
+        # (it tells the model which column of THIS filing is the asked year).
+        return (
+            fiscal_year_directive(query, evidence_text, filing_labels)
+            + fiscal_column_directive(query, filing_labels)
+        )
     return (
         ranking_directive(query)
         + acceleration_directive(query)

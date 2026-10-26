@@ -27,6 +27,7 @@ a formula's variable can intentionally use a narrower or broader alias set
 than the generic line item (e.g. one specific balance-sheet caption), so
 those are part of each formula's own definition, not shared vocabulary.
 """
+import os
 from typing import Any, Dict, List
 
 
@@ -408,3 +409,10 @@ def metric_view(field: str) -> Dict[str, Any]:
     """{metric: value} for every QUESTION_METRICS record that defines
     `field`, in QUESTION_METRICS order."""
     return {k: v[field] for k, v in QUESTION_METRICS.items() if field in v}
+
+
+if os.environ.get("ABLATE_DOMAIN") == "1":
+    QUESTION_METRICS.clear()
+    LINE_ITEM_ALIASES.clear()
+    COMPOSITE_LINE_ITEM_ALIASES.clear()
+    LINE_ITEM_STATEMENT.clear()
