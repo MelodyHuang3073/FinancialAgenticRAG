@@ -4,14 +4,15 @@ corpus store holds only that question's own filing (the grading condition
 where one file is uploaded per question), instead of every filing at once.
 
 Usage:
-    python tests/run_single_file_subset.py --set train|out --candidates FILE --out FILE [--limit N]
+    python tests/run_single_file_subset.py --set train|out --candidates FILE --out FILE [--limit N] [--shard K/N]
 
 --candidates is a JSON list of {"doc": <doc_name>, "q": <question prefix>};
 the QA entry is resolved by doc_name and question prefix. Experiment
 switches (e.g. ABLATE_POT=1) are read from the environment by the modules
 they belong to, so the same script runs every configuration.
 Writes --out incrementally (one record per question) so an interrupted run
-keeps what it finished.
+keeps what it finished. --shard K/N runs every N-th candidate starting at K
+(0-based), so N processes can split one list.
 """
 import argparse
 import json
@@ -41,7 +42,8 @@ SETS = {
 
 
 def _norm(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", name.lower())
+    # "dated" is only a filename decoration some doc_names carry (e.g. "..._8K_dated-2022-07-01")
+    return re.sub(r"[^a-z0-9]", "", name.lower().replace("dated", ""))
 
 
 def _company_for(doc_name: str, companies):
@@ -72,6 +74,7 @@ def main():
     ap.add_argument("--candidates", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--shard", default="")
     args = ap.parse_args()
 
     qa_path, cache_path = SETS[args.set]
@@ -81,6 +84,9 @@ def main():
     cands = json.load(open(args.candidates, encoding="utf-8"))
     if args.limit:
         cands = cands[:args.limit]
+    if args.shard:
+        k, n = (int(v) for v in args.shard.split("/"))
+        cands = cands[k::n]
 
     results, stores = [], {}
     for i, c in enumerate(cands, 1):
