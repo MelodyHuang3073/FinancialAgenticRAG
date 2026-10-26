@@ -5,8 +5,9 @@ loaded, full system, one run) and the manual labels below.
 Labels (my own reading of each answer against the gold answer; the automatic
 grader is only a screen):
   C correct, S small error (right conclusion, percentage off by 0.1 point),
-  P partially correct, W wrong. A percentage printed as an integer in the filing
-  counts as C; the same number written with extra precision does not.
+  P partially correct, W wrong. A percentage the filing prints as an integer
+  counts as C, and so does the same number written with a decimal that rounds to
+  it (the filing's 12% written as 12.0%, gold 12.4%).
 Everything not listed in LABELS is C.
 
 Run from backend/:  python ablation_results/build_baseline_standard.py
@@ -25,7 +26,6 @@ LABELS = {
     ("out", 3): ("P", "net income decline given as 19% from $4,009M; gold 22.1% from $4,173M, same conclusion"),
     ("out", 8): ("S", "ROE written as 0.33; gold 33.28%"),
     ("out", 12): ("W", "impairment of intangible assets $1.9B vs $714M; gold $1,993M vs $33M"),
-    ("out", 23): ("W", "growth written as 12.0% (filing says 12%); gold 12.4%"),
     ("out", 33): ("P", "names non-operating/one-time items but not the 'Other (income) expense, net' swing"),
     ("out", 50): ("W", "investment banking fees $9,735M (division table); gold $9,615M"),
     ("out", 70): ("P", "headline restructuring charges $1,092M/$1,987M; gold figures $1,550M/$2,419M appear only as a related line"),
