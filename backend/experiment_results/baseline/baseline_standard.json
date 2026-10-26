@@ -2071,8 +2071,8 @@
   "question": "What was Amazon's total net sales growth rate in FY2025 compared to FY2024?",
   "gold": "Approximately 12.4%, from $637,959 million in FY2024 to $716,924 million in FY2025.",
   "answer": "Amazon’s total net sales grew by **12.0%** in fiscal year 2025 compared to fiscal year 2024. Net sales increased from **$637,959 million** in 2024 to **$716,924 million** in 2025. The filing states, “Sales increased 12% in 2025, compared to the prior year.”",
-  "label": "W",
-  "note": "growth written as 12.0% (filing says 12%); gold 12.4%",
+  "label": "C",
+  "note": "",
   "screen_2pct": false
  },
  {
