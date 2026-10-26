@@ -1,59 +1,49 @@
-# 消融實驗的比較基準(完整系統)
+# 消融實驗的比較基準(單檔 300 題)
 
-日期:2026-10-25。程式版本:95e9df7(app 程式碼之後沒有再改)。模型:gpt-5-mini。
+之後每個消融實驗都跟這份基準比。
 
-## 組成
+## 內容
 
-每題的基準答案:
+- 完整系統(dev 的程式碼,所有消融開關關閉),300 題(訓練集 150、獨立測試集 150),**每題只載入它自己的那份財報**(老師的標準:一份檔案加正確答案就算對),每題只跑一次。
+- 跑的日期:2026-10-26。模型 gpt-5-mini。解析快取是 10/20 建的 `original_corpus_cache.pkl`、`outsample_corpus_cache.pkl`。
+- 判分:作者一人逐題閱讀答案,對照標準答案標 C/S/P/W;自動評分只當初篩。沒有第二位評審。
 
-- **最新一輪全上傳回歸**:訓練集 r9、獨立測試集 r6(提交 e7c33c9 的 `*_results.json`),全部財報一起上傳。
-- **單檔重跑補強**:歷次全上傳(訓練集 r6 到 r9、獨立測試集 r3 到 r6)自動評分判不過的題目,共 48 題(訓練集 29、獨立測試集 19),改用單檔重跑的答案(每題只載入自己的那份財報)。清單在 `single_file_candidates_*.json`,原始答案在 `single_pot_*.json`,執行腳本是 `tests/run_single_file_subset.py`。
-
-每題的 `label` 是人工逐題語意判斷,標準:
-
-1. 主要答案符合題目要求的精度(「四捨五入到小數一位」就要到小數一位);
-2. 科目、年度、單位、財報都對;
-3. 說明題要講到標準答案的主因;
-4. 沒有與證據矛盾的說法。
-
-評審:由作者一人依上述標準逐題判讀,沒有第二位評審,所以沒有一致率可報;論文需揭露這個限制,並附上逐題紀錄(`baseline_standard.json`)供讀者檢驗。自動評分只當篩選。
-
-標籤:C 正確、S 小誤差(結論對,百分比差 0.1 個百分點)、P 部分正確、W 錯誤。財報自己印的整數百分比(例如 Amazon 成長 12%,標準答案 12.4%)算 C;寫成「12.0%」這種多出來的精度則不算。
+標籤:C 正確、S 小誤差(結論對,百分比差 0.1 個百分點)、P 部分正確、W 錯誤。財報自己印的整數百分比(例如 Amazon 成長 12%,標準答案 12.4%)算 C;寫成「12.0%」這種多出來的精度不算。標準答案本身有疑慮的題(Boeing 有效稅率、AWW 股利)照財報判斷。
 
 ## 結果
 
 | | 正確 | 小誤差 | 部分 | 錯誤 |
 |---|---|---|---|---|
-| 訓練集 150 題 | 147 | 0 | 1 | 2 |
-| 獨立測試集 150 題 | 139 | 3 | 1 | 7 |
-| 合計 300 題 | 286 | 3 | 2 | 9 |
+| 訓練集 150 題 | 149 | 0 | 0 | 1 |
+| 獨立測試集 150 題 | 140 | 1 | 5 | 4 |
+| 合計 300 題 | 289 | 1 | 5 | 5 |
 
-只看全上傳(沒有單檔補強):訓練集 141/0/1/8,獨立測試集 136/2/2/10。
+沒有達到 C 的 11 題逐題原因在 `baseline_standard.json` 的 `note` 欄。
 
-## 使用
+## 限制
 
-- 後續每個消融實驗都跟這份基準比:同樣的全上傳回歸、同樣的歷史難題單檔重跑,只差一個開關。
-- 題號:獨立測試集是 `outsample_results.json` 的順序;訓練集是 metrics、domain、novel 三個結果檔依序串起來(50 + 50 + 50)。
-- 重建:`cd backend && python ablation_results/build_baseline_standard.py`(需要 git 中 HEAD 的結果檔與 `single_pot_*.json`)。
-- 注意:標準答案本身有疑慮的題(例如 Boeing 有效稅率、AWW 股利)已在標籤中照財報判斷,詳見 `baseline_standard.json` 的 `answer` 與 `gold`。
+- 單次執行。同一題重跑可能不同(10/25、10/26 對獨立測試集 19 題各跑一次,有 5 題結果不一樣),所以這份基準的數字有約 1% 以內的波動;消融結果要用同樣的跑法(單檔、一次)比較,差距在波動範圍內不下結論。
+- 判分時每題先讀答案開頭約 230 字,有疑問的 13 題再讀全文;沒有逐字讀完全部 300 個答案。
+- 訓練集是開發集,領域知識與規則是用它調的,獨立測試集的結果比較能代表沒看過的題目。
 
-## 檔案說明
+## 檔案
 
 | 檔案 | 內容 |
 |---|---|
-| `baseline_standard.json` | 300 題的完整紀錄:題目、標準答案、**基準答案全文**、答案來源(`all-files` 全上傳 252 題、`single-file` 單檔 48 題)、人工標籤。這就是之後消融實驗要比的對象 |
-| `baseline_answers.csv` | 同樣的內容,用 Excel 直接打開、可篩選 |
-| `summary.json` | 各項統計(答對率、依題型、精確度) |
-| `../single_pot_*.json`、`../single_file_candidates_*.json` | 48 題單檔重跑的原始答案與題目清單 |
-| 提交 e7c33c9 的 `*_results.json` | 最新一輪全上傳回歸的原始輸出(訓練集 r9、獨立測試集 r6) |
+| `baseline_standard.json` | 300 題完整紀錄:題目、標準答案、基準答案全文、人工標籤、`note`、自動初篩 |
+| `baseline_answers.csv` | 同樣的內容,用 Excel 打開、可篩選 |
+| `summary.json` | 各項統計(整體、依資料集、依題型) |
+| `../single_all_300.json` | 單檔全題跑的原始輸出(題序同題庫) |
+| `../all_candidates_{train,out}.json` | 全題清單,給 `run_single_file_subset.py` 用 |
+| `../build_baseline_standard.py` | 由原始輸出與人工標籤重建上面三個檔 |
+| 提交 e7c33c9 的 `*_results.json` | 較早的全上傳回歸(訓練集 r9、獨立測試集 r6),不再當基準 |
 
-組成方式:先取最新一輪全上傳回歸的 300 個答案;其中 48 題(歷次全上傳自動評分判不過的題目)用單檔重跑的答案**取代**;單檔答案是在 dev 的程式碼上執行(之後新增的實驗開關預設關閉,行為相同)。
+## 後續消融怎麼跑
 
-## 後續消融怎麼跑(從 dev 複製程式碼去改)
-
-1. 在新分支加一個環境變數開關(預設關閉、行為不變),只關一個元件。
-2. 全上傳各跑一輪:`python tests/run_full_150_from_cache.py`(訓練集,寫出三個 `*_results.json`)與 `python tests/run_outsample_questions.py`(獨立測試集,寫出 `outsample_results.json`)。跑完把四個結果檔另存到 `ablation_results/<名稱>/`,再用 `git checkout` 還原被覆蓋的主線結果檔。
-3. 48 題單檔各跑一次:`python tests/run_single_file_subset.py --set train --candidates ablation_results/single_file_candidates_train.json --out <輸出檔>`,獨立測試集把 `train` 換成 `out`。
-4. 跟 `baseline_standard.json` 逐題比較:全上傳那 252 題比全上傳答案,48 題比單檔答案;逐題讀答案後標 C/S/P/W,再用 `build_baseline_standard.py` 的做法合併統計。
-5. 在 Windows 用 PowerShell `Start-Process` 在背景執行,先用 1 題冒煙測試,跑前先看 `python -m app.agent.usage_tracker` 的額度(一組全上傳約 450 萬 token,48 題單檔約 70 萬)。
-
+1. 在新分支加環境變數開關(預設關閉、行為不變),只關一個元件。
+2. 單檔跑全部 300 題,可切成多份並行(需要在 Windows 用 PowerShell `Start-Process` 背景執行,先看 `python -m app.agent.usage_tracker` 的額度,300 題約 450 萬 token、約 40 到 60 分鐘):
+   `python tests/run_single_file_subset.py --set train --candidates ablation_results/all_candidates_train.json --out <輸出檔> --shard 0/2`
+   (`--shard 1/2`,獨立測試集把 `train` 換成 `out`)。
+3. 合併分片輸出,確認 300 題不缺、沒有 `error`。
+4. 逐題讀答案,跟 `baseline_standard.json` 同題比較,標 C/S/P/W。
+5. 注意跑的程序是否中途死掉(曾因檔名比對失敗停掉一份分片)。

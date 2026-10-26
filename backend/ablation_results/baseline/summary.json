@@ -1,308 +1,96 @@
 {
- "baseline_full_system": {
+ "all": {
+  "n": 300,
+  "C": 289,
+  "S": 1,
+  "P": 5,
+  "W": 5
+ },
+ "by_set": {
   "train": {
    "n": 150,
-   "C": 147,
+   "C": 149,
    "S": 0,
-   "P": 1,
-   "W": 2,
-   "by_type": {
-    "domain-relevant": {
-     "n": 50,
-     "C": 49,
-     "S": 0,
-     "P": 1,
-     "W": 0
-    },
-    "metrics-generated": {
-     "n": 50,
-     "C": 49,
-     "S": 0,
-     "P": 0,
-     "W": 1
-    },
-    "novel-generated": {
-     "n": 50,
-     "C": 49,
-     "S": 0,
-     "P": 0,
-     "W": 1
-    }
-   },
-   "mechanical": {
-    "numeric_gold": 126,
-    "within": {
-     "0.001": 94,
-     "0.005": 104,
-     "0.02": 112
-    },
-    "round_instructed": 28,
-    "exact_at_requested_decimals": 28
-   },
-   "mechanical_metrics_only": {
-    "numeric_gold": 50,
-    "within": {
-     "0.001": 42,
-     "0.005": 47,
-     "0.02": 49
-    },
-    "round_instructed": 28,
-    "exact_at_requested_decimals": 28
-   }
+   "P": 0,
+   "W": 1
   },
   "out": {
    "n": 150,
-   "C": 139,
-   "S": 3,
-   "P": 1,
-   "W": 7,
-   "by_type": {
-    "domain-relevant": {
-     "n": 21,
-     "C": 19,
-     "S": 0,
-     "P": 0,
-     "W": 2
-    },
-    "metrics-generated": {
-     "n": 100,
-     "C": 92,
-     "S": 3,
-     "P": 0,
-     "W": 5
-    },
-    "novel-generated": {
-     "n": 29,
-     "C": 28,
-     "S": 0,
-     "P": 1,
-     "W": 0
-    }
-   },
-   "mechanical": {
-    "numeric_gold": 150,
-    "within": {
-     "0.001": 117,
-     "0.005": 124,
-     "0.02": 136
-    },
-    "round_instructed": 26,
-    "exact_at_requested_decimals": 22
-   },
-   "mechanical_metrics_only": {
-    "numeric_gold": 100,
-    "within": {
-     "0.001": 86,
-     "0.005": 91,
-     "0.02": 98
-    },
-    "round_instructed": 26,
-    "exact_at_requested_decimals": 22
-   }
-  },
-  "all": {
-   "n": 300,
-   "C": 286,
-   "S": 3,
-   "P": 2,
-   "W": 9,
-   "by_type": {
-    "domain-relevant": {
-     "n": 71,
-     "C": 68,
-     "S": 0,
-     "P": 1,
-     "W": 2
-    },
-    "metrics-generated": {
-     "n": 150,
-     "C": 141,
-     "S": 3,
-     "P": 0,
-     "W": 6
-    },
-    "novel-generated": {
-     "n": 79,
-     "C": 77,
-     "S": 0,
-     "P": 1,
-     "W": 1
-    }
-   },
-   "mechanical": {
-    "numeric_gold": 276,
-    "within": {
-     "0.001": 211,
-     "0.005": 228,
-     "0.02": 248
-    },
-    "round_instructed": 54,
-    "exact_at_requested_decimals": 50
-   },
-   "mechanical_metrics_only": {
-    "numeric_gold": 150,
-    "within": {
-     "0.001": 128,
-     "0.005": 138,
-     "0.02": 147
-    },
-    "round_instructed": 54,
-    "exact_at_requested_decimals": 50
-   }
+   "C": 140,
+   "S": 1,
+   "P": 5,
+   "W": 4
   }
  },
- "all_files_only": {
-  "baseline_full_system": {
-   "train": {
-    "n": 150,
-    "C": 141,
-    "S": 0,
-    "P": 1,
-    "W": 8,
-    "by_type": {
-     "domain-relevant": {
-      "n": 50,
-      "C": 46,
-      "S": 0,
-      "P": 1,
-      "W": 3
-     },
-     "metrics-generated": {
-      "n": 50,
-      "C": 49,
-      "S": 0,
-      "P": 0,
-      "W": 1
-     },
-     "novel-generated": {
-      "n": 50,
-      "C": 46,
-      "S": 0,
-      "P": 0,
-      "W": 4
-     }
-    },
-    "mechanical": {
-     "numeric_gold": 126,
-     "within": {
-      "0.001": 94,
-      "0.005": 104,
-      "0.02": 112
-     },
-     "round_instructed": 28,
-     "exact_at_requested_decimals": 28
-    },
-    "mechanical_metrics_only": {
-     "numeric_gold": 50,
-     "within": {
-      "0.001": 42,
-      "0.005": 47,
-      "0.02": 49
-     },
-     "round_instructed": 28,
-     "exact_at_requested_decimals": 28
-    }
-   },
-   "out": {
-    "n": 150,
-    "C": 136,
-    "S": 2,
-    "P": 2,
-    "W": 10,
-    "by_type": {
-     "domain-relevant": {
-      "n": 21,
-      "C": 19,
-      "S": 0,
-      "P": 0,
-      "W": 2
-     },
-     "metrics-generated": {
-      "n": 100,
-      "C": 90,
-      "S": 2,
-      "P": 0,
-      "W": 8
-     },
-     "novel-generated": {
-      "n": 29,
-      "C": 27,
-      "S": 0,
-      "P": 2,
-      "W": 0
-     }
-    },
-    "mechanical": {
-     "numeric_gold": 150,
-     "within": {
-      "0.001": 118,
-      "0.005": 125,
-      "0.02": 137
-     },
-     "round_instructed": 26,
-     "exact_at_requested_decimals": 21
-    },
-    "mechanical_metrics_only": {
-     "numeric_gold": 100,
-     "within": {
-      "0.001": 85,
-      "0.005": 90,
-      "0.02": 96
-     },
-     "round_instructed": 26,
-     "exact_at_requested_decimals": 21
-    }
-   },
-   "all": {
-    "n": 300,
-    "C": 277,
-    "S": 2,
-    "P": 3,
-    "W": 18,
-    "by_type": {
-     "domain-relevant": {
-      "n": 71,
-      "C": 65,
-      "S": 0,
-      "P": 1,
-      "W": 5
-     },
-     "metrics-generated": {
-      "n": 150,
-      "C": 139,
-      "S": 2,
-      "P": 0,
-      "W": 9
-     },
-     "novel-generated": {
-      "n": 79,
-      "C": 73,
-      "S": 0,
-      "P": 2,
-      "W": 4
-     }
-    },
-    "mechanical": {
-     "numeric_gold": 276,
-     "within": {
-      "0.001": 212,
-      "0.005": 229,
-      "0.02": 249
-     },
-     "round_instructed": 54,
-     "exact_at_requested_decimals": 49
-    },
-    "mechanical_metrics_only": {
-     "numeric_gold": 150,
-     "within": {
-      "0.001": 127,
-      "0.005": 137,
-      "0.02": 145
-     },
-     "round_instructed": 54,
-     "exact_at_requested_decimals": 49
-    }
-   }
+ "by_type": {
+  "domain-relevant": {
+   "n": 71,
+   "C": 69,
+   "S": 0,
+   "P": 0,
+   "W": 2
+  },
+  "metrics-generated": {
+   "n": 150,
+   "C": 146,
+   "S": 1,
+   "P": 1,
+   "W": 2
+  },
+  "novel-generated": {
+   "n": 79,
+   "C": 74,
+   "S": 0,
+   "P": 4,
+   "W": 1
   }
+ },
+ "by_set_and_type": {
+  "train/domain-relevant": {
+   "n": 50,
+   "C": 50,
+   "S": 0,
+   "P": 0,
+   "W": 0
+  },
+  "out/domain-relevant": {
+   "n": 21,
+   "C": 19,
+   "S": 0,
+   "P": 0,
+   "W": 2
+  },
+  "train/metrics-generated": {
+   "n": 50,
+   "C": 50,
+   "S": 0,
+   "P": 0,
+   "W": 0
+  },
+  "out/metrics-generated": {
+   "n": 100,
+   "C": 96,
+   "S": 1,
+   "P": 1,
+   "W": 2
+  },
+  "train/novel-generated": {
+   "n": 50,
+   "C": 49,
+   "S": 0,
+   "P": 0,
+   "W": 1
+  },
+  "out/novel-generated": {
+   "n": 29,
+   "C": 25,
+   "S": 0,
+   "P": 4,
+   "W": 0
+  }
+ },
+ "screen_2pct": {
+  "numeric_gold": 276,
+  "matched": 216
  }
 }
