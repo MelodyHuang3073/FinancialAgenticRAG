@@ -17,6 +17,7 @@ to avoid false matches, prioritizing year mentioned in the query, and stripping 
 prefixes before year matching.
 """
 
+import os
 import re
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -3797,7 +3798,12 @@ class ProgramOfThoughtReasoner:
         # If structured extraction cannot provide per-category shares reliably, skip
         # returning an unverified numeric result and let the textual synthesis enumerate
         # and verify categories instead.
-        if (is_no_calculation_question(query) if no_calculation is None else no_calculation):
+        # Ablation switch (ABLATE_POT=1): treat every question as one with no
+        # computed answer, so the LLM does the arithmetic from the evidence.
+        if (
+            os.environ.get("ABLATE_POT") == "1"
+            or (is_no_calculation_question(query) if no_calculation is None else no_calculation)
+        ):
             return {
                 "code": "", "success": True, "result_value": None,
                 "output_log": "", "extracted_variables": {},
