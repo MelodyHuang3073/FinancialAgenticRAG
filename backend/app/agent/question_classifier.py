@@ -18,6 +18,7 @@ Classifies questions along three axes:
    - HYBRID: Combine table rows and narrative passages
 """
 
+import os
 import re
 from typing import Dict, Any, List, Optional
 
@@ -218,6 +219,18 @@ class FinanceBenchClassifier:
             has_exclusion,
             len(target_metrics) >= 2,
         ]) else "SIMPLE"
+
+        # Ablation switch (default off): ABLATE_ROUTER=numeric|explanation sends every
+        # question down one path -- the answer mode, retrieval strategy and statement
+        # hint the classifier would have chosen are replaced by fixed values.
+        forced = os.environ.get("ABLATE_ROUTER", "").lower()
+        if forced in ("numeric", "explanation"):
+            answer_mode = "NUMERIC" if forced == "numeric" else "EXPLANATION"
+            retrieval_strategy = "HYBRID"
+            retrieval_queries = self._build_retrieval_queries(
+                query, entity, target_metrics, years, retrieval_strategy
+            )
+            statement_type_hint = None
 
         return {
             "entity": entity,
