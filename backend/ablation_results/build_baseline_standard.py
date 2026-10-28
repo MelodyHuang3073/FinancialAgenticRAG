@@ -7,7 +7,10 @@ grader is only a screen):
   C correct, S small error (right conclusion, percentage off by 0.1 point),
   P partially correct, W wrong. A percentage the filing prints as an integer
   counts as C, and so does the same number written with a decimal that rounds to
-  it (the filing's 12% written as 12.0%, gold 12.4%).
+  it (the filing's 12% written as 12.0%, gold 12.4%). A rate computed from the
+  filing's amounts must be the correct rounding of the computed value; one digit
+  off (0.1 point) is S (2026-10-28 audit: Amazon service sales growth 15.1%,
+  computed 15.045%, should be 15.0%).
 Everything not listed in LABELS is C.
 
 Run from backend/:  python ablation_results/build_baseline_standard.py
@@ -25,6 +28,7 @@ LABELS = {
     ("train", 109): ("W", "worst topline region: answered Las Vegas Strip, gold is MGM China (-44%)"),
     ("out", 3): ("P", "net income decline given as 19% from $4,009M; gold 22.1% from $4,173M, same conclusion"),
     ("out", 8): ("S", "ROE written as 0.33; gold 33.28%"),
+    ("out", 24): ("S", "service sales growth 15.1%; computed from the filing amounts 15.045%, should be 15.0%"),
     ("out", 12): ("W", "impairment of intangible assets $1.9B vs $714M; gold $1,993M vs $33M"),
     ("out", 33): ("P", "names non-operating/one-time items but not the 'Other (income) expense, net' swing"),
     ("out", 50): ("W", "investment banking fees $9,735M (division table); gold $9,615M"),
