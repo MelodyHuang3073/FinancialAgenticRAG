@@ -1,0 +1,310 @@
+{
+ "baseline": {
+  "all": {
+   "n": 300,
+   "C": 289,
+   "S": 2,
+   "P": 5,
+   "W": 4
+  },
+  "train": {
+   "n": 150,
+   "C": 149,
+   "S": 0,
+   "P": 0,
+   "W": 1
+  },
+  "out": {
+   "n": 150,
+   "C": 140,
+   "S": 2,
+   "P": 5,
+   "W": 3
+  }
+ },
+ "no_domain": {
+  "all": {
+   "n": 300,
+   "C": 261,
+   "S": 5,
+   "P": 13,
+   "W": 21
+  },
+  "train": {
+   "n": 150,
+   "C": 125,
+   "S": 2,
+   "P": 7,
+   "W": 16
+  },
+  "out": {
+   "n": 150,
+   "C": 136,
+   "S": 3,
+   "P": 6,
+   "W": 5
+  }
+ },
+ "read_one_by_one": 119,
+ "label_changes": [
+  {
+   "set": "train",
+   "n": 6,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "Does 3M have a reasonably healthy liquidity profile based on its quick ratio for Q2 of FY2"
+  },
+  {
+   "set": "train",
+   "n": 17,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Roughly how many times has AES Corporation sold its inventory in FY2022? Calculate invento"
+  },
+  {
+   "set": "train",
+   "n": 18,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Based on the information provided primarily in the statement of financial position and the"
+  },
+  {
+   "set": "train",
+   "n": 24,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "Has AMCOR's quick ratio improved or declined between FY2023 and FY2022? If the quick ratio"
+  },
+  {
+   "set": "train",
+   "n": 32,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "Does AMD have a reasonably healthy liquidity profile based on its quick ratio for FY22? If"
+  },
+  {
+   "set": "train",
+   "n": 56,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Which Best Buy product category performed the best (by top line) in the domestic (USA) Mar"
+  },
+  {
+   "set": "train",
+   "n": 63,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Does Boeing have an improving gross margin profile as of FY2022? If gross margin is not a "
+  },
+  {
+   "set": "train",
+   "n": 64,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "Who are the primary customers of Boeing as of FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 71,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Based on the information provided primarily in the balance sheet and the statement of inco"
+  },
+  {
+   "set": "train",
+   "n": 73,
+   "baseline": "C",
+   "nodomain": "S",
+   "question": "How much has the effective tax rate of Corning changed between FY2021 and FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 74,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "Does Corning have positive working capital based on FY2022 data? If working capital is not"
+  },
+  {
+   "set": "train",
+   "n": 77,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Is CVS Health a capital-intensive business based on FY2022 data?"
+  },
+  {
+   "set": "train",
+   "n": 87,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "What drove gross margin change as of FY2022 for JnJ? If gross margin is not a useful metri"
+  },
+  {
+   "set": "train",
+   "n": 89,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Is growth in JnJ's adjusted EPS expected to accelerate in FY2023?"
+  },
+  {
+   "set": "train",
+   "n": 96,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "If JPM went bankrupted by the end by 2021 Q1 and liquidated all of its assets to pay its s"
+  },
+  {
+   "set": "train",
+   "n": 108,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "What was MGM's interest coverage ratio using FY2022 Adjusted EBIT as the numerator and ann"
+  },
+  {
+   "set": "train",
+   "n": 119,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Does Paypal have positive working capital based on FY2022 data? If working capital is not "
+  },
+  {
+   "set": "train",
+   "n": 123,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "What is the quantity of restructuring costs directly outlined in Pepsico's income statemen"
+  },
+  {
+   "set": "train",
+   "n": 124,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "What is the FY2022 unadjusted EBITDA less capex for PepsiCo? Define unadjusted EBITDA as u"
+  },
+  {
+   "set": "train",
+   "n": 125,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "What is the FY2022 unadjusted EBITDA % margin for PepsiCo? Calculate unadjusted EBITDA usi"
+  },
+  {
+   "set": "train",
+   "n": 133,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "What are three main companies acquired by Pfizer mentioned in this 10K report?"
+  },
+  {
+   "set": "train",
+   "n": 134,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "How much does Pfizer expect to pay to spin off Upjohn in the future in USD million?"
+  },
+  {
+   "set": "train",
+   "n": 136,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "As of Q2'2023, is Pfizer spinning off any large business segments?"
+  },
+  {
+   "set": "train",
+   "n": 148,
+   "baseline": "C",
+   "nodomain": "S",
+   "question": "What is FY2018 days payable outstanding (DPO) for Walmart? DPO is defined as: 365 * (avera"
+  },
+  {
+   "set": "out",
+   "n": 3,
+   "baseline": "P",
+   "nodomain": "C",
+   "question": "Did 3M's net income grow at the same rate as its net sales in FY2025? What does this imply"
+  },
+  {
+   "set": "out",
+   "n": 8,
+   "baseline": "S",
+   "nodomain": "C",
+   "question": "What is Microsoft's FY2025 return on equity (net income / average total stockholders' equi"
+  },
+  {
+   "set": "out",
+   "n": 9,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "Which grew faster for Microsoft in FY2025: Product revenue or Service and other revenue? W"
+  },
+  {
+   "set": "out",
+   "n": 10,
+   "baseline": "C",
+   "nodomain": "S",
+   "question": "What is PepsiCo's FY2025 gross margin (gross profit / net revenue)? Round to one decimal p"
+  },
+  {
+   "set": "out",
+   "n": 11,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "Did PepsiCo's net income increase or decrease in FY2025 despite revenue growth, and what p"
+  },
+  {
+   "set": "out",
+   "n": 24,
+   "baseline": "S",
+   "nodomain": "P",
+   "question": "Which grew faster for Amazon in FY2025: net product sales or net service sales?"
+  },
+  {
+   "set": "out",
+   "n": 32,
+   "baseline": "C",
+   "nodomain": "S",
+   "question": "What was Johnson & Johnson's sales growth rate in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 33,
+   "baseline": "P",
+   "nodomain": "C",
+   "question": "Johnson & Johnson's net earnings nearly doubled in FY2025 compared to FY2024, far outpacin"
+  },
+  {
+   "set": "out",
+   "n": 50,
+   "baseline": "W",
+   "nodomain": "C",
+   "question": "What were JPMorgan Chase's investment banking fees in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 52,
+   "baseline": "C",
+   "nodomain": "S",
+   "question": "What was Nike's net income in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 68,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "What is Pfizer's FY2025 gross margin ((total revenues - cost of sales) / total revenues)? "
+  },
+  {
+   "set": "out",
+   "n": 69,
+   "baseline": "C",
+   "nodomain": "W",
+   "question": "What was Pfizer's acquired in-process R&D charge in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 104,
+   "baseline": "C",
+   "nodomain": "P",
+   "question": "What were MGM Resorts' Casino revenue and Rooms revenue in FY2025?"
+  }
+ ]
+}
