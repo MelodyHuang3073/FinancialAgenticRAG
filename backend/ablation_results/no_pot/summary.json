@@ -1,0 +1,212 @@
+{
+ "baseline": {
+  "all": {
+   "n": 300,
+   "C": 289,
+   "S": 2,
+   "P": 5,
+   "W": 4
+  },
+  "train": {
+   "n": 150,
+   "C": 149,
+   "S": 0,
+   "P": 0,
+   "W": 1
+  },
+  "out": {
+   "n": 150,
+   "C": 140,
+   "S": 2,
+   "P": 5,
+   "W": 3
+  }
+ },
+ "no_pot": {
+  "all": {
+   "n": 300,
+   "C": 277,
+   "S": 5,
+   "P": 11,
+   "W": 7
+  },
+  "train": {
+   "n": 150,
+   "C": 137,
+   "S": 2,
+   "P": 7,
+   "W": 4
+  },
+  "out": {
+   "n": 150,
+   "C": 140,
+   "S": 3,
+   "P": 4,
+   "W": 3
+  }
+ },
+ "read_one_by_one": 118,
+ "label_changes": [
+  {
+   "set": "train",
+   "n": 6,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Does 3M have a reasonably healthy liquidity profile based on its quick ratio for Q2 of FY2"
+  },
+  {
+   "set": "train",
+   "n": 17,
+   "baseline": "C",
+   "nopot": "W",
+   "question": "Roughly how many times has AES Corporation sold its inventory in FY2022? Calculate invento"
+  },
+  {
+   "set": "train",
+   "n": 24,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Has AMCOR's quick ratio improved or declined between FY2023 and FY2022? If the quick ratio"
+  },
+  {
+   "set": "train",
+   "n": 55,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Was there any change in the number of Best Buy stores between Q2 of FY2024 and FY2023?"
+  },
+  {
+   "set": "train",
+   "n": 61,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Are there any product categories / service categories that represent more than 20% of Boei"
+  },
+  {
+   "set": "train",
+   "n": 69,
+   "baseline": "C",
+   "nopot": "S",
+   "question": "What is Coca Cola's FY2021 COGS % margin? Calculate what was asked by utilizing the line i"
+  },
+  {
+   "set": "train",
+   "n": 74,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Does Corning have positive working capital based on FY2022 data? If working capital is not"
+  },
+  {
+   "set": "train",
+   "n": 82,
+   "baseline": "C",
+   "nopot": "S",
+   "question": "What is the FY2019 cash conversion cycle (CCC) for General Mills? CCC is defined as: DIO +"
+  },
+  {
+   "set": "train",
+   "n": 96,
+   "baseline": "C",
+   "nopot": "W",
+   "question": "If JPM went bankrupted by the end by 2021 Q1 and liquidated all of its assets to pay its s"
+  },
+  {
+   "set": "train",
+   "n": 108,
+   "baseline": "C",
+   "nopot": "W",
+   "question": "What was MGM's interest coverage ratio using FY2022 Adjusted EBIT as the numerator and ann"
+  },
+  {
+   "set": "train",
+   "n": 109,
+   "baseline": "W",
+   "nopot": "C",
+   "question": "Which region had the worst topline performance for MGM during FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 113,
+   "baseline": "C",
+   "nopot": "W",
+   "question": "We want to calculate a financial metric. Please help us compute it by basing your answers "
+  },
+  {
+   "set": "train",
+   "n": 119,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Does Paypal have positive working capital based on FY2022 data? If working capital is not "
+  },
+  {
+   "set": "train",
+   "n": 145,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Does Verizon have a reasonably healthy liquidity profile based on its quick ratio for FY 2"
+  },
+  {
+   "set": "out",
+   "n": 3,
+   "baseline": "P",
+   "nopot": "C",
+   "question": "Did 3M's net income grow at the same rate as its net sales in FY2025? What does this imply"
+  },
+  {
+   "set": "out",
+   "n": 7,
+   "baseline": "C",
+   "nopot": "S",
+   "question": "What is Microsoft's FY2025 operating margin (operating income / revenue)? Round to one dec"
+  },
+  {
+   "set": "out",
+   "n": 8,
+   "baseline": "S",
+   "nopot": "C",
+   "question": "What is Microsoft's FY2025 return on equity (net income / average total stockholders' equi"
+  },
+  {
+   "set": "out",
+   "n": 33,
+   "baseline": "P",
+   "nopot": "W",
+   "question": "Johnson & Johnson's net earnings nearly doubled in FY2025 compared to FY2024, far outpacin"
+  },
+  {
+   "set": "out",
+   "n": 34,
+   "baseline": "C",
+   "nopot": "W",
+   "question": "What was Johnson & Johnson's total debt (short-term borrowings + long-term debt) in FY2025"
+  },
+  {
+   "set": "out",
+   "n": 50,
+   "baseline": "W",
+   "nopot": "C",
+   "question": "What were JPMorgan Chase's investment banking fees in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 54,
+   "baseline": "C",
+   "nopot": "S",
+   "question": "Nike's net income declined much faster than its revenue in FY2025 (about 43.5% vs about 9."
+  },
+  {
+   "set": "out",
+   "n": 59,
+   "baseline": "C",
+   "nopot": "P",
+   "question": "Walmart's net income grew much faster than revenue in fiscal 2025 (about 25% vs about 5%) "
+  },
+  {
+   "set": "out",
+   "n": 84,
+   "baseline": "W",
+   "nopot": "C",
+   "question": "What were Verizon's service revenues compared to wireless equipment revenues in FY2025?"
+  }
+ ]
+}
