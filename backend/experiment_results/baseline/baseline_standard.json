@@ -2083,8 +2083,8 @@
   "question": "Which grew faster for Amazon in FY2025: net product sales or net service sales?",
   "gold": "Net service sales grew faster, up about 15.0% (from $365,648 million to $420,658 million), compared to net product sales which grew about 8.8% (from $272,311 million to $296,266 million).",
   "answer": "Net service sales grew faster for Amazon in FY2025: net service sales rose to $420,658 million, a 15.1% increase from $365,648 million in 2024, while net product sales rose to $296,266 million, an 8.8% increase from $272,311 million in 2024.  \n\nThese figures are taken from the company’s consolidated net sales table showing the line items \"Net product sales\" and \"Net service sales.\"",
-  "label": "C",
-  "note": "",
+  "label": "S",
+  "note": "service sales growth 15.1%; computed from the filing amounts 15.045%, should be 15.0%",
   "screen_2pct": true
  },
  {
