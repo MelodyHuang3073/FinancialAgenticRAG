@@ -172,6 +172,11 @@ def _evidence_display_text(item: Dict[str, Any], max_chars: int = 4000) -> str:
     return parent[pos - before:end + after]
 
 
+_ANSWER_SYSTEM_PROMPT = (
+    "You are a professional financial report analysis assistant. Respond in clear English with a result-first format, always in complete sentences -- never reply with only a number."
+)
+
+
 class LLMAnswerGenerator:
     def __init__(self) -> None:
         self._client = None
@@ -191,6 +196,16 @@ class LLMAnswerGenerator:
                 self._client = OpenAI(api_key=openai_api_key)
                 self._model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
                 return self._client
+
+        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        if anthropic_api_key:
+            try:
+                import anthropic
+                self._client = anthropic.Anthropic(api_key=anthropic_api_key, max_retries=6)
+                self._model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
+                return self._client
+            except Exception:
+                pass
 
         google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_GENAI_API_KEY")
         if not google_api_key:
@@ -450,11 +465,23 @@ the filing sentence it rests on.
 """
 
         try:
-            if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+            if hasattr(client, "messages") and not hasattr(client, "chat"):
+                # Anthropic: system prompt is its own argument, max_tokens is required
+                response = client.messages.create(
+                    model=self._model,
+                    max_tokens=8000,
+                    system=_ANSWER_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                record_usage(self._model, "answer", getattr(response, "usage", None), len(prompt))
+                text = "".join(getattr(b, "text", "") for b in (getattr(response, "content", None) or []))
+                if text.strip():
+                    return text.strip()
+            elif hasattr(client, "chat") and hasattr(client.chat, "completions"):
                 create_kwargs: Dict[str, Any] = {
                     "model": self._model,
                     "messages": [
-                        {"role": "system", "content": "You are a professional financial report analysis assistant. Respond in clear English with a result-first format, always in complete sentences -- never reply with only a number."},
+                        {"role": "system", "content": _ANSWER_SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
                 }

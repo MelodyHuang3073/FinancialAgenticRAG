@@ -38,7 +38,7 @@ def _today() -> str:
 
 
 def _usage_numbers(usage: Any) -> Dict[str, Optional[int]]:
-    """Token counts from an OpenAI `usage` object or a Gemini `usage_metadata`."""
+    """Token counts from an OpenAI `usage` object, a Gemini `usage_metadata` or an Anthropic `usage`."""
     if usage is None:
         return {"prompt": None, "completion": None, "reasoning": None, "total": None}
 
@@ -53,11 +53,16 @@ def _usage_numbers(usage: Any) -> Dict[str, Optional[int]]:
 
     details = getattr(usage, "completion_tokens_details", None)
     reasoning = getattr(details, "reasoning_tokens", None) if details is not None else None
+    prompt = g("prompt_tokens", "prompt_token_count", "input_tokens")
+    completion = g("completion_tokens", "candidates_token_count", "output_tokens")
+    total = g("total_tokens", "total_token_count")
+    if total is None and prompt is not None and completion is not None:
+        total = prompt + completion  # Anthropic reports input and output separately
     return {
-        "prompt": g("prompt_tokens", "prompt_token_count"),
-        "completion": g("completion_tokens", "candidates_token_count"),
+        "prompt": prompt,
+        "completion": completion,
         "reasoning": int(reasoning) if reasoning is not None else None,
-        "total": g("total_tokens", "total_token_count"),
+        "total": total,
     }
 
 

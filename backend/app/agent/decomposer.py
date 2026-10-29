@@ -212,6 +212,17 @@ class QueryDecomposer:
             except Exception:
                 pass
 
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            try:
+                import anthropic
+                self._llm_client = anthropic.Anthropic(api_key=anthropic_key, max_retries=6)
+                self._llm_model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
+                self._llm_enabled = True
+                return self._llm_client
+            except Exception:
+                pass
+
         google_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if google_key:
             try:
@@ -262,7 +273,17 @@ class QueryDecomposer:
         user_content = "\n".join(context_lines)
 
         try:
-            if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+            if hasattr(client, "messages") and not hasattr(client, "chat"):
+                # Anthropic
+                response = client.messages.create(
+                    model=self._llm_model,
+                    max_tokens=2000,
+                    system=self._SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_content}],
+                )
+                record_usage(self._llm_model, "decomposer", getattr(response, "usage", None), len(user_content))
+                raw = "".join(getattr(b, "text", "") for b in (getattr(response, "content", None) or []))
+            elif hasattr(client, "chat") and hasattr(client.chat, "completions"):
                 # OpenAI
                 reasoning = _is_reasoning_model(self._llm_model)
                 create_kwargs: Dict[str, Any] = {
@@ -355,7 +376,15 @@ class QueryDecomposer:
             "separated by spaces. Output ONLY the keywords, nothing else."
         )
         try:
-            if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+            if hasattr(client, "messages") and not hasattr(client, "chat"):
+                response = client.messages.create(
+                    model=self._llm_model,
+                    max_tokens=2000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                record_usage(self._llm_model, "decomposer", getattr(response, "usage", None), len(prompt))
+                raw = "".join(getattr(b, "text", "") for b in (getattr(response, "content", None) or [])).strip()
+            elif hasattr(client, "chat") and hasattr(client.chat, "completions"):
                 reasoning = _is_reasoning_model(self._llm_model)
                 create_kwargs: Dict[str, Any] = {
                     "model": self._llm_model,
