@@ -1,0 +1,248 @@
+{
+ "model": "gemini-3.1-flash-lite",
+ "baseline": {
+  "all": {
+   "n": 300,
+   "C": 289,
+   "S": 2,
+   "P": 5,
+   "W": 4
+  },
+  "train": {
+   "n": 150,
+   "C": 149,
+   "S": 0,
+   "P": 0,
+   "W": 1
+  },
+  "out": {
+   "n": 150,
+   "C": 140,
+   "S": 2,
+   "P": 5,
+   "W": 3
+  }
+ },
+ "llm": {
+  "all": {
+   "n": 300,
+   "C": 270,
+   "S": 6,
+   "P": 11,
+   "W": 13
+  },
+  "train": {
+   "n": 150,
+   "C": 137,
+   "S": 2,
+   "P": 6,
+   "W": 5
+  },
+  "out": {
+   "n": 150,
+   "C": 133,
+   "S": 4,
+   "P": 5,
+   "W": 8
+  }
+ },
+ "reran_after_fallback": 35,
+ "label_changes": [
+  {
+   "set": "train",
+   "n": 6,
+   "baseline": "C",
+   "llm": "W",
+   "question": "Does 3M have a reasonably healthy liquidity profile based on its quick ratio for Q2 of FY2"
+  },
+  {
+   "set": "train",
+   "n": 15,
+   "baseline": "C",
+   "llm": "W",
+   "question": "Does Adobe have an improving Free cashflow conversion as of FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 25,
+   "baseline": "C",
+   "llm": "P",
+   "question": "What are major acquisitions that AMCOR has done in FY2023, FY2022 and FY2021?"
+  },
+  {
+   "set": "train",
+   "n": 28,
+   "baseline": "C",
+   "llm": "P",
+   "question": "What is the nature & purpose of AMCOR's restructuring liability as oF Q2 of FY2023 close?"
+  },
+  {
+   "set": "train",
+   "n": 51,
+   "baseline": "C",
+   "llm": "W",
+   "question": "Are Best Buy's gross margins historically consistent (not fluctuating more than roughly 2%"
+  },
+  {
+   "set": "train",
+   "n": 61,
+   "baseline": "C",
+   "llm": "P",
+   "question": "Are there any product categories / service categories that represent more than 20% of Boei"
+  },
+  {
+   "set": "train",
+   "n": 67,
+   "baseline": "C",
+   "llm": "S",
+   "question": "How does Boeing's effective tax rate in FY2022 compare to FY2021?"
+  },
+  {
+   "set": "train",
+   "n": 72,
+   "baseline": "C",
+   "llm": "S",
+   "question": "Taking into account the information outlined in the income statement, what is the FY2019 -"
+  },
+  {
+   "set": "train",
+   "n": 74,
+   "baseline": "C",
+   "llm": "P",
+   "question": "Does Corning have positive working capital based on FY2022 data? If working capital is not"
+  },
+  {
+   "set": "train",
+   "n": 77,
+   "baseline": "C",
+   "llm": "W",
+   "question": "Is CVS Health a capital-intensive business based on FY2022 data?"
+  },
+  {
+   "set": "train",
+   "n": 109,
+   "baseline": "W",
+   "llm": "C",
+   "question": "Which region had the worst topline performance for MGM during FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 119,
+   "baseline": "C",
+   "llm": "P",
+   "question": "Does Paypal have positive working capital based on FY2022 data? If working capital is not "
+  },
+  {
+   "set": "train",
+   "n": 124,
+   "baseline": "C",
+   "llm": "W",
+   "question": "What is the FY2022 unadjusted EBITDA less capex for PepsiCo? Define unadjusted EBITDA as u"
+  },
+  {
+   "set": "train",
+   "n": 133,
+   "baseline": "C",
+   "llm": "P",
+   "question": "What are three main companies acquired by Pfizer mentioned in this 10K report?"
+  },
+  {
+   "set": "out",
+   "n": 3,
+   "baseline": "P",
+   "llm": "C",
+   "question": "Did 3M's net income grow at the same rate as its net sales in FY2025? What does this imply"
+  },
+  {
+   "set": "out",
+   "n": 10,
+   "baseline": "C",
+   "llm": "S",
+   "question": "What is PepsiCo's FY2025 gross margin (gross profit / net revenue)? Round to one decimal p"
+  },
+  {
+   "set": "out",
+   "n": 24,
+   "baseline": "S",
+   "llm": "C",
+   "question": "Which grew faster for Amazon in FY2025: net product sales or net service sales?"
+  },
+  {
+   "set": "out",
+   "n": 33,
+   "baseline": "P",
+   "llm": "W",
+   "question": "Johnson & Johnson's net earnings nearly doubled in FY2025 compared to FY2024, far outpacin"
+  },
+  {
+   "set": "out",
+   "n": 50,
+   "baseline": "W",
+   "llm": "C",
+   "question": "What were JPMorgan Chase's investment banking fees in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 87,
+   "baseline": "C",
+   "llm": "W",
+   "question": "What was General Mills' net earnings in fiscal year 2025 compared to fiscal year 2024?"
+  },
+  {
+   "set": "out",
+   "n": 101,
+   "baseline": "C",
+   "llm": "W",
+   "question": "What was MGM Resorts' total revenue growth rate in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 105,
+   "baseline": "C",
+   "llm": "P",
+   "question": "What was MGM Resorts' diluted EPS in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 116,
+   "baseline": "C",
+   "llm": "S",
+   "question": "What was American Water Works' operating revenue growth rate in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 118,
+   "baseline": "C",
+   "llm": "S",
+   "question": "What is American Water Works' FY2025 operating margin (operating income / operating revenu"
+  },
+  {
+   "set": "out",
+   "n": 129,
+   "baseline": "C",
+   "llm": "W",
+   "question": "What was Ulta Beauty's operating income in fiscal 2025 compared to the prior fiscal year?"
+  },
+  {
+   "set": "out",
+   "n": 132,
+   "baseline": "C",
+   "llm": "W",
+   "question": "What was Ulta Beauty's diluted EPS in fiscal 2025 compared to the prior fiscal year, and w"
+  },
+  {
+   "set": "out",
+   "n": 133,
+   "baseline": "C",
+   "llm": "W",
+   "question": "What is Ulta Beauty's fiscal 2025 gross margin (gross profit / net sales)? Round to one de"
+  },
+  {
+   "set": "out",
+   "n": 147,
+   "baseline": "C",
+   "llm": "P",
+   "question": "Corning's net income attributable to Corning more than tripled in FY2025 (from $506 millio"
+  }
+ ]
+}
