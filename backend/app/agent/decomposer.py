@@ -15,6 +15,7 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 from app.agent.usage_tracker import record_usage
+from app.agent.gemini_call import generate_content as gemini_generate
 from app.agent.financial_vocabulary import metric_view
 
 
@@ -287,11 +288,10 @@ class QueryDecomposer:
                 raw = response.choices[0].message.content or ""
             else:
                 # Gemini
-                full_prompt = self._SYSTEM_PROMPT + "\n\n" + user_content
-                response = client.models.generate_content(
-                    model=self._llm_model, contents=full_prompt
+                response = gemini_generate(
+                    client, self._llm_model, user_content, system_instruction=self._SYSTEM_PROMPT
                 )
-                record_usage(self._llm_model, "decomposer", getattr(response, "usage_metadata", None), len(full_prompt))
+                record_usage(self._llm_model, "decomposer", getattr(response, "usage_metadata", None), len(user_content))
                 raw = getattr(response, "text", "") or ""
 
             # Extract the JSON object from the response (the prompt asks for
@@ -372,7 +372,7 @@ class QueryDecomposer:
                 record_usage(self._llm_model, "decomposer", getattr(response, "usage", None), len(prompt))
                 raw = (response.choices[0].message.content or "").strip()
             else:
-                response = client.models.generate_content(model=self._llm_model, contents=prompt)
+                response = gemini_generate(client, self._llm_model, prompt)
                 record_usage(self._llm_model, "decomposer", getattr(response, "usage_metadata", None), len(prompt))
                 raw = (getattr(response, "text", "") or "").strip()
             return raw or None
