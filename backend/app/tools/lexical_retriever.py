@@ -1,4 +1,5 @@
 import math
+import os
 import re
 from typing import List, Dict, Any, Optional, Tuple, Set
 
@@ -179,7 +180,8 @@ class LexicalFinancialRetriever:
     #: True -> every named re-weighting rule is inactive; final_score is
     #: bm25*0.7 + overlap_count*0.3 with no multiplier at all (ranking
     #: driven purely by lexical match, the paper's ablation baseline).
-    DISABLE_RULE_MULTIPLIERS: bool = False
+    #: Ablation switch for the experiments: ABLATE_WEIGHTS=1 turns every re-weighting rule off.
+    DISABLE_RULE_MULTIPLIERS: bool = os.environ.get("ABLATE_WEIGHTS") == "1"
     #: Only meaningful when DISABLE_RULE_MULTIPLIERS is True: the set of
     #: rule names (RULE_MULTIPLIERS/RULE_DESCRIPTIONS keys) to keep active
     #: anyway, for ablating one rule at a time. None/empty = none kept.
