@@ -1,0 +1,268 @@
+{
+ "baseline": {
+  "all": {
+   "n": 300,
+   "C": 289,
+   "S": 2,
+   "P": 5,
+   "W": 4
+  },
+  "train": {
+   "n": 150,
+   "C": 149,
+   "S": 0,
+   "P": 0,
+   "W": 1
+  },
+  "out": {
+   "n": 150,
+   "C": 140,
+   "S": 2,
+   "P": 5,
+   "W": 3
+  }
+ },
+ "gpt_5_nano": {
+  "all": {
+   "n": 300,
+   "C": 270,
+   "S": 3,
+   "P": 15,
+   "W": 12
+  },
+  "train": {
+   "n": 150,
+   "C": 130,
+   "S": 1,
+   "P": 10,
+   "W": 9
+  },
+  "out": {
+   "n": 150,
+   "C": 140,
+   "S": 2,
+   "P": 5,
+   "W": 3
+  }
+ },
+ "read_one_by_one": 300,
+ "label_changes": [
+  {
+   "set": "train",
+   "n": 15,
+   "baseline": "C",
+   "nano": "W",
+   "question": "Does Adobe have an improving Free cashflow conversion as of FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 28,
+   "baseline": "C",
+   "nano": "W",
+   "question": "What is the nature & purpose of AMCOR's restructuring liability as oF Q2 of FY2023 close?"
+  },
+  {
+   "set": "train",
+   "n": 30,
+   "baseline": "C",
+   "nano": "P",
+   "question": "How much was the Real change in Sales for AMCOR in FY 2023 vs FY 2022, if we exclude the i"
+  },
+  {
+   "set": "train",
+   "n": 32,
+   "baseline": "C",
+   "nano": "S",
+   "question": "Does AMD have a reasonably healthy liquidity profile based on its quick ratio for FY22? If"
+  },
+  {
+   "set": "train",
+   "n": 55,
+   "baseline": "C",
+   "nano": "P",
+   "question": "Was there any change in the number of Best Buy stores between Q2 of FY2024 and FY2023?"
+  },
+  {
+   "set": "train",
+   "n": 65,
+   "baseline": "C",
+   "nano": "P",
+   "question": "Is Boeing's business subject to cyclicality?"
+  },
+  {
+   "set": "train",
+   "n": 66,
+   "baseline": "C",
+   "nano": "P",
+   "question": "What production rate changes is Boeing forecasting for FY2023?"
+  },
+  {
+   "set": "train",
+   "n": 74,
+   "baseline": "C",
+   "nano": "P",
+   "question": "Does Corning have positive working capital based on FY2022 data? If working capital is not"
+  },
+  {
+   "set": "train",
+   "n": 89,
+   "baseline": "C",
+   "nano": "W",
+   "question": "Is growth in JnJ's adjusted EPS expected to accelerate in FY2023?"
+  },
+  {
+   "set": "train",
+   "n": 90,
+   "baseline": "C",
+   "nano": "W",
+   "question": "How did JnJ's US sales growth compare to international sales growth in FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 95,
+   "baseline": "C",
+   "nano": "W",
+   "question": "Which of JPM's business segments had the lowest net revenue in 2021 Q1?"
+  },
+  {
+   "set": "train",
+   "n": 98,
+   "baseline": "C",
+   "nano": "P",
+   "question": "In 2022 Q2, which of JPM's business segments had the highest net income?"
+  },
+  {
+   "set": "train",
+   "n": 109,
+   "baseline": "W",
+   "nano": "C",
+   "question": "Which region had the worst topline performance for MGM during FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 119,
+   "baseline": "C",
+   "nano": "P",
+   "question": "Does Paypal have positive working capital based on FY2022 data? If working capital is not "
+  },
+  {
+   "set": "train",
+   "n": 121,
+   "baseline": "C",
+   "nano": "P",
+   "question": "What are the geographies that Pepsico primarily operates in as of FY2022?"
+  },
+  {
+   "set": "train",
+   "n": 122,
+   "baseline": "C",
+   "nano": "W",
+   "question": "Has Pepsico reported any materially important ongoing legal battles from FY2022 and FY2021"
+  },
+  {
+   "set": "train",
+   "n": 133,
+   "baseline": "C",
+   "nano": "P",
+   "question": "What are three main companies acquired by Pfizer mentioned in this 10K report?"
+  },
+  {
+   "set": "train",
+   "n": 135,
+   "baseline": "C",
+   "nano": "W",
+   "question": "For Pfizer, which geographic region had the biggest drop in Q22023 year over year revenues"
+  },
+  {
+   "set": "train",
+   "n": 141,
+   "baseline": "C",
+   "nano": "W",
+   "question": "What percent of Ulta Beauty's total spend on stock repurchases for FY 2023 occurred in Q4 "
+  },
+  {
+   "set": "train",
+   "n": 142,
+   "baseline": "C",
+   "nano": "W",
+   "question": "Did Ulta Beauty's wages expense as a percent of net sales increase or decrease in FY2023?"
+  },
+  {
+   "set": "train",
+   "n": 145,
+   "baseline": "C",
+   "nano": "P",
+   "question": "Does Verizon have a reasonably healthy liquidity profile based on its quick ratio for FY 2"
+  },
+  {
+   "set": "out",
+   "n": 3,
+   "baseline": "P",
+   "nano": "C",
+   "question": "Did 3M's net income grow at the same rate as its net sales in FY2025? What does this imply"
+  },
+  {
+   "set": "out",
+   "n": 8,
+   "baseline": "S",
+   "nano": "C",
+   "question": "What is Microsoft's FY2025 return on equity (net income / average total stockholders' equi"
+  },
+  {
+   "set": "out",
+   "n": 12,
+   "baseline": "W",
+   "nano": "C",
+   "question": "What was PepsiCo's impairment of intangible assets in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 24,
+   "baseline": "S",
+   "nano": "C",
+   "question": "Which grew faster for Amazon in FY2025: net product sales or net service sales?"
+  },
+  {
+   "set": "out",
+   "n": 70,
+   "baseline": "P",
+   "nano": "C",
+   "question": "What were Pfizer's restructuring charges in FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 104,
+   "baseline": "C",
+   "nano": "P",
+   "question": "What were MGM Resorts' Casino revenue and Rooms revenue in FY2025?"
+  },
+  {
+   "set": "out",
+   "n": 131,
+   "baseline": "C",
+   "nano": "P",
+   "question": "What was Ulta Beauty's net income in fiscal 2025 compared to the prior fiscal year?"
+  },
+  {
+   "set": "out",
+   "n": 140,
+   "baseline": "C",
+   "nano": "S",
+   "question": "What was 3M's total assets at the end of FY2025 compared to FY2024?"
+  },
+  {
+   "set": "out",
+   "n": 142,
+   "baseline": "C",
+   "nano": "S",
+   "question": "What was Adobe's research and development expense as a percent of revenue in FY2025? Round"
+  },
+  {
+   "set": "out",
+   "n": 147,
+   "baseline": "C",
+   "nano": "W",
+   "question": "Corning's net income attributable to Corning more than tripled in FY2025 (from $506 millio"
+  }
+ ]
+}
