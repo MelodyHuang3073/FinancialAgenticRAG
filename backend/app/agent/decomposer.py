@@ -206,7 +206,7 @@ class QueryDecomposer:
             try:
                 from openai import OpenAI
                 self._llm_client = OpenAI(api_key=openai_key)
-                self._llm_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+                self._llm_model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
                 self._llm_enabled = True
                 return self._llm_client
             except Exception:
