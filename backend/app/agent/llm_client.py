@@ -189,7 +189,7 @@ class LLMAnswerGenerator:
                 openai_api_key = None
             else:
                 self._client = OpenAI(api_key=openai_api_key)
-                self._model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+                self._model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
                 return self._client
 
         google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_GENAI_API_KEY")
