@@ -1891,8 +1891,8 @@
   "question": "What is Microsoft's FY2025 return on equity (net income / average total stockholders' equity between FY2024 and FY2025)? Round to two decimal places.",
   "gold": "33.28%. Net income of $101,832 million divided by average stockholders' equity of $305,978 million (average of $343,479 million in FY2025 and $268,477 million in FY2024).",
   "answer": "Microsoft’s FY2025 return on equity (net income ÷ average total stockholders’ equity for FY2024–FY2025) was **0.33**.  \n\nThis calculation used net income of 101,832 and total stockholders’ equity of 268,477 (FY2024) and 343,479 (FY2025), whose average is 305,978, so 101,832 ÷ 305,978 = 0.33. I based the inputs on the filing lines labeled “Net income” and “Total stockholders’ equity.”",
-  "label": "S",
-  "note": "ROE written as 0.33; gold 33.28%",
+  "label": "C",
+  "note": "",
   "screen_2pct": false
  },
  {
