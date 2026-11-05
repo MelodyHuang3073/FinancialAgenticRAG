@@ -104,6 +104,15 @@ def _validate_llm_formula(raw: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+#: Output budget for the decomposer's two LLM calls when the model is a reasoning model.
+#: Reasoning tokens count against it, and an exhausted budget returns an EMPTY message,
+#: which the caller silently treats as "no LLM answer" and falls back to the rule path.
+#: Measured on 354 calls with no cap (gpt-5-mini): median ~930 completion tokens, p95
+#: ~2.2-2.4k, max 5,976 -- a 2,000 cap emptied ~6% of the calls. 16,000 is ~2.7x the
+#: largest observed call; it bounds a runaway generation without ever cutting a normal one.
+REASONING_MAX_COMPLETION_TOKENS = 16000
+
+
 def _is_reasoning_model(model_name: str) -> bool:
     """
     True for OpenAI's reasoning-tier models (gpt-5 family, o1/o3/o4), which
@@ -274,11 +283,11 @@ class QueryDecomposer:
                     # Reasoning models spend part of this budget on
                     # invisible internal reasoning tokens before the JSON
                     # output -- can be entirely consumed by reasoning alone,
-                    # leaving an empty message. Generous since these tokens
-                    # are free under the daily complimentary-token
-                    # allowance. Raised from 512 now that a reply can also
-                    # carry a formula object alongside the sub-query array.
-                    "max_completion_tokens": 768 if not reasoning else 2000,
+                    # leaving an empty message (see
+                    # REASONING_MAX_COMPLETION_TOKENS for the measured sizes).
+                    # Raised from 512 now that a reply can also carry a
+                    # formula object alongside the sub-query array.
+                    "max_completion_tokens": 768 if not reasoning else REASONING_MAX_COMPLETION_TOKENS,
                 }
                 if not reasoning:
                     create_kwargs["temperature"] = 0
@@ -360,11 +369,10 @@ class QueryDecomposer:
                 create_kwargs: Dict[str, Any] = {
                     "model": self._llm_model,
                     "messages": [{"role": "user", "content": prompt}],
-                    # Increase model token budget beyond 800 for complex reasoning
-                    # prompts.
                     # Internal reasoning tokens count toward completion limits and can
-                    # exhaust output on nontrivial questions.
-                    "max_completion_tokens": 100 if not reasoning else 2000,
+                    # exhaust output on nontrivial questions; see
+                    # REASONING_MAX_COMPLETION_TOKENS.
+                    "max_completion_tokens": 100 if not reasoning else REASONING_MAX_COMPLETION_TOKENS,
                 }
                 if not reasoning:
                     create_kwargs["temperature"] = 0
