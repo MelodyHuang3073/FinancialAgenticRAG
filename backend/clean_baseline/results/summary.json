@@ -1,0 +1,115 @@
+{
+ "all": {
+  "n": 300,
+  "clean_rag": {
+   "C": 176,
+   "S": 4,
+   "P": 27,
+   "W": 93
+  }
+ },
+ "train": {
+  "n": 150,
+  "clean_rag": {
+   "C": 66,
+   "S": 0,
+   "P": 16,
+   "W": 68
+  }
+ },
+ "out": {
+  "n": 150,
+  "clean_rag": {
+   "C": 110,
+   "S": 4,
+   "P": 11,
+   "W": 25
+  }
+ },
+ "by_type": {
+  "domain-relevant": {
+   "n": 71,
+   "clean_rag": {
+    "C": 39,
+    "S": 0,
+    "P": 13,
+    "W": 19
+   }
+  },
+  "metrics-generated": {
+   "n": 150,
+   "clean_rag": {
+    "C": 84,
+    "S": 3,
+    "P": 9,
+    "W": 54
+   }
+  },
+  "novel-generated": {
+   "n": 79,
+   "clean_rag": {
+    "C": 53,
+    "S": 1,
+    "P": 5,
+    "W": 20
+   }
+  }
+ },
+ "w_breakdown": {
+  "train": {
+   "W": 68,
+   "lack_or_ask_back": 50,
+   "gave_wrong_answer": 18
+  },
+  "out": {
+   "W": 25,
+   "lack_or_ask_back": 11,
+   "gave_wrong_answer": 14
+  },
+  "by_set_and_type": {
+   "original/domain-relevant": {
+    "W": 15,
+    "lack_or_ask_back": 9,
+    "gave_wrong_answer": 6
+   },
+   "original/metrics-generated": {
+    "W": 38,
+    "lack_or_ask_back": 33,
+    "gave_wrong_answer": 5
+   },
+   "original/novel-generated": {
+    "W": 15,
+    "lack_or_ask_back": 8,
+    "gave_wrong_answer": 7
+   },
+   "outsample/domain-relevant": {
+    "W": 4,
+    "lack_or_ask_back": 2,
+    "gave_wrong_answer": 2
+   },
+   "outsample/metrics-generated": {
+    "W": 16,
+    "lack_or_ask_back": 8,
+    "gave_wrong_answer": 8
+   },
+   "outsample/novel-generated": {
+    "W": 5,
+    "lack_or_ask_back": 1,
+    "gave_wrong_answer": 4
+   }
+  }
+ },
+ "usage": {
+  "calls": 300,
+  "errors": 0,
+  "prompt_tokens": 1120791,
+  "completion_tokens": 236557,
+  "total_tokens": 1357348,
+  "tokens_per_question": 4524,
+  "seconds_per_question": {
+   "mean": 8.1,
+   "median": 6.5,
+   "max": 40.2
+  }
+ }
+}
