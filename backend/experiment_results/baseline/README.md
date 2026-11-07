@@ -1,6 +1,6 @@
 # 比較基準(完整系統,單檔 300 題)
 
-疊加實驗的第 7 步,也是所有消融的比較對象。規劃見上一層的 [EXPERIMENT_PLAN.md](../EXPERIMENT_PLAN.md),評分規則在其第 7 節。
+疊加實驗的第 7 步,也是所有消融的比較對象。規劃見上一層的 [EXPERIMENT_PLAN.md](../EXPERIMENT_PLAN.md),評分規則在其第 9 節。
 
 ## 怎麼跑的
 
@@ -12,7 +12,7 @@
 | 語料庫 | `tests/original_corpus_cache.pkl`、`tests/outsample_corpus_cache.pkl` |
 | 跑法 | `tests/run_single_file_subset.py`,4 個程序同時跑(兩個題組各切 2 份),先冒煙測試 2 題 |
 | 檢查 | 300 題齊全,0 次錯誤,沒有備援合成答案,沒有空答案 |
-| 評分 | 依 EXPERIMENT_PLAN.md 第 7 節逐題讀完 300 題答案,每個非 C 的標籤記依據,通過 `experiment_results/grading_check.py`,並與舊基準、Naive RAG 做跨組比對 |
+| 評分 | 依 EXPERIMENT_PLAN.md 第 9 節逐題讀完 300 題答案,每個非 C 的標籤記依據,通過 `experiment_results/grading_check.py`,並與舊基準、Naive RAG 做跨組比對 |
 
 ## 結果
 
@@ -24,7 +24,7 @@
 
 依題型(正確題數):算指標題 148 / 150、領域題 65 / 71、說明題 74 / 79。
 
-沒有達到 C 的 13 題(依據 = 決策表列號,見規劃文件 7.5):
+沒有達到 C 的 13 題(依據 = 決策表列號,見規劃文件 9.5):
 
 | 題 | 標籤 | 依據 | 原因 |
 |---|---|---|---|

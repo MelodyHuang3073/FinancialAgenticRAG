@@ -1,15 +1,15 @@
 """Mechanical checks on a group's grading labels, run before any results are committed.
 
-Reading the answers is still done by a person (EXPERIMENT_PLAN.md section 7); this script only
+Reading the answers is still done by a person (EXPERIMENT_PLAN.md section 9); this script only
 catches inconsistencies that need no reading:
 
   1. every label file is well formed (300 questions, ids unique, label in C/S/P/W);
   2. every label other than C names the rule it was judged by, and the label is one that rule allows
-     (a decision-table row 1-22 of section 7.5, or a section 7.4 rule such as "7.4-6");
+     (a decision-table row 1-22 of section 9.5, or a section 9.4 rule such as "9.4-6");
   3. across groups: any question whose label differs between groups is listed, with each group's rule,
      so the answers can be re-read together and unified.
 
-Label file: a JSON list of {"id": "train-12" | "out-8", "label": "C|S|P|W", "rule": 3 | "7.4-6" | null}.
+Label file: a JSON list of {"id": "train-12" | "out-8", "label": "C|S|P|W", "rule": 3 | "9.4-6" | null}.
 Run:  python grading_check.py group_a.json group_b.json ...
 """
 import json
@@ -17,16 +17,16 @@ import sys
 
 LABELS = ("C", "S", "P", "W")
 ANY = set(LABELS)
-#: Labels each decision-table row (section 7.5) allows.
+#: Labels each decision-table row (section 9.5) allows.
 ROW_LABELS = {
     1: {"S"}, 2: {"P"}, 3: {"W"}, 4: {"S"}, 5: {"P"}, 6: {"P", "W"}, 7: {"C"}, 8: {"C"},
     9: ANY, 10: {"C", "S"}, 11: {"P"}, 12: {"P"}, 13: {"W"}, 14: {"W"}, 15: {"P"}, 16: {"P"},
     17: {"C"}, 18: {"P", "W"}, 19: {"C", "P", "W"}, 20: {"P"}, 21: ANY, 22: ANY,
 }
-#: Labels each section 7.4 rule allows ("7.4-<n>").
+#: Labels each section 9.4 rule allows ("9.4-<n>").
 TEXT_LABELS = {
-    "7.4-1": {"C", "P", "W"}, "7.4-2": {"W"}, "7.4-3": {"C", "P", "W"}, "7.4-4": {"P", "W"},
-    "7.4-5": {"P"}, "7.4-6": {"C", "W"}, "7.4-7": {"C"}, "7.4-8": {"S", "P", "W"},
+    "9.4-1": {"C", "P", "W"}, "9.4-2": {"W"}, "9.4-3": {"C", "P", "W"}, "9.4-4": {"P", "W"},
+    "9.4-5": {"P"}, "9.4-6": {"C", "W"}, "9.4-7": {"C"}, "9.4-8": {"S", "P", "W"},
 }
 N_QUESTIONS = 300
 

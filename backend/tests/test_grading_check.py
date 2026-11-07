@@ -21,7 +21,7 @@ def test_non_c_label_needs_a_rule_and_the_rule_must_allow_it():
     rows = _rows()
     rows[0] = {"id": "train-0", "label": "P", "rule": None}
     rows[1] = {"id": "train-1", "label": "S", "rule": 2}       # row 2 is P
-    rows[2] = {"id": "train-2", "label": "W", "rule": "7.4-5"}  # 7.4-5 is P
+    rows[2] = {"id": "train-2", "label": "W", "rule": "9.4-5"}  # 9.4-5 is P
     rows[3] = {"id": "train-3", "label": "P", "rule": 99}
     msgs = g.validate(rows)
     assert len(msgs) == 4 and "no rule" in msgs[0] and "allows" in msgs[1] and "unknown rule" in msgs[3]
