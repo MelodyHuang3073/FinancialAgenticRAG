@@ -27,9 +27,9 @@ def test_step_one_pulls_in_no_system_component_beyond_the_evidence_display():
     assert loaded == []
 
 
-def test_steps_one_and_two_exist_and_another_step_stops_instead_of_running(monkeypatch):
-    assert sorted(r.STEPS) == [1, 2]
-    monkeypatch.setattr(sys, "argv", ["run_step.py", "--step", "3", "--set", "original", "--dry-run"])
+def test_steps_one_to_three_exist_and_another_step_stops_instead_of_running(monkeypatch):
+    assert sorted(r.STEPS) == [1, 2, 3]
+    monkeypatch.setattr(sys, "argv", ["run_step.py", "--step", "4", "--set", "original", "--dry-run"])
     with pytest.raises(SystemExit) as e:
         r.main()
     assert "not implemented" in str(e.value)
@@ -229,3 +229,119 @@ def test_step_two_does_not_touch_the_systems_prompt_code():
     from app.agent import llm_client as lc
     import inspect
     assert "include_route_lines" not in inspect.getsource(lc.LLMAnswerGenerator.generate_answer)
+
+
+# ---- step 3: the decomposer and the formula library (C4) ----------------------------------------------------
+def _plan(sub=None, search=None):
+    return type("P", (), {"sub_questions": sub or [], "search_queries": search or []})()
+
+
+def _rq(q, source=None):
+    d = {"type": "retrieval", "query": q}
+    if source:
+        d["source"] = source
+    return d
+
+
+def test_planned_queries_numeric_takes_retrieval_steps_and_adds_the_question_when_nothing_computes_it():
+    plan = _plan(sub=[_rq("ACME revenue 2024"), _rq("ACME revenue 2024"), {"type": "computation", "query": "Compute"}, _rq("ACME cost 2024")])
+    assert r.planned_queries("Q?", "NUMERIC", plan, False) == ["ACME revenue 2024", "ACME cost 2024"]       # distinct, in order, no computation step
+    assert r.planned_queries("Q?", "NUMERIC", plan, True) == ["ACME revenue 2024", "ACME cost 2024", "Q?"]
+    again = _plan(sub=[_rq("Q?"), _rq("x")])
+    assert r.planned_queries("Q?", "NUMERIC", again, True) == ["Q?", "x"]                              # already there: not repeated
+
+
+def test_planned_queries_other_modes_take_the_planners_search_queries():
+    plan = _plan(sub=[_rq("ignored")], search=["a b", "a b", "c"])
+    assert r.planned_queries("Q?", "EXPLANATION", plan, False) == ["a b", "c"]
+
+
+class _FailingModel:
+    """A model client that always fails, so the decomposer falls back to its rules (no network)."""
+
+    def __init__(self):
+        self.attempts = 0
+        self.chat = type("C", (), {"completions": self})()
+
+    def create(self, **kw):
+        self.attempts += 1
+        raise RuntimeError("offline")
+
+
+def _ctx3(filing):
+    ctx = _ctx(filing)
+    ctx["uploaded"] = [{"filename": "ACME_2024_10K.pdf", "company": "ACME", "passage_count": len(filing)}]
+    dec = r._orchestrator_for(ctx).decomposer
+    dec._llm_enabled, dec._llm_client, dec._llm_model = True, _FailingModel(), "gpt-5-mini"
+    return ctx
+
+
+FORMULA_Q = "What is ACME's FY2024 current ratio? Round to two decimal places."
+NON_FORMULA_Q = "What was ACME's total amount of widgets shipped in FY2024?"
+
+
+def test_step_three_formula_question_searches_the_formula_variables_and_keeps_step_twos_prompt_frame():
+    ctx = _ctx3(_filing())
+    messages, top = r.STEPS[3](ctx, FORMULA_Q, 16)
+    meta = ctx["meta"]
+    assert meta["formula"] is True and meta["answer_mode"] == "NUMERIC" and meta["n_queries"] >= 2
+    assert ctx["orch"].decomposer._llm_client.attempts == 0            # a formula-library question needs no model call
+    prompt = messages[1]["content"]
+    assert "Answer Mode: NUMERIC" in prompt and "Computed value:" not in prompt and "Verification summary:" not in prompt
+    assert [m["role"] for m in messages] == ["system", "user"] and len(top) == 16
+
+
+def test_step_three_non_formula_numeric_question_asks_the_decomposer_and_survives_its_failure():
+    ctx = _ctx3(_filing())
+    messages, top = r.STEPS[3](ctx, NON_FORMULA_Q, 16)
+    assert ctx["orch"].decomposer._llm_client.attempts >= 1             # the model was asked (and failed -> rule fallback)
+    assert NON_FORMULA_Q in messages[1]["content"] and len(top) == 16
+
+
+def test_step_three_searches_exactly_the_queries_the_systems_planner_plans_nothing_missing_nothing_added():
+    from app.agent.financial_formula_library import detect_formula
+    for q in (FORMULA_Q, NON_FORMULA_Q, EXPL_Q):
+        ctx = _ctx3(_filing())
+        cls, plan, queries, formula = r.plan_for(ctx, q)
+        assert formula == bool(detect_formula(q))
+        if cls["answer_mode"] == "NUMERIC":
+            wanted = {sq["query"] for sq in plan.sub_questions if sq["type"] == "retrieval"}
+        else:
+            wanted = set(plan.search_queries)
+        assert wanted <= set(queries)                                    # every planned query is searched
+        extra = set(queries) - wanted
+        assert extra <= {q}                                              # the only addition is the question itself (no-calculation shapes)
+        assert len(queries) == len(set(queries))                         # each distinct query once
+        messages, _ = r.STEPS[3](_ctx3(_filing()), q, 16)
+        assert messages[1]["content"].count("Available Evidence:") == 1
+
+
+def test_step_three_prompt_is_step_twos_frame_only_the_retrieved_evidence_differs():
+    filing = _filing()
+    c2, c3 = _ctx3(filing), _ctx3(filing)
+    m2, _ = r.STEPS[2](c2, NUM_Q, 16)
+    m3, _ = r.STEPS[3](c3, NUM_Q, 16)
+    assert m2[0] == m3[0]                                                        # same system message
+    head = lambda m: m[1]["content"].split("Available Evidence:")[0]
+    assert head(m2) == head(m3)                                                  # question, mode and routing lines identical
+    tail = lambda m: m[1]["content"].split("【ANSWERING PRINCIPLES】")[1]
+    assert tail(m2) == tail(m3)                                                  # principles to checklist identical
+
+
+def test_step_three_adds_nothing_from_the_system_retriever_c5():
+    import inspect
+    src = inspect.getsource(r.step3_request) + inspect.getsource(r._system_prompt_request) + inspect.getsource(r.plan_for)
+    for c5_part in ("lexical_retriever", "company_match", "year_match_boost", "select_with_quota", "statement_type_hint_boost"):
+        assert c5_part not in src
+    assert "naive.retrieve" in src                                               # still step 1's rank_bm25
+
+
+def test_step_three_counts_the_planners_model_calls_per_question():
+    ctx = _ctx3(_filing())
+    r.STEPS[3](ctx, NON_FORMULA_Q, 16)
+    assert ctx["meta"]["decomposer_calls"] == 0                                  # a failing call reports no usage; the attempt itself is not a counted call
+    r._count_decomposer_usage("m", "decomposer", type("U", (), {"prompt_tokens": 10, "completion_tokens": 4})())
+    assert r._decomposer_calls[-1] == (10, 4)
+    ctx2 = _ctx3(_filing())
+    r.STEPS[3](ctx2, FORMULA_Q, 16)
+    assert r._decomposer_calls == []                                             # reset for each question
