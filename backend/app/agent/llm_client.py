@@ -28,6 +28,7 @@ if load_dotenv is not None and os.path.exists(ENV_PATH):
 # append-only ledger, safe with parallel shards). This module reports its answer
 # calls as caller="answer"; the decomposer reports as caller="decomposer".
 from app.agent.usage_tracker import record_usage, DAILY_FREE_TOKEN_CAP  # noqa: E402,F401
+from app.agent.gemini_call import generate_content as gemini_generate  # noqa: E402
 
 # How many retrieved evidence items (sorted by relevance_score) are formatted into the
 # prompt the LLM actually sees.
@@ -170,6 +171,11 @@ def _evidence_display_text(item: Dict[str, Any], max_chars: int = 4000) -> str:
     before = min(pos, spare - after)
     after = min(len(parent) - end, spare - before)
     return parent[pos - before:end + after]
+
+
+_ANSWER_SYSTEM_PROMPT = (
+    "You are a professional financial report analysis assistant. Respond in clear English with a result-first format, always in complete sentences -- never reply with only a number."
+)
 
 
 class LLMAnswerGenerator:
@@ -454,7 +460,7 @@ the filing sentence it rests on.
                 create_kwargs: Dict[str, Any] = {
                     "model": self._model,
                     "messages": [
-                        {"role": "system", "content": "You are a professional financial report analysis assistant. Respond in clear English with a result-first format, always in complete sentences -- never reply with only a number."},
+                        {"role": "system", "content": _ANSWER_SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
                 }
@@ -469,7 +475,7 @@ the filing sentence it rests on.
                     if content:
                         return str(content).strip()
             else:
-                response = client.models.generate_content(model=self._model, contents=prompt)
+                response = gemini_generate(client, self._model, prompt, system_instruction=_ANSWER_SYSTEM_PROMPT)
                 record_usage(self._model, "answer", getattr(response, "usage_metadata", None), len(prompt))
                 if hasattr(response, "text") and response.text:
                     return str(response.text).strip()
