@@ -1,7 +1,7 @@
 """Stacking experiment runner: one step per call (EXPERIMENT_PLAN.md section 3, revision 2026-11-08).
 
 Step 0 is the Naive RAG control (backend/clean_baseline/run.py). This file runs the steps that add the
-system's components on top of it. Only step 1 exists so far; asking for another step stops with an error
+system's components on top of it. Only steps 1 and 2 exist so far; asking for another step stops with an error
 instead of running something that is not that step.
 
 Step 1 adds exactly one component, the system's corpus (C1), and nothing else:
@@ -19,6 +19,9 @@ Step 1 adds exactly one component, the system's corpus (C1), and nothing else:
 Not in this step: the answer prompt text and the Answer Mode lines (C2), the question classifier and vocabulary
 (C3), the decomposer and formula library (C4), the system retriever (C5), PoT (C6), Tri-Check (C7).
 
+Step 2 adds exactly two components on top of step 1, the answer prompt (C2) and the question classifier with its
+vocabulary (C3), and nothing else (see step2_request). Retrieval stays rank_bm25 on `content`.
+
     python backend/stack_runner/run_step.py --step 1 --set original --dry-run          # no API call
     python backend/stack_runner/run_step.py --step 1 --set original --shard 1/2 --out step1_original_1.json
 """
@@ -31,6 +34,7 @@ import pickle
 import re
 import sys
 import time
+from types import SimpleNamespace
 
 from rank_bm25 import BM25Okapi
 
@@ -115,7 +119,78 @@ def step1_request(ctx, question: str, top_k: int, parent_map=None):
     return [{"role": "user", "content": prompt}], top
 
 
-STEPS = {1: step1_request}
+# ---- step 2: the system's answer prompt (C2) and the question classifier with its vocabulary (C3) -----------
+class _Capture:
+    """Stands in for the model client: generate_answer calls client.chat.completions.create(...) once; the
+    arguments are recorded so the runner can send exactly that call itself (with retries and token counts)."""
+
+    def __init__(self):
+        self.kwargs = None
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="-"))], usage=None)
+
+
+def filing_labels_for(filing):
+    """The fiscal-year labels of the whole filing, computed the way the orchestrator does it
+    (Orchestrator._filing_year_labels: every passage of the filing, joined)."""
+    from app.agent.answer_directives import filing_periods
+    return filing_periods("\n".join(passage.get("content") or "" for passage in filing))
+
+
+def search_text_for(question: str, classification) -> str:
+    """Step 2's one BM25 query string. A NUMERIC question searches its own text. Any other question searches its
+    own text plus the classifier's retrieval queries (each distinct query once, in the classifier's order),
+    joined by single spaces -- the classifier already ends its list with the question, which is not repeated."""
+    if classification["answer_mode"] == "NUMERIC":
+        return question
+    queries = [question] + [q for q in classification["retrieval_queries"] if q != question]
+    return " ".join(queries)
+
+
+def step2_request(ctx, question: str, top_k: int, parent_map=None):
+    """(messages, retrieved indices) for step 2 = step 1 plus the answer prompt (C2) and the classifier with its
+    vocabulary (C3):
+      - retrieval is rank_bm25 as in step 1 (here on `search_text_for`: the question, plus the classifier's queries
+        for a non-numeric question);
+      - the prompt is built by the system's own LLMAnswerGenerator.generate_answer -- system message, question
+        first, the "Answer Mode" / "Routing Reason" lines (orchestrator's reason text), evidence, the question-shape
+        directives, principles, accounting conventions, output format, checklist; its one model call is captured and
+        sent unchanged (model + the two messages). No PoT or verification result is passed, so the "Computed value"
+        block (C6) and the "Verification summary" line (C7) are absent, exactly as in the system when those are off;
+      - the fiscal-year labels come from the whole filing's entries (as in the orchestrator), not from the 16."""
+    from app.agent.question_classifier import FinanceBenchClassifier      # imported only when step 2 runs
+    from app.agent import llm_client as client_module
+    client_module.record_usage = lambda *args, **kwargs: None         # the runner counts tokens itself (plan section 1)
+    if "classifier" not in ctx:
+        ctx["classifier"] = FinanceBenchClassifier()
+    cls = ctx["classifier"].classify(question)
+    reason = f"FinanceBench: {cls.get('question_type', '')} / {cls.get('cognitive_task', '')}"      # as the orchestrator
+    ctx["meta"] = {"answer_mode": cls["answer_mode"], "n_queries": len(cls["retrieval_queries"])}
+    filing = ctx["filing"]
+    top = naive.retrieve(ctx["bm25"], search_text_for(question, cls), top_k)
+    items = []
+    for rank, j in enumerate(top):
+        item = dict(filing[j], relevance_score=len(top) - rank)                       # keeps the BM25 order
+        if not item.get("parent_content") and item.get("parent_id") and parent_map:
+            item["parent_content"] = parent_map.get(item["parent_id"], "")
+        items.append(item)
+    if "labels" not in ctx:
+        ctx["labels"] = filing_labels_for(filing)
+    capture = _Capture()
+    generator = llm_client.LLMAnswerGenerator()
+    generator._client, generator._model = capture, ctx["model"]
+    generator.generate_answer(
+        query=question, answer_mode=cls["answer_mode"], evidence=items, route_res={"reason": reason},
+        pot_res=None, verification_res=None, filing_labels=ctx["labels"])
+    assert capture.kwargs is not None, "generate_answer did not make its model call"
+    assert set(capture.kwargs) == {"model", "messages"}, sorted(capture.kwargs)
+    return capture.kwargs["messages"], top
+
+
+STEPS = {1: step1_request, 2: step2_request}
 
 
 def send(client, model: str, messages):
@@ -179,6 +254,7 @@ def main():
         ctx = indexes[company]
         filing = ctx["filing"]
         messages, top = STEPS[a.step](ctx, q["question"], a.top_k, parent_map)
+        meta = ctx.pop("meta", None)
         prompt = messages[-1]["content"]
         if a.dry_run:
             for m in messages[:-1]:
@@ -193,6 +269,8 @@ def main():
                "question": q["question"], "gold": q["answer"], "model_answer": "", "error": None,
                "retrieved": [filing[j]["id"] for j in top], "prompt_chars": len(prompt),
                "messages": len(messages), "tokens": None}
+        if meta:
+            row["meta"] = meta
         try:
             row["model_answer"], row["tokens"] = send(client, a.model, messages)
         except Exception as e:

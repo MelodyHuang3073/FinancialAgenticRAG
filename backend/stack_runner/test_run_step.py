@@ -22,13 +22,14 @@ def _row(i, company="ACME", table="T", content=None, parent="PARENT PAGE", typ="
 
 
 def test_step_one_pulls_in_no_system_component_beyond_the_evidence_display():
+    # (run first in the file: step 2 below imports the classifier, which is only done when step 2 runs)
     loaded = [m for m in sys.modules if m.startswith("app.") and m.split(".")[-1] in SYSTEM_PARTS]
     assert loaded == []
 
 
-def test_only_step_one_exists_and_another_step_stops_instead_of_running(monkeypatch):
-    assert sorted(r.STEPS) == [1]
-    monkeypatch.setattr(sys, "argv", ["run_step.py", "--step", "2", "--set", "original", "--dry-run"])
+def test_steps_one_and_two_exist_and_another_step_stops_instead_of_running(monkeypatch):
+    assert sorted(r.STEPS) == [1, 2]
+    monkeypatch.setattr(sys, "argv", ["run_step.py", "--step", "3", "--set", "original", "--dry-run"])
     with pytest.raises(SystemExit) as e:
         r.main()
     assert "not implemented" in str(e.value)
@@ -142,3 +143,89 @@ def test_first_real_question_builds_a_sixteen_entry_prompt_with_no_tag_line():
     for line in prompt.split("\n\nQuestion:")[0].split("\n- [")[1:]:
         label, rest = line.split("] ", 1)
         assert " / " in label and not rest.startswith("(")
+
+
+# ---- step 2: the answer prompt (C2) + the classifier and vocabulary (C3) ------------------------------------
+def _filing(n=20):
+    rows = []
+    for i in range(n):
+        e = _row(i, content=f"Line Item: revenue item {i} | 2024: {i}", parent=f"PAGE {i} " + "x" * 50, pid=f"p{i}")
+        e.update(period="2024", section="income_statement", page_number=str(i + 1))
+        rows.append(e)
+    return rows
+
+
+NUM_Q = "What is the FY2018 capital expenditure amount for ACME?"
+EXPL_Q = "What drove operating margin change as of FY2022 for ACME? If operating margin is not useful, explain why."
+
+
+def test_step_two_sends_the_systems_two_messages_and_nothing_else():
+    messages, top = r.STEPS[2](_ctx(_filing()), "What is revenue item 3?", 16)
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert messages[0]["content"].startswith("You are a professional financial report analysis assistant.")
+    assert len(top) == 16
+
+
+def test_step_two_prompt_has_every_c2_and_c3_part_and_none_of_the_later_ones():
+    messages, _ = r.STEPS[2](_ctx(_filing()), NUM_Q, 16)
+    p = messages[1]["content"]
+    for part in ("You are a professional financial analysis assistant", "Question: " + NUM_Q, "Answer Mode: NUMERIC",
+                 "Routing Reason: FinanceBench: ", "Available Evidence:", "ANSWERING PRINCIPLES", "⑤ Computed values",
+                 "OUTPUT FORMAT", "CHECK BEFORE YOU ANSWER"):
+        assert p.count(part) == 1, part
+    for later in ("Computed value:", "Verification summary", "Financial question understanding", "External web evidence"):
+        assert later not in p, later
+
+
+def test_step_two_prompt_differs_from_the_full_systems_only_by_the_c6_and_c7_blocks():
+    from app.agent import llm_client as lc
+    ctx = _ctx(_filing())
+    messages, top = r.STEPS[2](ctx, NUM_Q, 16)
+    items = [dict(ctx["filing"][j], relevance_score=len(top) - k) for k, j in enumerate(top)]
+    reason = [ln for ln in messages[1]["content"].split(chr(10)) if ln.startswith("Routing Reason: ")][0][len("Routing Reason: "):]
+    cap = r._Capture()
+    g = lc.LLMAnswerGenerator()
+    g._client, g._model = cap, "gpt-5-mini"
+    g.generate_answer(query=NUM_Q, answer_mode="NUMERIC", evidence=items, route_res={"reason": reason},
+                      pot_res={"result_value": 1.5, "code": "a=1", "output_log": "ok", "used_evidence_ids": []},
+                      verification_res={"checks": {"c": {"passed": True}}}, filing_labels=ctx["labels"])
+    full = cap.kwargs["messages"][1]["content"].split("\n")
+    step = messages[1]["content"].split("\n")
+    import difflib
+    changed = [ln for ln in difflib.unified_diff(step, full, lineterm="", n=0) if ln[:1] in "+-" and ln[:3] not in ("+++", "---")]
+    assert changed and all(ln.startswith("+") for ln in changed)
+    assert any("Computed value:" in ln for ln in changed) and any("Verification summary" in ln for ln in changed)
+    assert not any("Answer Mode" in ln or "Routing Reason" in ln or "ANSWERING" in ln for ln in changed)
+
+
+def test_step_two_numeric_question_retrieves_exactly_what_step_one_does_and_shows_the_same_evidence_lines():
+    ctx = _ctx(_filing())
+    m1, t1 = r.STEPS[1](ctx, NUM_Q, 16)
+    m2, t2 = r.STEPS[2](ctx, NUM_Q, 16)
+    assert t1 == t2
+    lines1 = [ln for ln in m1[0]["content"].split("\n") if ln.startswith("- [")]
+    assert lines1 and all(ln in m2[1]["content"] for ln in lines1)
+
+
+def test_step_two_non_numeric_question_adds_the_classifiers_queries_to_the_search_text():
+    from app.agent.question_classifier import FinanceBenchClassifier
+    cls = FinanceBenchClassifier().classify(EXPL_Q)
+    assert cls["answer_mode"] != "NUMERIC"
+    text = r.search_text_for(EXPL_Q, cls)
+    assert text.startswith(EXPL_Q) and all(q in text for q in cls["retrieval_queries"])
+    assert r.search_text_for(NUM_Q, {"answer_mode": "NUMERIC", "retrieval_queries": ["x"]}) == NUM_Q
+
+
+def test_step_two_fiscal_labels_come_from_the_whole_filing_not_only_the_retrieved_entries():
+    filing = _filing(40)
+    filing[39]["content"] = "For the fiscal year ended January 28, 2023 (fiscal 2022) the company reported"
+    ctx = _ctx(filing)
+    r.STEPS[2](ctx, NUM_Q, 16)
+    assert vars(ctx["labels"]) == vars(r.filing_labels_for(filing))
+    assert 2022 in ctx["labels"].labels
+
+
+def test_step_two_does_not_touch_the_systems_prompt_code():
+    from app.agent import llm_client as lc
+    import inspect
+    assert "include_route_lines" not in inspect.getsource(lc.LLMAnswerGenerator.generate_answer)
