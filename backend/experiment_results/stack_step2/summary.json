@@ -1,0 +1,481 @@
+{
+ "all": {
+  "n": 300,
+  "C": 216,
+  "S": 2,
+  "P": 17,
+  "W": 65
+ },
+ "train": {
+  "n": 150,
+  "C": 80,
+  "S": 1,
+  "P": 12,
+  "W": 57
+ },
+ "out": {
+  "n": 150,
+  "C": 136,
+  "S": 1,
+  "P": 5,
+  "W": 8
+ },
+ "by_type": {
+  "domain-relevant": {
+   "n": 71,
+   "C": 48,
+   "S": 0,
+   "P": 9,
+   "W": 14
+  },
+  "metrics-generated": {
+   "n": 150,
+   "C": 104,
+   "S": 2,
+   "P": 3,
+   "W": 41
+  },
+  "novel-generated": {
+   "n": 79,
+   "C": 64,
+   "S": 0,
+   "P": 5,
+   "W": 10
+  }
+ },
+ "not_correct": [
+  {
+   "id": "train-3",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "train-6",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-9",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-10",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-11",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-13",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-14",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-15",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-17",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-18",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-19",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-22",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-24",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-25",
+   "label": "W",
+   "rule": 19
+  },
+  {
+   "id": "train-27",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-31",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-32",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-38",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-40",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-45",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-47",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-48",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "train-49",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-50",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-51",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-55",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-57",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-60",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-61",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-62",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "train-63",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-68",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-69",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-71",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-72",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-74",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-75",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-76",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-77",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-82",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-83",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-85",
+   "label": "S",
+   "rule": 4
+  },
+  {
+   "id": "train-88",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-96",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-100",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-101",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-102",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-103",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-104",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-105",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-108",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-110",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-111",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-112",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "train-113",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-114",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-115",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-117",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-119",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-122",
+   "label": "P",
+   "rule": 16
+  },
+  {
+   "id": "train-124",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-125",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-131",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-132",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-133",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-135",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-144",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-145",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-146",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "train-148",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-1",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-3",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "out-9",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "out-27",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-28",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-34",
+   "label": "S",
+   "rule": 4
+  },
+  {
+   "id": "out-68",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-70",
+   "label": "P",
+   "rule": 20
+  },
+  {
+   "id": "out-75",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-104",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-116",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-119",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-124",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "out-140",
+   "label": "W",
+   "rule": 13
+  }
+ ],
+ "errors": 0,
+ "seconds_per_question": {
+  "mean": 14.1,
+  "median": 13.2,
+  "max": 36.2
+ },
+ "usage": {
+  "calls": 300,
+  "prompt_tokens": 4835908,
+  "completion_tokens": 366627,
+  "total_tokens": 5202535,
+  "prompt_chars_median": 67662
+ }
+}
