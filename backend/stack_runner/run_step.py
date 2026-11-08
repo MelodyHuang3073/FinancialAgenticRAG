@@ -1,7 +1,7 @@
 """Stacking experiment runner: one step per call (EXPERIMENT_PLAN.md section 3, revision 2026-11-08).
 
 Step 0 is the Naive RAG control (backend/clean_baseline/run.py). This file runs the steps that add the
-system's components on top of it. Only steps 1 and 2 exist so far; asking for another step stops with an error
+system's components on top of it. Only steps 1 to 3 exist so far; asking for another step stops with an error
 instead of running something that is not that step.
 
 Step 1 adds exactly one component, the system's corpus (C1), and nothing else:
@@ -150,27 +150,18 @@ def search_text_for(question: str, classification) -> str:
     return " ".join(queries)
 
 
-def step2_request(ctx, question: str, top_k: int, parent_map=None):
-    """(messages, retrieved indices) for step 2 = step 1 plus the answer prompt (C2) and the classifier with its
-    vocabulary (C3):
-      - retrieval is rank_bm25 as in step 1 (here on `search_text_for`: the question, plus the classifier's queries
-        for a non-numeric question);
-      - the prompt is built by the system's own LLMAnswerGenerator.generate_answer -- system message, question
-        first, the "Answer Mode" / "Routing Reason" lines (orchestrator's reason text), evidence, the question-shape
-        directives, principles, accounting conventions, output format, checklist; its one model call is captured and
-        sent unchanged (model + the two messages). No PoT or verification result is passed, so the "Computed value"
-        block (C6) and the "Verification summary" line (C7) are absent, exactly as in the system when those are off;
-      - the fiscal-year labels come from the whole filing's entries (as in the orchestrator), not from the 16."""
-    from app.agent.question_classifier import FinanceBenchClassifier      # imported only when step 2 runs
+def _system_prompt_request(ctx, question: str, search_text: str, cls, top_k: int, parent_map=None):
+    """(messages, retrieved indices) shared by steps 2 and 3: rank_bm25 on `search_text` (step 1's retrieval, 16
+    entries), the prompt built by the system's own LLMAnswerGenerator.generate_answer with the classifier's
+    answer mode and the orchestrator's routing-reason text, its one model call captured and sent unchanged
+    (model + the two messages). No PoT or verification result is passed, so the "Computed value" block (C6) and
+    the "Verification summary" line (C7) are absent, exactly as in the system when those are off. The fiscal-year
+    labels come from the whole filing's entries (as in the orchestrator), not from the 16."""
     from app.agent import llm_client as client_module
     client_module.record_usage = lambda *args, **kwargs: None         # the runner counts tokens itself (plan section 1)
-    if "classifier" not in ctx:
-        ctx["classifier"] = FinanceBenchClassifier()
-    cls = ctx["classifier"].classify(question)
     reason = f"FinanceBench: {cls.get('question_type', '')} / {cls.get('cognitive_task', '')}"      # as the orchestrator
-    ctx["meta"] = {"answer_mode": cls["answer_mode"], "n_queries": len(cls["retrieval_queries"])}
     filing = ctx["filing"]
-    top = naive.retrieve(ctx["bm25"], search_text_for(question, cls), top_k)
+    top = naive.retrieve(ctx["bm25"], search_text, top_k)
     items = []
     for rank, j in enumerate(top):
         item = dict(filing[j], relevance_score=len(top) - rank)                       # keeps the BM25 order
@@ -190,7 +181,94 @@ def step2_request(ctx, question: str, top_k: int, parent_map=None):
     return capture.kwargs["messages"], top
 
 
-STEPS = {1: step1_request, 2: step2_request}
+def step2_request(ctx, question: str, top_k: int, parent_map=None):
+    """(messages, retrieved indices) for step 2 = step 1 plus the answer prompt (C2) and the classifier with its
+    vocabulary (C3): retrieval is rank_bm25 on `search_text_for` (the question, plus the classifier's queries for a
+    non-numeric question); the prompt is the system's (see _system_prompt_request)."""
+    from app.agent.question_classifier import FinanceBenchClassifier      # imported only when step 2 runs
+    if "classifier" not in ctx:
+        ctx["classifier"] = FinanceBenchClassifier()
+    cls = ctx["classifier"].classify(question)
+    ctx["meta"] = {"answer_mode": cls["answer_mode"], "n_queries": len(cls["retrieval_queries"])}
+    return _system_prompt_request(ctx, question, search_text_for(question, cls), cls, top_k, parent_map)
+
+
+# ---- step 3: the query decomposer and the formula library (C4) --------------------------------------------
+_decomposer_calls = []          # (prompt tokens, completion tokens) of each decomposer model call of the current question
+
+
+def _count_decomposer_usage(model, caller, usage=None, prompt_chars=0):
+    from app.agent.usage_tracker import _usage_numbers
+    n = _usage_numbers(usage)
+    _decomposer_calls.append((n["prompt"], n["completion"]))
+
+
+def planned_queries(question: str, answer_mode: str, plan, no_calculation: bool):
+    """Every query the system's planner wants searched, each distinct one once, in planning order.
+    NUMERIC: the retrieval sub-questions (formula variables, the decomposer's steps, the question itself when
+    no formula covers it, the topic query) plus the question when it has no single computed answer.
+    Any other mode: the planner's search queries."""
+    if answer_mode == "NUMERIC":
+        queries = [sq["query"] for sq in plan.sub_questions if sq["type"] == "retrieval"]
+        if no_calculation and question not in queries:
+            queries.append(question)
+    else:
+        queries = list(plan.search_queries)
+    seen, out = set(), []
+    for q in queries:
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out
+
+
+def _orchestrator_for(ctx):
+    """One orchestrator per filing, over a stand-in store that holds only that filing (the single-file condition).
+    Only its planning and entity-alignment methods are used in step 3; nothing is retrieved through it."""
+    if "orch" not in ctx:
+        from app.agent import decomposer as decomposer_module
+        decomposer_module.record_usage = _count_decomposer_usage
+        from app.agent.orchestrator import FinAgentRAGOrchestrator
+        store = SimpleNamespace(corpus=ctx["filing"], uploaded_files=ctx.get("uploaded", []))
+        ctx["orch"] = FinAgentRAGOrchestrator(corpus_store=store)
+    return ctx["orch"]
+
+
+def plan_for(ctx, question: str):
+    """(classification, plan, queries, formula found?) exactly as the orchestrator plans before it retrieves:
+    classify, align the company to the filing, look the question up in the formula library, add the implied
+    previous year for trend questions, then `_plan_queries`."""
+    from app.agent.financial_formula_library import detect_formula
+    from app.agent.pot_reasoner import _with_implied_trend_year, is_no_calculation_question
+    orch = _orchestrator_for(ctx)
+    del _decomposer_calls[:]
+    cls = orch.classifier.classify(question)
+    clean_entity = cls["entity"]
+    cls["entity"] = orch._match_entity_to_corpus(cls["entity"], question)
+    clean_entity = orch._readable_company_name(cls["entity"], question) or clean_entity
+    library_formula = detect_formula(question)
+    retrieval_years = _with_implied_trend_year(cls["years"], question.lower())
+    query_entity = clean_entity if clean_entity and clean_entity != "company" else cls["entity"]
+    plan = orch._plan_queries(question, cls, cls["answer_mode"], library_formula, query_entity, retrieval_years)
+    queries = planned_queries(question, cls["answer_mode"], plan, is_no_calculation_question(question))
+    return cls, plan, queries, bool(library_formula)
+
+
+def step3_request(ctx, question: str, top_k: int, parent_map=None):
+    """(messages, retrieved indices) for step 3 = step 2 plus the decomposer and the formula library (C4): the
+    system's own planner decides what to search (formula variables, the model's decomposition, the question, the
+    topic query, the implied previous year); all distinct queries are joined into ONE rank_bm25 query string (still
+    step 1's retrieval, not the system retriever). The prompt is step 2's. The planner's model calls are counted in
+    ctx["meta"]."""
+    cls, plan, queries, formula = plan_for(ctx, question)
+    source = sorted({sq.get("source") for sq in plan.sub_questions if sq.get("source")})      # e.g. ['llm', 'narrative_topic']
+    ctx["meta"] = {"answer_mode": cls["answer_mode"], "n_queries": len(queries), "formula": formula,
+                   "decompose_source": source, "decomposer_calls": len(_decomposer_calls),
+                   "decomposer_tokens": [sum(c[0] for c in _decomposer_calls), sum(c[1] for c in _decomposer_calls)]}
+    return _system_prompt_request(ctx, question, " ".join(queries), cls, top_k, parent_map)
+
+
+STEPS = {1: step1_request, 2: step2_request, 3: step3_request}
 
 
 def send(client, model: str, messages):
@@ -250,6 +328,7 @@ def main():
         if company not in indexes:
             filing = filing_entries(entries, company)
             indexes[company] = {"filing": filing, "model": a.model,
+                                "uploaded": [u for u in cached.get("uploaded_files", []) if u.get("company") == company],
                                 "bm25": BM25Okapi([naive.tokenize(index_text(e)) for e in filing])}
         ctx = indexes[company]
         filing = ctx["filing"]
