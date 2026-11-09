@@ -1,0 +1,309 @@
+{
+ "all": {
+  "n": 300,
+  "C": 252,
+  "S": 6,
+  "P": 22,
+  "W": 20
+ },
+ "train": {
+  "n": 150,
+  "C": 122,
+  "S": 1,
+  "P": 14,
+  "W": 13
+ },
+ "out": {
+  "n": 150,
+  "C": 130,
+  "S": 5,
+  "P": 8,
+  "W": 7
+ },
+ "by_type": {
+  "domain-relevant": {
+   "n": 71,
+   "C": 53,
+   "S": 1,
+   "P": 11,
+   "W": 6
+  },
+  "metrics-generated": {
+   "n": 150,
+   "C": 132,
+   "S": 4,
+   "P": 4,
+   "W": 10
+  },
+  "novel-generated": {
+   "n": 79,
+   "C": 67,
+   "S": 1,
+   "P": 7,
+   "W": 4
+  }
+ },
+ "not_correct": [
+  {
+   "id": "train-4",
+   "label": "P",
+   "rule": "9.4-8"
+  },
+  {
+   "id": "train-6",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-14",
+   "label": "W",
+   "rule": "9.4-2"
+  },
+  {
+   "id": "train-17",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-18",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-22",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-25",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-32",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-40",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-55",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-71",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-72",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-74",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-82",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-83",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-89",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-96",
+   "label": "P",
+   "rule": 20
+  },
+  {
+   "id": "train-103",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-108",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-113",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-115",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "train-119",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-121",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-123",
+   "label": "P",
+   "rule": 20
+  },
+  {
+   "id": "train-133",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-136",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-145",
+   "label": "W",
+   "rule": "9.4-2"
+  },
+  {
+   "id": "train-146",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "out-1",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-8",
+   "label": "S",
+   "rule": 10
+  },
+  {
+   "id": "out-10",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-12",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-24",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-28",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-30",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-33",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "out-39",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "out-44",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-50",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-68",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-70",
+   "label": "P",
+   "rule": 20
+  },
+  {
+   "id": "out-103",
+   "label": "P",
+   "rule": "9.4-8"
+  },
+  {
+   "id": "out-104",
+   "label": "P",
+   "rule": 12
+  },
+  {
+   "id": "out-119",
+   "label": "P",
+   "rule": 12
+  },
+  {
+   "id": "out-120",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-122",
+   "label": "W",
+   "rule": "9.4-1"
+  },
+  {
+   "id": "out-124",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "out-126",
+   "label": "S",
+   "rule": 4
+  }
+ ],
+ "errors": 0,
+ "seconds_per_question": {
+  "mean": 21.4,
+  "median": 20.6,
+  "max": 66.50765323638916
+ },
+ "usage": {
+  "decomposer": {
+   "calls": 234,
+   "prompt_tokens": 95915,
+   "completion_tokens": 202569,
+   "total_tokens": 298484
+  },
+  "answer": {
+   "calls": 300,
+   "prompt_tokens": 1977156,
+   "completion_tokens": 334934,
+   "total_tokens": 2312090
+  },
+  "total_tokens": 2610574
+ }
+}
