@@ -1,7 +1,7 @@
 """Stacking experiment runner: one step per call (EXPERIMENT_PLAN.md section 3, revision 2026-11-08).
 
 Step 0 is the Naive RAG control (backend/clean_baseline/run.py). This file runs the steps that add the
-system's components on top of it. Only steps 1 to 3 exist so far; asking for another step stops with an error
+system's components on top of it. Only steps 1 to 4 exist so far; asking for another step stops with an error
 instead of running something that is not that step.
 
 Step 1 adds exactly one component, the system's corpus (C1), and nothing else:
@@ -157,9 +157,6 @@ def _system_prompt_request(ctx, question: str, search_text: str, cls, top_k: int
     (model + the two messages). No PoT or verification result is passed, so the "Computed value" block (C6) and
     the "Verification summary" line (C7) are absent, exactly as in the system when those are off. The fiscal-year
     labels come from the whole filing's entries (as in the orchestrator), not from the 16."""
-    from app.agent import llm_client as client_module
-    client_module.record_usage = lambda *args, **kwargs: None         # the runner counts tokens itself (plan section 1)
-    reason = f"FinanceBench: {cls.get('question_type', '')} / {cls.get('cognitive_task', '')}"      # as the orchestrator
     filing = ctx["filing"]
     top = naive.retrieve(ctx["bm25"], search_text, top_k)
     items = []
@@ -168,6 +165,16 @@ def _system_prompt_request(ctx, question: str, search_text: str, cls, top_k: int
         if not item.get("parent_content") and item.get("parent_id") and parent_map:
             item["parent_content"] = parent_map.get(item["parent_id"], "")
         items.append(item)
+    return _answer_messages(ctx, question, items, cls), top
+
+
+def _answer_messages(ctx, question: str, items, cls):
+    """The system's own answer prompt (LLMAnswerGenerator.generate_answer) around `items`, its one model call
+    captured: returns the messages (model + the two messages)."""
+    from app.agent import llm_client as client_module
+    client_module.record_usage = lambda *args, **kwargs: None         # the runner counts tokens itself (plan section 1)
+    reason = f"FinanceBench: {cls.get('question_type', '')} / {cls.get('cognitive_task', '')}"      # as the orchestrator
+    filing = ctx["filing"]
     if "labels" not in ctx:
         ctx["labels"] = filing_labels_for(filing)
     capture = _Capture()
@@ -178,7 +185,7 @@ def _system_prompt_request(ctx, question: str, search_text: str, cls, top_k: int
         pot_res=None, verification_res=None, filing_labels=ctx["labels"])
     assert capture.kwargs is not None, "generate_answer did not make its model call"
     assert set(capture.kwargs) == {"model", "messages"}, sorted(capture.kwargs)
-    return capture.kwargs["messages"], top
+    return capture.kwargs["messages"]
 
 
 def step2_request(ctx, question: str, top_k: int, parent_map=None):
@@ -268,7 +275,77 @@ def step3_request(ctx, question: str, top_k: int, parent_map=None):
     return _system_prompt_request(ctx, question, " ".join(queries), cls, top_k, parent_map)
 
 
-STEPS = {1: step1_request, 2: step2_request, 3: step3_request}
+# ---- step 4: the system retriever (C5) -------------------------------------------------------------------------
+def _system_orchestrator_for(ctx, parent_map):
+    """One orchestrator per filing over a real corpus store that holds only that filing (the single-file
+    condition, built as tests/run_single_file_subset.py builds it), with PoT, Tri-Check and the answer call
+    switched off: the orchestrator's own planning, search loop, de-duplication, quota selection and window of 30
+    run unchanged; what it would hand to the answer call is captured instead (see step4_request)."""
+    if "orch4" not in ctx:
+        from app.agent import decomposer as decomposer_module
+        decomposer_module.record_usage = _count_decomposer_usage
+        from app.agent.orchestrator import FinAgentRAGOrchestrator
+        from app.rag.corpus_store import FinancialCorpusStore
+        from app.tools.lexical_retriever import LexicalFinancialRetriever
+        store = FinancialCorpusStore()
+        store.corpus = list(ctx["filing"])
+        store.parent_map = parent_map or {}
+        store.uploaded_files = list(ctx.get("uploaded", []))
+        store.retriever = LexicalFinancialRetriever(store.corpus)
+        orch = FinAgentRAGOrchestrator(corpus_store=store)
+        state = ctx["orch4_state"] = {}
+        # C6 and C7 off: no computed value, and a verdict that accepts at once (so there is no retry, C7)
+        orch.pot_reasoner.generate_and_execute = lambda *a, **k: {
+            "code": "", "success": True, "result_value": None, "output_log": "", "extracted_variables": {},
+            "used_evidence_ids": []}
+        orch.verifier.verify = lambda *a, **k: {"decision": "ACCEPT"}
+
+        def capture(query, evidence, pot_res, verifier_res, classification, sub_questions):
+            state.update(final_context=evidence, classification=classification, sub_questions=sub_questions)
+            return "-"
+        orch._synthesize_final_answer = capture
+        plan_queries = orch._plan_queries
+
+        def keep_plan(*a, **k):
+            state["plan"] = plan_queries(*a, **k)
+            return state["plan"]
+        orch._plan_queries = keep_plan
+        ctx["orch4"] = orch
+    return ctx["orch4"]
+
+
+def step4_request(ctx, question: str, top_k: int, parent_map=None):
+    """(messages, retrieved indices) for step 4 = step 3 plus the system retriever (C5): the orchestrator runs its
+    own first attempt -- the planner's queries, one search each with the 8 score weightings, the exclusion of
+    already-fetched passages, the (metric, year) skip, a per-query statement-type hint, de-duplication, the
+    per-query quota and the window of 30 -- and the system's answer call then keeps its 16 of those 30. The prompt
+    is step 3's (no Computed value, no Verification summary). Only the first attempt: PoT is off, so the
+    verdict is accepted at once and there is no retry."""
+    from app.agent.evidence_selection import select_with_quota
+    from app.agent.llm_client import EVIDENCE_PROMPT_CAP
+    orch = _system_orchestrator_for(ctx, parent_map)
+    state = ctx["orch4_state"]
+    state.clear()
+    del _decomposer_calls[:]
+    orch.process_query(question)
+    cls, window = state["classification"], state["final_context"]
+    index = {e["id"]: j for j, e in enumerate(ctx["filing"])}
+    items = []
+    for ev in window:
+        item = dict(ev)
+        if not item.get("parent_content") and item.get("parent_id") and parent_map:
+            item["parent_content"] = parent_map.get(item["parent_id"], "")
+        items.append(item)
+    kept = select_with_quota(items, EVIDENCE_PROMPT_CAP)             # the 16 the answer call keeps
+    plan = state["plan"]
+    source = sorted({sq.get("source") for sq in plan.sub_questions if sq.get("source")})
+    ctx["meta"] = {"answer_mode": cls["answer_mode"], "window": len(window), "decompose_source": source,
+                   "decomposer_calls": len(_decomposer_calls),
+                   "decomposer_tokens": [sum(c[0] for c in _decomposer_calls), sum(c[1] for c in _decomposer_calls)]}
+    return _answer_messages(ctx, question, items, cls), [index[e["id"]] for e in kept]
+
+
+STEPS = {1: step1_request, 2: step2_request, 3: step3_request, 4: step4_request}
 
 
 def send(client, model: str, messages):
