@@ -28,6 +28,7 @@ if load_dotenv is not None and os.path.exists(ENV_PATH):
 # append-only ledger, safe with parallel shards). This module reports its answer
 # calls as caller="answer"; the decomposer reports as caller="decomposer".
 from app.agent.usage_tracker import record_usage, DAILY_FREE_TOKEN_CAP  # noqa: E402,F401
+from app import ablation  # noqa: E402
 
 # How many retrieved evidence items (sorted by relevance_score) are formatted into the
 # prompt the LLM actually sees.
@@ -249,6 +250,10 @@ class LLMAnswerGenerator:
             f"{_truncate_evidence_content(_evidence_display_text(item), max_chars=4000, max_table_rows=30)}"
             for item in sorted_evidence[:effective_cap]
         )
+        if ablation.off("C1"):
+            # Ablation row 1: the corpus is plain-text chunks, so the evidence is the chunk text itself,
+            # without the "[company / table name]" label or a page around it (app/ablation.py).
+            evidence_text = "\n\n".join(item.get("content", "") for item in sorted_evidence[:effective_cap])
 
         computed_summary = ""
         if pot_res:
@@ -293,6 +298,8 @@ class LLMAnswerGenerator:
         incurred_cost_summary = (
             incurred_cost_directive(query, pool_text) + leverage_directive(query, pool_text) + question_directives(query, pool_text, filing_labels)
         )
+        if ablation.off("C2"):
+            incurred_cost_summary = ""   # ablation row 2: the answer prompt's rule-based notes belong to C2
 
         verification_summary = ""
         if verification_res:
@@ -449,14 +456,22 @@ the filing sentence it rests on.
   meaning, then apply the accounting conventions in ⑥ exactly as written.
 """
 
+        messages = [
+            {"role": "system", "content": "You are a professional financial report analysis assistant. Respond in clear English with a result-first format, always in complete sentences -- never reply with only a number."},
+            {"role": "user", "content": prompt},
+        ]
+        if ablation.off("C2"):
+            # Ablation row 2: the plain prompt of the Naive RAG control (a context block and the question,
+            # no system message). The computed value and verification summary are still appended after the
+            # evidence when the system produced them (app/ablation.py).
+            prompt = "Context:\n" + evidence_text + computed_summary + verification_summary + "\n\nQuestion: " + query
+            messages = [{"role": "user", "content": prompt}]
+
         try:
             if hasattr(client, "chat") and hasattr(client.chat, "completions"):
                 create_kwargs: Dict[str, Any] = {
                     "model": self._model,
-                    "messages": [
-                        {"role": "system", "content": "You are a professional financial report analysis assistant. Respond in clear English with a result-first format, always in complete sentences -- never reply with only a number."},
-                        {"role": "user", "content": prompt},
-                    ],
+                    "messages": messages,
                 }
                 if not _is_reasoning_model(self._model):
                     create_kwargs["temperature"] = 0.2

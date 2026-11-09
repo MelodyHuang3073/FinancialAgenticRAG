@@ -21,6 +21,7 @@ Classifies questions along three axes:
 import re
 from typing import Dict, Any, List, Optional
 
+from app import ablation
 from app.agent.financial_vocabulary import metric_view
 
 
@@ -219,6 +220,12 @@ class FinanceBenchClassifier:
             len(target_metrics) >= 2,
         ]) else "SIMPLE"
 
+        # Ablation row 2 (C3 off): no question-type judgement. Every question takes one fixed path (numeric in row 2a, explanation in 2b),
+        # the retrieval strategy is fixed and there is no statement-type hint. See app/ablation.py.
+        if ablation.off("C3"):
+            answer_mode = ablation.forced_answer_mode()
+            retrieval_strategy = "HYBRID"
+            statement_type_hint = None
         return {
             "entity": entity,
             "target_metrics": target_metrics,

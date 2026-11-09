@@ -408,3 +408,11 @@ def metric_view(field: str) -> Dict[str, Any]:
     """{metric: value} for every QUESTION_METRICS record that defines
     `field`, in QUESTION_METRICS order."""
     return {k: v[field] for k, v in QUESTION_METRICS.items() if field in v}
+
+# Ablation row 2 (C3 off): the vocabulary tables are emptied in place, before any other module
+# derives anything from them. See app/ablation.py.
+from app import ablation as _ablation  # noqa: E402
+
+if _ablation.off("C3"):
+    for _table in (QUESTION_METRICS, LINE_ITEM_ALIASES, COMPOSITE_LINE_ITEM_ALIASES, LINE_ITEM_STATEMENT):
+        _table.clear()

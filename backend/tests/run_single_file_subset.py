@@ -9,7 +9,9 @@ Usage:
 --candidates is a JSON list of {"doc": <doc_name>, "q": <question prefix>};
 the QA entry is resolved by doc_name and question prefix. Experiment
 switches (e.g. ABLATE_POT=1) are read from the environment by the modules
-they belong to, so the same script runs every configuration.
+they belong to, so the same script runs every configuration. The ablation row is ABLATE_ROW (app/ablation.py): 0 or unset is the
+full system, 1 to 5 switch off the component(s) of that row of EXPERIMENT_PLAN.md section 4; every result
+record carries the row it was produced with.
 Writes --out incrementally (one record per question) so an interrupted run
 keeps what it finished. --shard K/N runs every N-th candidate starting at K
 (0-based), so N processes can split one list.
@@ -28,16 +30,18 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from app import ablation
 from app.rag.corpus_store import FinancialCorpusStore
 from app.tools.lexical_retriever import LexicalFinancialRetriever
 from app.agent.orchestrator import FinAgentRAGOrchestrator
 
 HERE = os.path.dirname(__file__)
+# Row 1 (C1 off) reads the plain-text corpus (company -> list of 1,000-character chunks); every other row the
+# system's parsed corpus.
+_CORPUS = ("original_clean_corpus_cache.pkl", "outsample_clean_corpus_cache.pkl") if ablation.off("C1")     else ("original_corpus_cache.pkl", "outsample_corpus_cache.pkl")
 SETS = {
-    "train": (os.path.join(HERE, "financebench_qa_subset.json"),
-              os.path.join(HERE, "original_corpus_cache.pkl")),
-    "out": (os.path.join(HERE, "financebench_outsample_qa.json"),
-            os.path.join(HERE, "outsample_corpus_cache.pkl")),
+    "train": (os.path.join(HERE, "financebench_qa_subset.json"), os.path.join(HERE, _CORPUS[0])),
+    "out": (os.path.join(HERE, "financebench_outsample_qa.json"), os.path.join(HERE, _CORPUS[1])),
 }
 
 
@@ -61,6 +65,11 @@ def _company_for(doc_name: str, companies):
 
 def _single_store(cached, company: str) -> FinancialCorpusStore:
     vs = FinancialCorpusStore()
+    if ablation.off("C1"):
+        vs.corpus = ablation.plain_entries(company, cached[company])
+        vs.uploaded_files = [{"filename": company + ".pdf", "company": company, "passage_count": len(vs.corpus)}]
+        vs.retriever = LexicalFinancialRetriever(vs.corpus)
+        return vs
     vs.corpus = [e for e in cached["corpus"] if e.get("company") == company]
     vs.parent_map = cached["parent_map"]
     vs.uploaded_files = [u for u in cached["uploaded_files"] if u["company"] == company]
@@ -80,7 +89,8 @@ def main():
     qa_path, cache_path = SETS[args.set]
     qa = json.load(open(qa_path, encoding="utf-8"))
     cached = pickle.load(open(cache_path, "rb"))
-    companies = sorted({u["company"] for u in cached["uploaded_files"]})
+    companies = sorted(cached) if ablation.off("C1") else sorted({u["company"] for u in cached["uploaded_files"]})
+    print("config:", json.dumps(ablation.describe()), flush=True)
     cands = json.load(open(args.candidates, encoding="utf-8"))
     if args.limit:
         cands = cands[:args.limit]
@@ -109,7 +119,7 @@ def main():
             "doc_name": item["doc_name"], "question": item["question"], "gold": item["answer"],
             "question_type": item["question_type"], "model_answer": answer, "error": error,
             "elapsed": time.time() - t0, "mode": "single-file",
-            "ablate_pot": os.environ.get("ABLATE_POT") == "1",
+            "ablation": ablation.describe(),
         })
         json.dump(results, open(args.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         print(f"[{i}/{len(cands)}] {item['doc_name']} ({time.time() - t0:.0f}s)\n  Q: {item['question'][:100]}\n"

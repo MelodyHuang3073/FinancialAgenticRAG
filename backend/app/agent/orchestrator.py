@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 
+from app import ablation
 from app.rag.corpus_store import FinancialCorpusStore
 from app.agent.question_classifier import FinanceBenchClassifier
 from app.agent.decomposer import QueryDecomposer
@@ -74,6 +75,26 @@ class FinAgentRAGOrchestrator:
         self.verifier = TriCheckSelfVerifier()
         self.refiner = QueryRefiner()
         self.llm_generator = LLMAnswerGenerator()
+        if ablation.off("C5"):
+            # Ablation row 4: no window of 30 -- what is retrieved is what the model reads (app/ablation.py).
+            self.CONTEXT_CHUNK_LIMIT = EVIDENCE_PROMPT_CAP
+
+    def _retrieve_concatenated(
+        self, queries: List[str], retrieved_ids: set, evidence_buffer: List[Dict[str, Any]],
+        evidence_meta: List[Dict[str, Any]], iter_trace: Dict[str, Any],
+    ) -> None:
+        """Ablation row 4 (C5 off): every planned query joined into one string, one plain rank_bm25
+        search, the best EVIDENCE_PROMPT_CAP passages. No weights, no per-query search, no quota."""
+        joined = " ".join(dict.fromkeys(q for q in queries if q))
+        hits = self.corpus_store.search_bm25(
+            joined, top_k=EVIDENCE_PROMPT_CAP, exclude_ids=list(retrieved_ids),
+        )
+        for hit in hits:
+            retrieved_ids.add(hit["id"])
+            evidence_buffer.append(hit)
+            info = self._build_evidence_info(hit, sub_question=joined)
+            iter_trace["retrieved_passages"].append(info)
+            evidence_meta.append(info)
 
     def _top_evidence(self, evidence_buffer: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Select the top-scoring CONTEXT_CHUNK_LIMIT items after sorting by relevance,
@@ -180,17 +201,24 @@ class FinAgentRAGOrchestrator:
     ) -> None:
         """Run a _plan_retry plan's searches, adding new evidence in place."""
         for k, plan_query in enumerate(plan["queries"]):
-            hits = self.corpus_store.search(
-                plan_query, top_k=plan["top_k"],
-                exclude_ids=list(retrieved_ids),
-                entity=classification.get("entity"),
-                statement_type_hint=statement_type_hint,
-                query_years=classification.get("years"),
-            )
-            for hit in self._tag_subquery(
-                200 + attempt * 10 + k,
-                self._deduplicate_hits(hits, entity=classification.get("entity")),
-            ):
+            if ablation.off("C5"):
+                # Ablation row 4: a retry searches the way the first attempt did (plain rank_bm25).
+                retry_hits = self.corpus_store.search_bm25(
+                    plan_query, top_k=plan["top_k"], exclude_ids=list(retrieved_ids),
+                )
+            else:
+                hits = self.corpus_store.search(
+                    plan_query, top_k=plan["top_k"],
+                    exclude_ids=list(retrieved_ids),
+                    entity=classification.get("entity"),
+                    statement_type_hint=statement_type_hint,
+                    query_years=classification.get("years"),
+                )
+                retry_hits = self._tag_subquery(
+                    200 + attempt * 10 + k,
+                    self._deduplicate_hits(hits, entity=classification.get("entity")),
+                )
+            for hit in retry_hits:
                 retrieved_ids.add(hit["id"])
                 evidence_buffer.append(hit)
                 info = self._build_evidence_info(hit, sub_question=plan_query)
@@ -225,6 +253,24 @@ class FinAgentRAGOrchestrator:
                non-numeric -> when there is no formula.
         """
         numeric = answer_mode == "NUMERIC"
+
+        if ablation.off("C4"):
+            # Ablation row 3 (C4 off): no decomposition, no formula, no extra queries -- the question itself
+            # (a non-numeric question also gets the classifier's own queries). See app/ablation.py.
+            if numeric:
+                sub_questions = [{
+                    "step": 1, "type": "retrieval", "query": query, "target_metric": "",
+                    "target_year": "", "source": "original_question",
+                }]
+                search_queries: List[str] = []
+            else:
+                sub_questions = self._build_non_numeric_subquestions(
+                    query, answer_mode, classification.get("target_metrics")
+                )
+                search_queries = list(classification["retrieval_queries"])
+                if query not in search_queries:
+                    search_queries.append(query)
+            return QueryPlan(sub_questions, search_queries, None, not numeric)
 
         # ── 1. base queries ──
         dynamic_formula_entry = None
@@ -376,13 +422,16 @@ class FinAgentRAGOrchestrator:
         # library match drives retrieval sub-queries (numeric and non-numeric
         # paths alike) and is handed to the PoT module, which does not
         # re-match the query itself.
-        library_formula = detect_formula(query)
+        library_formula = None if ablation.off("C4") else detect_formula(query)
         formula_entry = library_formula if answer_mode == "NUMERIC" else None
         # If a question asks whether a metric is improving/declining as of year Y, treat
         # it as implying a comparison to year Y-1.
         # Without this implied prior-year fetch, retrieval may lack the earlier-year
         # evidence needed for trend calculations, causing fallback answers.
-        retrieval_years = _with_implied_trend_year(classification["years"], query.lower())
+        retrieval_years = (
+            classification["years"] if ablation.off("C4")
+            else _with_implied_trend_year(classification["years"], query.lower())
+        )
         query_entity = clean_entity if clean_entity and clean_entity != "company" else classification["entity"]
         plan = self._plan_queries(
             query, classification, answer_mode, library_formula, query_entity, retrieval_years,
@@ -422,6 +471,15 @@ class FinAgentRAGOrchestrator:
                         sq for sq in sub_questions if sq["type"] == "retrieval"
                     ]
                     decompose_src = sub_questions[-1].get("source", "rule") if sub_questions else "rule"
+                    if ablation.off("C5"):
+                        # Ablation row 4: one concatenated query, one plain search (_retrieve_concatenated).
+                        concatenated = [sq["query"] for sq in retrieval_steps]
+                        if no_calculation and query not in concatenated:
+                            concatenated.append(query)
+                        self._retrieve_concatenated(
+                            concatenated, retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
+                        )
+                        retrieval_steps = []
 
                     for sub_q in retrieval_steps:
                         # Every sub-question is ALWAYS retrieved (no early-stop gate):
@@ -554,7 +612,7 @@ class FinAgentRAGOrchestrator:
                     # sub-questions target -- so, as on the non-numeric path, the
                     # question itself is also searched. Computable questions keep
                     # retrieval targeted on their formula inputs.
-                    if no_calculation and query not in {sq["query"] for sq in retrieval_steps}:
+                    if no_calculation and not ablation.off("C5") and query not in {sq["query"] for sq in retrieval_steps}:
                         q_hits = self._tag_subquery(
                             len(retrieval_steps) + 1,
                             self._deduplicate_hits(
@@ -599,20 +657,27 @@ class FinAgentRAGOrchestrator:
                     if parent_id and not ev_enriched.get("parent_content"):
                         ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
                     context_window.append(ev_enriched)
-                pot_res = self.pot_reasoner.generate_and_execute(
-                    query, context_window, entity=classification["entity"],
-                    library_formula_entry=library_formula,
-                    dynamic_formula_entry=dynamic_formula_entry,
-                    no_calculation=no_calculation,
-                )
+                if ablation.off("C6"):
+                    # Ablation row 5: no calculation -- a question with no computed answer (app/ablation.py).
+                    pot_res = ablation.empty_pot_result(answer_mode)
+                else:
+                    pot_res = self.pot_reasoner.generate_and_execute(
+                        query, context_window, entity=classification["entity"],
+                        library_formula_entry=library_formula,
+                        dynamic_formula_entry=dynamic_formula_entry,
+                        no_calculation=no_calculation,
+                    )
                 iter_trace["pot_code"] = pot_res["code"]
                 iter_trace["sandbox_output"] = pot_res["output_log"]
                 iter_trace["result_value"] = pot_res["result_value"]
 
                 # ── Tri-Check Verification ──
-                verification_res = self.verifier.verify(
-                    query, context_window, pot_res, entity=classification.get("entity")
-                )
+                if ablation.off("C7"):
+                    verification_res = ablation.accepted_verdict()   # ablation row 5: accept, never retry
+                else:
+                    verification_res = self.verifier.verify(
+                        query, context_window, pot_res, entity=classification.get("entity")
+                    )
                 iter_trace["verification"] = verification_res
 
                 trace_steps.append({
@@ -658,7 +723,12 @@ class FinAgentRAGOrchestrator:
                     "retrieved_passages": [], "pot_code": "", "sandbox_output": "",
                     "verification": {}
                 }
-                if iteration_count == 1:
+                if iteration_count == 1 and ablation.off("C5"):
+                    # Ablation row 4: one concatenated query, one plain search.
+                    self._retrieve_concatenated(
+                        list(search_queries), retrieved_ids, evidence_buffer, evidence_meta, iter_trace,
+                    )
+                elif iteration_count == 1:
                     new_hits = []
                     for sq_idx, sq in enumerate(search_queries):
                         new_hits.extend(self._tag_subquery(sq_idx, self.corpus_store.search(
@@ -702,7 +772,7 @@ class FinAgentRAGOrchestrator:
                         ev_enriched["parent_content"] = self.corpus_store.get_parent_content(parent_id)
                     context_window.append(ev_enriched)
 
-                if non_numeric_formula:
+                if non_numeric_formula and not ablation.off("C6"):
                     pot_res = self.pot_reasoner.generate_and_execute(
                         query, context_window, entity=classification["entity"],
                         library_formula_entry=non_numeric_formula,
@@ -719,9 +789,12 @@ class FinAgentRAGOrchestrator:
                 iter_trace["sandbox_output"] = pot_res.get("output_log", "")
                 iter_trace["result_value"] = pot_res.get("result_value")
 
-                verification_res = self.verifier.verify(
-                    query, self._top_evidence(evidence_buffer), pot_res, entity=classification.get("entity")
-                )
+                if ablation.off("C7"):
+                    verification_res = ablation.accepted_verdict()   # ablation row 5: accept, never retry
+                else:
+                    verification_res = self.verifier.verify(
+                        query, self._top_evidence(evidence_buffer), pot_res, entity=classification.get("entity")
+                    )
                 iter_trace["verification"] = verification_res
                 trace_steps.append({
                     "step_name": "Evidence Retrieval & Analysis",
@@ -751,7 +824,9 @@ class FinAgentRAGOrchestrator:
         # ── Step 4: Final Answer Synthesis ──
         final_context = self._top_evidence(evidence_buffer)
         final_answer = self._synthesize_final_answer(
-            query, final_context, pot_res or {}, verification_res or {},
+            query, final_context,
+            {} if ablation.off("C6") else (pot_res or {}),
+            {} if ablation.off("C7") else (verification_res or {}),
             classification, sub_questions
         )
         # Mirrors llm_client.generate_answer's own effective_cap exactly --

@@ -105,3 +105,25 @@ class FinancialCorpusStore:
             query_years=query_years,
         )
 
+    def search_bm25(self, query: str, top_k: int = 16, exclude_ids: List[str] = None) -> List[Dict[str, Any]]:
+        """Ablation row 4 (C5 off): plain Okapi BM25 (rank_bm25 defaults) over each passage's `content`,
+        the query and the passages lower-cased and split on whitespace, nothing else -- no weights, no
+        company or year signals. Scores are returned as `relevance_score`. See app/ablation.py."""
+        import numpy as np
+        from rank_bm25 import BM25Okapi
+        if getattr(self, "_bm25_size", None) != len(self.corpus):
+            self._bm25 = BM25Okapi([doc["content"].lower().split() for doc in self.corpus]) if self.corpus else None
+            self._bm25_size = len(self.corpus)
+        if self._bm25 is None:
+            return []
+        skip = set(exclude_ids or [])
+        scores = self._bm25.get_scores(query.lower().split())
+        hits: List[Dict[str, Any]] = []
+        for i in np.argsort(-scores, kind="stable"):
+            doc = self.corpus[int(i)]
+            if doc["id"] in skip:
+                continue
+            hits.append(dict(doc, relevance_score=float(scores[int(i)])))
+            if len(hits) >= top_k:
+                break
+        return hits
