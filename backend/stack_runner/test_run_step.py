@@ -27,9 +27,9 @@ def test_step_one_pulls_in_no_system_component_beyond_the_evidence_display():
     assert loaded == []
 
 
-def test_steps_one_to_three_exist_and_another_step_stops_instead_of_running(monkeypatch):
-    assert sorted(r.STEPS) == [1, 2, 3]
-    monkeypatch.setattr(sys, "argv", ["run_step.py", "--step", "4", "--set", "original", "--dry-run"])
+def test_steps_one_to_four_exist_and_another_step_stops_instead_of_running(monkeypatch):
+    assert sorted(r.STEPS) == [1, 2, 3, 4]
+    monkeypatch.setattr(sys, "argv", ["run_step.py", "--step", "5", "--set", "original", "--dry-run"])
     with pytest.raises(SystemExit) as e:
         r.main()
     assert "not implemented" in str(e.value)
@@ -345,3 +345,54 @@ def test_step_three_counts_the_planners_model_calls_per_question():
     ctx2 = _ctx3(_filing())
     r.STEPS[3](ctx2, FORMULA_Q, 16)
     assert r._decomposer_calls == []                                             # reset for each question
+
+
+# ---- step 4: the system retriever (C5) ---------------------------------------------------------------------
+def _run4(q, filing=None):
+    filing = filing or _filing()
+    ctx = _ctx3(filing)
+    messages, top = r.STEPS[4](ctx, q, 16, None)
+    return ctx, messages, top
+
+
+def test_step_four_uses_the_systems_own_retriever_and_orchestrator_loop():
+    from app.tools.lexical_retriever import LexicalFinancialRetriever
+    ctx, messages, top = _run4(FORMULA_Q)
+    orch = ctx["orch4"]
+    assert isinstance(orch.corpus_store.retriever, LexicalFinancialRetriever)
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert 1 <= len(top) <= 16 and len(set(top)) == len(top)
+    assert ctx["meta"]["window"] >= len(top) and ctx["meta"]["window"] <= 30
+
+
+def test_step_four_has_no_pot_no_verification_and_no_retry():
+    calls = []
+    ctx = _ctx3(_filing())
+    r._system_orchestrator_for(ctx, None)
+    orch = ctx["orch4"]
+    verify = orch.verifier.verify
+    orch.verifier.verify = lambda *a, **k: (calls.append(1), verify(*a, **k))[1]
+    messages, _ = r.STEPS[4](ctx, FORMULA_Q, 16, None)
+    assert calls == [1]                                           # one attempt, accepted at once, no retry
+    prompt = messages[1]["content"]
+    assert "Computed value:" not in prompt and "Verification summary:" not in prompt
+
+
+def test_step_four_prompt_frame_is_step_threes_only_the_evidence_differs():
+    filing = _filing()
+    m3, _ = r.STEPS[3](_ctx3(filing), FORMULA_Q, 16)
+    m4 = r.STEPS[4](_ctx3(filing), FORMULA_Q, 16, None)[0]
+    assert m3[0] == m4[0]
+    head = lambda m: m[1]["content"].split("Available Evidence:")[0]
+    assert head(m3) == head(m4)
+    tail = lambda m: m[1]["content"].split("【ANSWERING PRINCIPLES】")[1]
+    assert tail(m3) == tail(m4)
+
+
+def test_step_four_runs_each_question_from_a_clean_state_and_counts_planner_calls():
+    ctx = _ctx3(_filing())
+    r.STEPS[4](ctx, NON_FORMULA_Q, 16, None)
+    ctx.pop("meta")
+    r.STEPS[4](ctx, FORMULA_Q, 16, None)
+    assert ctx["meta"]["decomposer_calls"] == 0 and r._decomposer_calls == []
+    assert ctx["orch4_state"]["classification"]["answer_mode"] == "NUMERIC"
