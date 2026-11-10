@@ -1,9 +1,9 @@
-"""Tables from single_clean_300.json (labels were read by hand, one answer at a time)
+"""Tables from answers.json (labels were read by hand, one answer at a time)
 (label = C/S/P/W by EXPERIMENT_PLAN.md section 9; rule = the decision-table row or 9.4 rule it was judged by).
-    python backend/clean_baseline/results/summarize.py"""
+    python backend/experiment_results/stack_step0/summarize.py"""
 import collections, json, os, statistics as st
 HERE = os.path.dirname(os.path.abspath(__file__))
-rows = json.load(open(os.path.join(HERE, "single_clean_300.json"), encoding="utf-8"))
+rows = json.load(open(os.path.join(HERE, "answers.json"), encoding="utf-8"))
 def tab(sel, key):
     c = collections.Counter(key(r) for r in sel)
     return {k: c[k] for k in "CSPW"}

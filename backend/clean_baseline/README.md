@@ -30,7 +30,7 @@ cd backend/clean_baseline && python -m pytest -q               # 離線測試
 
 ## 結果(2026-11-05 依 EXPERIMENT_PLAN.md 第 9 節重新判分、2026-11-11 全面複核,gpt-5-mini、單檔、300 題各跑一次)
 
-答案是 2026-11-02 跑的,模型沒有重跑。2026-11-05 把 300 題答案依規劃文件第 9 節(四個等級、數字題與說明題規則、22 項邊界情形決策表)重新逐題讀過一次,每個非 C 的標籤都記下依據(決策表列號或第 9.4 節的規則),存在 `results/labels.json`,並通過 `experiment_results/grading_check.py`。判分者是 AI 助理,作者複核。
+答案是 2026-11-02 跑的,模型沒有重跑。2026-11-05 把 300 題答案依規劃文件第 9 節(四個等級、數字題與說明題規則、22 項邊界情形決策表)重新逐題讀過一次,每個非 C 的標籤都記下依據(決策表列號或第 9.4 節的規則),存在 `labels.json`,並通過 `experiment_results/grading_check.py`。判分者是 AI 助理,作者複核。
 
 | | 正確 | 小誤差 | 部分 | 錯誤 | 答對率 |
 |---|---|---|---|---|---|
@@ -69,4 +69,4 @@ cd backend/clean_baseline && python -m pytest -q               # 離線測試
 
 獨立測試集 57(Walmart 營業利益率)維持 P:題目要求精確到小數點後一位,反推的總營收(678.0B)與財報(680,985M)差約 0.4%,4.3% 是碰巧一致。
 
-檔案:`results/single_clean_300.json`(每題答案、檢索到的 chunk 序號、用量、`label` 與 `rule`)、`results/labels.json`(逐題標籤與依據)、`results/summary.json`、`results/summarize.py`(重算以上表格)。
+檔案(在 `backend/experiment_results/stack_step0/`):`answers.json`(每題答案、檢索到的 chunk 序號、用量、`label` 與 `rule`)、`labels.json`(逐題標籤與依據)、`summary.json`、`summarize.py`(重算以上表格)。
