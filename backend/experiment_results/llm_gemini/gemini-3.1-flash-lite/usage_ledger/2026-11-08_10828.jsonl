@@ -1,0 +1,1 @@
+{"ts": "2026-11-09 00:36:37", "date": "2026-11-08", "pid": 10828, "model": "gemini-3.1-flash-lite", "caller": "decomposer", "prompt_tokens": 146, "completion_tokens": 24, "reasoning_tokens": null, "total_tokens": 170, "prompt_chars": 594}
