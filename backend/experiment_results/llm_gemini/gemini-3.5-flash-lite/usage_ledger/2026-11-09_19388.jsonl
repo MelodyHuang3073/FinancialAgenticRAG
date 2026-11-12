@@ -1,0 +1,2 @@
+{"ts": "2026-11-09 12:59:02", "date": "2026-11-09", "pid": 19388, "model": "gemini-3.5-flash-lite", "caller": "decomposer", "prompt_tokens": 127, "completion_tokens": 25, "reasoning_tokens": null, "total_tokens": 152, "prompt_chars": 536}
+{"ts": "2026-11-09 12:59:07", "date": "2026-11-09", "pid": 19388, "model": "gemini-3.5-flash-lite", "caller": "answer", "prompt_tokens": 19716, "completion_tokens": 193, "reasoning_tokens": null, "total_tokens": 19909, "prompt_chars": 72105}
