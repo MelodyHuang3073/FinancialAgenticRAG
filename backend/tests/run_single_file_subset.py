@@ -12,7 +12,9 @@ switches (e.g. ABLATE_POT=1) are read from the environment by the modules
 they belong to, so the same script runs every configuration.
 Writes --out incrementally (one record per question) so an interrupted run
 keeps what it finished. --shard K/N runs every N-th candidate starting at K
-(0-based), so N processes can split one list.
+(0-based), so N processes can split one list. Starting the script again WITHOUT --resume
+begins from nothing and overwrites --out; with --resume the records already in --out are kept
+and only the candidates without a record are run.
 """
 import argparse
 import json
@@ -68,6 +70,13 @@ def _single_store(cached, company: str) -> FinancialCorpusStore:
     return vs
 
 
+def load_existing(path):
+    """The records already written to `path` (none when the file does not exist), for --resume."""
+    if not os.path.exists(path):
+        return []
+    return json.load(open(path, encoding="utf-8"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--set", choices=SETS, required=True)
@@ -75,6 +84,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--shard", default="")
+    ap.add_argument("--resume", action="store_true",
+                    help="keep the records already in --out and run only the candidates that have none; "
+                         "without it --out is started again from nothing and overwritten")
     args = ap.parse_args()
 
     qa_path, cache_path = SETS[args.set]
@@ -88,7 +100,8 @@ def main():
         k, n = (int(v) for v in args.shard.split("/"))
         cands = cands[k::n]
 
-    results, stores = [], {}
+    results, stores = (load_existing(args.out) if args.resume else []), {}
+    done = {(r["doc_name"], r["question"]) for r in results}
     for i, c in enumerate(cands, 1):
         matches = [x for x in qa
                    if x["doc_name"].lower().endswith(c["doc"].lower().split("/")[-1])
@@ -96,6 +109,8 @@ def main():
         if len(matches) != 1:
             raise SystemExit(f"candidate {c!r} matched {len(matches)} questions")
         item = matches[0]
+        if (item["doc_name"], item["question"]) in done:
+            continue  # --resume: this question already has its record
         company = _company_for(item["doc_name"], companies)
         if company not in stores:
             stores[company] = FinAgentRAGOrchestrator(corpus_store=_single_store(cached, company))
