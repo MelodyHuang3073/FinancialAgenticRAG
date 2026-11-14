@@ -85,7 +85,15 @@ def run_one(agent, data_dir, q):
             "output_tokens": agent.total_output_token_count - out0}
 
 
+def ensure_utf8():
+    """Google's code opens its log files with the platform default encoding (cp950 on this Windows machine), which
+    cannot hold characters such as U+2011 that the model writes. Restart once in Python's UTF-8 mode."""
+    if not sys.flags.utf8_mode:
+        os.execv(sys.executable, [sys.executable, "-X", "utf8", os.path.abspath(__file__)] + sys.argv[1:])
+
+
 def main():
+    ensure_utf8()
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--out", required=True)
