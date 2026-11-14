@@ -74,3 +74,18 @@ def test_runner_end_to_end_and_selection(tmp_path, monkeypatch):
     out = str(tmp_path / "r.json")
     rq.save(out, [rec])
     assert json.load(open(out))[0]["answer"] == "1000"
+
+
+def test_ensure_utf8_restarts_in_utf8_mode_and_only_once(monkeypatch):
+    """cp950 cannot write characters like U+2011 that the model emits; the runner restarts itself with -X utf8."""
+    import types
+    from baselines.tablerag_google import run_questions as rq
+    calls = []
+    monkeypatch.setattr(rq.os, "execv", lambda exe, argv: calls.append(argv))
+    monkeypatch.setattr(rq, "sys", types.SimpleNamespace(flags=types.SimpleNamespace(utf8_mode=0), executable="py", argv=["x", "--ids", "train-1"]))
+    rq.ensure_utf8()
+    assert calls and calls[0][:3] == ["py", "-X", "utf8"] and calls[0][-2:] == ["--ids", "train-1"]
+    calls.clear()
+    monkeypatch.setattr(rq, "sys", types.SimpleNamespace(flags=types.SimpleNamespace(utf8_mode=1), executable="py", argv=["x"]))
+    rq.ensure_utf8()
+    assert not calls
