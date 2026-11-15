@@ -1,0 +1,1267 @@
+{
+ "all": {
+  "n": 300,
+  "C": 119,
+  "S": 1,
+  "P": 7,
+  "W": 173,
+  "with_final_answer": 144,
+  "C_among_final_answers": 119,
+  "used_all_5_rounds": 197,
+  "empty_answer": 0
+ },
+ "train": {
+  "n": 150,
+  "C": 41,
+  "S": 0,
+  "P": 6,
+  "W": 103,
+  "with_final_answer": 58,
+  "C_among_final_answers": 41,
+  "used_all_5_rounds": 108,
+  "empty_answer": 0
+ },
+ "out": {
+  "n": 150,
+  "C": 78,
+  "S": 1,
+  "P": 1,
+  "W": 70,
+  "with_final_answer": 86,
+  "C_among_final_answers": 78,
+  "used_all_5_rounds": 89,
+  "empty_answer": 0
+ },
+ "by_type": {
+  "domain-relevant": {
+   "n": 71,
+   "C": 24,
+   "S": 0,
+   "P": 5,
+   "W": 42,
+   "with_final_answer": 32,
+   "C_among_final_answers": 24,
+   "used_all_5_rounds": 42,
+   "empty_answer": 0
+  },
+  "metrics-generated": {
+   "n": 150,
+   "C": 78,
+   "S": 1,
+   "P": 0,
+   "W": 71,
+   "with_final_answer": 87,
+   "C_among_final_answers": 78,
+   "used_all_5_rounds": 91,
+   "empty_answer": 0
+  },
+  "novel-generated": {
+   "n": 79,
+   "C": 17,
+   "S": 0,
+   "P": 2,
+   "W": 60,
+   "with_final_answer": 25,
+   "C_among_final_answers": 17,
+   "used_all_5_rounds": 64,
+   "empty_answer": 0
+  }
+ },
+ "by_type_and_set": {
+  "original/domain-relevant": {
+   "n": 50,
+   "C": 12,
+   "S": 0,
+   "P": 5,
+   "W": 33,
+   "with_final_answer": 19,
+   "C_among_final_answers": 12,
+   "used_all_5_rounds": 32,
+   "empty_answer": 0
+  },
+  "original/metrics-generated": {
+   "n": 50,
+   "C": 21,
+   "S": 0,
+   "P": 0,
+   "W": 29,
+   "with_final_answer": 24,
+   "C_among_final_answers": 21,
+   "used_all_5_rounds": 35,
+   "empty_answer": 0
+  },
+  "original/novel-generated": {
+   "n": 50,
+   "C": 8,
+   "S": 0,
+   "P": 1,
+   "W": 41,
+   "with_final_answer": 15,
+   "C_among_final_answers": 8,
+   "used_all_5_rounds": 41,
+   "empty_answer": 0
+  },
+  "outsample/domain-relevant": {
+   "n": 21,
+   "C": 12,
+   "S": 0,
+   "P": 0,
+   "W": 9,
+   "with_final_answer": 13,
+   "C_among_final_answers": 12,
+   "used_all_5_rounds": 10,
+   "empty_answer": 0
+  },
+  "outsample/metrics-generated": {
+   "n": 100,
+   "C": 57,
+   "S": 1,
+   "P": 0,
+   "W": 42,
+   "with_final_answer": 63,
+   "C_among_final_answers": 57,
+   "used_all_5_rounds": 56,
+   "empty_answer": 0
+  },
+  "outsample/novel-generated": {
+   "n": 29,
+   "C": 9,
+   "S": 0,
+   "P": 1,
+   "W": 19,
+   "with_final_answer": 10,
+   "C_among_final_answers": 9,
+   "used_all_5_rounds": 23,
+   "empty_answer": 0
+  }
+ },
+ "not_correct": [
+  {
+   "id": "train-2",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-3",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-4",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-5",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-6",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-7",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-8",
+   "label": "P",
+   "rule": "9.4-4",
+   "final_answer": true
+  },
+  {
+   "id": "train-9",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-10",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-12",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-14",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-15",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-17",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-18",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-23",
+   "label": "W",
+   "rule": 13,
+   "final_answer": true
+  },
+  {
+   "id": "train-24",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-25",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-26",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-27",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-28",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-29",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-33",
+   "label": "P",
+   "rule": 19,
+   "final_answer": true
+  },
+  {
+   "id": "train-35",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-37",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-40",
+   "label": "P",
+   "rule": 19,
+   "final_answer": true
+  },
+  {
+   "id": "train-41",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-42",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-44",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "train-45",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-46",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-48",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-49",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "train-51",
+   "label": "P",
+   "rule": "9.4-4",
+   "final_answer": true
+  },
+  {
+   "id": "train-52",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-54",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-55",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-56",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-58",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-59",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-60",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-61",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-62",
+   "label": "W",
+   "rule": 14,
+   "final_answer": true
+  },
+  {
+   "id": "train-63",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-64",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "train-65",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-66",
+   "label": "W",
+   "rule": 13,
+   "final_answer": true
+  },
+  {
+   "id": "train-69",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-71",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-73",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-74",
+   "label": "P",
+   "rule": "9.4-4",
+   "final_answer": true
+  },
+  {
+   "id": "train-76",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-77",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-78",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-79",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-80",
+   "label": "W",
+   "rule": 14,
+   "final_answer": true
+  },
+  {
+   "id": "train-82",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-85",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-86",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-87",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-88",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-89",
+   "label": "W",
+   "rule": 13,
+   "final_answer": true
+  },
+  {
+   "id": "train-90",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "train-91",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-92",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-93",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-96",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-98",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-99",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-100",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-101",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-104",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-105",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-107",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-108",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-109",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-110",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-111",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-113",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "train-115",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "train-117",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-119",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-120",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-121",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-122",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-123",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-124",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-125",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-126",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-127",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-128",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-129",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-130",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-132",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-133",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-134",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-136",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-137",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-138",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-139",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-140",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-141",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-142",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-143",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-144",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-145",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-146",
+   "label": "P",
+   "rule": 15,
+   "final_answer": true
+  },
+  {
+   "id": "train-148",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-149",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "train-150",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-1",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-3",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-5",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-8",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-9",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-12",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-16",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-17",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-18",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-20",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-21",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-25",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-26",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-27",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-28",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-31",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-32",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "out-33",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-34",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-35",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-36",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-38",
+   "label": "S",
+   "rule": 1,
+   "final_answer": true
+  },
+  {
+   "id": "out-39",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-40",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-43",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-44",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-47",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-49",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-50",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "out-59",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-61",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-67",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-68",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-71",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-79",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-82",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-83",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-84",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-85",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-87",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-90",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-92",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-94",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-96",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-97",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-99",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-101",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-102",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-103",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-104",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "out-105",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "out-114",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-116",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-118",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-120",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-121",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-122",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-124",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-126",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-127",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-128",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-129",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "out-130",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-131",
+   "label": "W",
+   "rule": 6,
+   "final_answer": true
+  },
+  {
+   "id": "out-132",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-133",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-140",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-141",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-142",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-145",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-147",
+   "label": "W",
+   "rule": 13,
+   "final_answer": false
+  },
+  {
+   "id": "out-150",
+   "label": "P",
+   "rule": "9.4-4",
+   "final_answer": true
+  }
+ ],
+ "errors": 0,
+ "seconds_per_question": {
+  "mean": 73.2,
+  "median": 64.7,
+  "max": 294.9
+ },
+ "usage": {
+  "train": {
+   "calls": 980,
+   "prompt_tokens": 1538862,
+   "completion_tokens": 1026200,
+   "reasoning_tokens": 605056,
+   "total_tokens": 2565062,
+   "capped_replies": 12
+  },
+  "out": {
+   "calls": 940,
+   "prompt_tokens": 1413626,
+   "completion_tokens": 793525,
+   "reasoning_tokens": 479744,
+   "total_tokens": 2207151,
+   "capped_replies": 6
+  },
+  "rerun": {
+   "calls": 28,
+   "prompt_tokens": 70782,
+   "completion_tokens": 35820,
+   "reasoning_tokens": 17088,
+   "total_tokens": 106602,
+   "capped_replies": 0
+  },
+  "trials": {
+   "calls": 106,
+   "prompt_tokens": 178096,
+   "completion_tokens": 113408,
+   "reasoning_tokens": 61408,
+   "total_tokens": 291504,
+   "capped_replies": 5
+  },
+  "final_runs_total_tokens": 4878815
+ }
+}
