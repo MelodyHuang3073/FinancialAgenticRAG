@@ -43,3 +43,10 @@ def test_long_table_one_row_per_cell_with_page_unit_and_default():
 
 def test_company_for_tolerates_date_decoration():
     assert company_for("PEPSICO_2023_8K_dated-2023-05-30", ["PEPSICO_2023_8K_2023-05-30"]) == "PEPSICO_2023_8K_2023-05-30"
+
+
+def test_build_index_skips_filings_that_already_have_both_databases(tmp_path):
+    from baselines.tablerag_google.build_index import missing_tables
+    for name in ("schema_db_10000_A", "cell_db_10000_A", "schema_db_10000_B"):
+        (tmp_path / name).mkdir()
+    assert missing_tables(str(tmp_path), ["A", "B", "C"]) == ["B", "C"]
