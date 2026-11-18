@@ -97,8 +97,8 @@
  },
  {
   "doc_name": "AMAZON_2025_10K",
-  "question": "How many segments has Amazon organized its operations into as of FY2025, and what are they?",
-  "answer": "Three segments: North America, International, and Amazon Web Services (AWS).",
+  "question": "How many shares of Amazon common stock were outstanding as of January 28, 2026 (the date given on the cover of its FY2025 10-K)?",
+  "answer": "10,734,920,870 shares.",
   "question_type": "novel-generated"
  },
  {
@@ -157,8 +157,8 @@
  },
  {
   "doc_name": "AMD_2025_10K",
-  "question": "What are AMD's reportable segments as of FY2025?",
-  "answer": "Three reportable segments: Data Center, Client and Gaming, and Embedded (plus an All Other category that is not a reportable segment).",
+  "question": "How much remained available under AMD's stock repurchase program at the end of FY2025 (December 27, 2025)?",
+  "answer": "$9.4 billion remained available under the program, which authorizes repurchases of up to $14 billion of common stock.",
   "question_type": "novel-generated"
  },
  {
@@ -277,8 +277,8 @@
  },
  {
   "doc_name": "COCACOLA_2025_10K",
-  "question": "What are the operating segments of Coca-Cola as of FY2025?",
-  "answer": "EMEA, Latin America, North America, Asia Pacific and Bottling Investments (the first four are the geographic operating segments); Corporate is reported separately.",
+  "question": "Of the estimated beverage servings consumed worldwide every day, how many bear trademarks owned by or licensed to Coca-Cola?",
+  "answer": "About 2.2 billion of the estimated 65 billion servings of all beverages consumed worldwide every day.",
   "question_type": "novel-generated"
  },
  {
@@ -319,8 +319,8 @@
  },
  {
   "doc_name": "CORNING_2025_10K",
-  "question": "What are Corning's reportable segments as of FY2025?",
-  "answer": "Five reportable segments: Optical Communications, Display, Specialty Materials, Automotive and Life Sciences.",
+  "question": "What share of Corning's total segment net sales did its Optical Communications segment represent in 2025?",
+  "answer": "38% (the Display segment represented 23%).",
   "question_type": "novel-generated"
  },
  {
@@ -385,8 +385,8 @@
  },
  {
   "doc_name": "CVSHEALTH_2025_10K",
-  "question": "What are the reportable segments of CVS Health as of FY2025?",
-  "answer": "Four reportable segments: Health Care Benefits, Health Services, Pharmacy & Consumer Wellness, and Corporate/Other.",
+  "question": "Roughly how many retail pharmacies are in CVS Health's national pharmacy network, and how do they split between chain and independent?",
+  "answer": "Approximately 63,000 retail pharmacies: about 34,500 chain pharmacies (including CVS pharmacy locations) and about 28,500 independent pharmacies.",
   "question_type": "novel-generated"
  },
  {
@@ -427,8 +427,8 @@
  },
  {
   "doc_name": "JOHNSON_JOHNSON_2025_10K",
-  "question": "How many business segments is Johnson & Johnson organized into as of FY2025, and what are they?",
-  "answer": "Two business segments: Innovative Medicine and MedTech.",
+  "question": "What share of Johnson & Johnson's total gross revenues did its three largest wholesalers represent in 2025?",
+  "answer": "The three wholesalers distributing products for both segments represented approximately 21.8%, 15.5% and 11.1% of total gross revenues in 2025 (versus 20.5%, 15.6% and 12.3% in 2024).",
   "question_type": "novel-generated"
  },
  {
@@ -463,8 +463,8 @@
  },
  {
   "doc_name": "JPMORGAN_2025_10K",
-  "question": "What reportable business segments does JPMorgan Chase have as of FY2025?",
-  "answer": "Three reportable business segments: Consumer & Community Banking (CCB), Commercial & Investment Bank (CIB) and Asset & Wealth Management (AWM), with the remaining activities in Corporate.",
+  "question": "How large was JPMorgan Chase's common share repurchase authorization through June 30, 2025, and when was the program announced?",
+  "answer": "Up to $30 billion of common shares, under the repurchase program announced on June 28, 2024.",
   "question_type": "novel-generated"
  },
  {
@@ -607,8 +607,8 @@
  },
  {
   "doc_name": "MICROSOFT_2025_10K",
-  "question": "What segments does Microsoft report its financial performance in as of fiscal 2025?",
-  "answer": "Three segments: Productivity and Business Processes, Intelligent Cloud, and More Personal Computing.",
+  "question": "How many shares of Microsoft common stock were outstanding as of July 24, 2025, according to its fiscal 2025 10-K?",
+  "answer": "7,433,166,379 shares.",
   "question_type": "novel-generated"
  },
  {
@@ -847,8 +847,8 @@
  },
  {
   "doc_name": "VERIZON_2025_10K",
-  "question": "What are Verizon's reportable segments as of FY2025?",
-  "answer": "Two reportable segments: Verizon Consumer Group (Consumer) and Verizon Business Group (Business).",
+  "question": "What change did Verizon's Board of Directors make to the quarterly dividend in the third quarter of 2025?",
+  "answer": "It increased the quarterly dividend payment by 1.8% to $0.6900 per share from $0.6775 in the preceding quarter, the nineteenth consecutive year of a quarterly dividend increase.",
   "question_type": "novel-generated"
  },
  {
