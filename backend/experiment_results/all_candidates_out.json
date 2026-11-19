@@ -1,602 +1,602 @@
 [
  {
   "doc": "3M_2025_10K",
-  "q": "What is 3M's FY2025 net profit margin (net income / net sales)? Round to one decimal place."
+  "q": "How much did 3M spend on purchases of property, plant and equipment (capital expenditures) in FY2025? Answer in USD millions. Compute or extract the answer by primarily using the details outlined in the statement of cash flows."
  },
  {
   "doc": "3M_2025_10K",
-  "q": "What is 3M's FY2025 current ratio (total current assets / total current liabilities)? Round to two decimal places."
+  "q": "By how many percentage points did 3M's effective tax rate move from FY2024 to FY2025?"
  },
  {
   "doc": "3M_2025_10K",
-  "q": "Did 3M's net income grow at the same rate as its net sales in FY2025? What does this imply about the company's profitability trend?"
- },
- {
-  "doc": "AMD_2025_10K",
-  "q": "What is AMD's FY2025 gross margin (gross profit / net revenue)? Round to one decimal place."
- },
- {
-  "doc": "AMD_2025_10K",
-  "q": "What was AMD's research and development expense as a percent of net revenue in FY2025? Round to one decimal place."
- },
- {
-  "doc": "AMD_2025_10K",
-  "q": "Which AMD reporting segment was the only one to decline in FY2025, and by how much?"
- },
- {
-  "doc": "MICROSOFT_2025_10K",
-  "q": "What is Microsoft's FY2025 operating margin (operating income / revenue)? Round to one decimal place."
- },
- {
-  "doc": "MICROSOFT_2025_10K",
-  "q": "What is Microsoft's FY2025 return on equity (net income / average total stockholders' equity between FY2024 and FY2025)? Round to two decimal places."
- },
- {
-  "doc": "MICROSOFT_2025_10K",
-  "q": "Which grew faster for Microsoft in FY2025: Product revenue or Service and other revenue? What does this suggest about Microsoft's business mix?"
- },
- {
-  "doc": "PEPSICO_2025_10K",
-  "q": "What is PepsiCo's FY2025 gross margin (gross profit / net revenue)? Round to one decimal place."
- },
- {
-  "doc": "PEPSICO_2025_10K",
-  "q": "Did PepsiCo's net income increase or decrease in FY2025 despite revenue growth, and what primarily drove this?"
- },
- {
-  "doc": "PEPSICO_2025_10K",
-  "q": "What was PepsiCo's impairment of intangible assets in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMCOR_2025_10K",
-  "q": "What is Amcor's FY2025 gross margin (gross profit / net sales)? Round to one decimal place."
- },
- {
-  "doc": "AMCOR_2025_10K",
-  "q": "Amcor's net sales grew in FY2025 but net income declined sharply -- what happened?"
- },
- {
-  "doc": "AMCOR_2025_10K",
-  "q": "What major corporate transaction did Amcor complete in FY2025?"
- },
- {
-  "doc": "AMCOR_2025_10K",
-  "q": "What was Amcor's restructuring and transaction costs in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AES_2025_10K",
-  "q": "What is AES's FY2025 gross margin (Operating Margin / Revenues, as presented in the income statement)? Round to one decimal place."
- },
- {
-  "doc": "AES_2025_10K",
-  "q": "What were AES's FY2025 revenues compared to FY2024?"
- },
- {
-  "doc": "AES_2025_10K",
-  "q": "What was AES's asset impairment expense in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AES_2025_10K",
-  "q": "What was AES's net income attributable to the parent company in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMAZON_2025_10K",
-  "q": "What is Amazon's FY2025 operating margin (operating income / total net sales)? Round to one decimal place."
- },
- {
-  "doc": "AMAZON_2025_10K",
-  "q": "What was Amazon's net income in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMAZON_2025_10K",
-  "q": "What was Amazon's total net sales growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMAZON_2025_10K",
-  "q": "Which grew faster for Amazon in FY2025: net product sales or net service sales?"
- },
- {
-  "doc": "AMAZON_2025_10K",
-  "q": "What drove the large increase in Amazon's \"Other income (expense), net\" in FY2025?"
- },
- {
-  "doc": "BOEING_2025_10K",
-  "q": "Did Boeing return to profitability in FY2025?"
- },
- {
-  "doc": "BOEING_2025_10K",
-  "q": "What was Boeing's total revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "BOEING_2025_10K",
-  "q": "What is Boeing's FY2025 gross margin (gross profit / total revenues)? Round to one decimal place."
- },
- {
-  "doc": "BOEING_2025_10K",
-  "q": "What was Boeing's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "BOEING_2025_10K",
-  "q": "What were Boeing's sales of products compared to sales of services in FY2025?"
- },
- {
-  "doc": "JOHNSON_JOHNSON_2025_10K",
-  "q": "What is Johnson & Johnson's FY2025 gross margin (gross profit / sales to customers)? Round to one decimal place."
- },
- {
-  "doc": "JOHNSON_JOHNSON_2025_10K",
-  "q": "What was Johnson & Johnson's sales growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "JOHNSON_JOHNSON_2025_10K",
-  "q": "Johnson & Johnson's net earnings nearly doubled in FY2025 compared to FY2024, far outpacing sales growth -- what primarily drove this?"
- },
- {
-  "doc": "JOHNSON_JOHNSON_2025_10K",
-  "q": "What was Johnson & Johnson's total debt (short-term borrowings + long-term debt) in FY2025 compared to FY2024?"
- },
- {
-  "doc": "JOHNSON_JOHNSON_2025_10K",
-  "q": "What was Johnson & Johnson's research and development expense in FY2025 compared to FY2024?"
- },
- {
-  "doc": "ADOBE_2025_10K",
-  "q": "What is Adobe's FY2025 gross margin (gross profit / revenue)? Round to one decimal place."
- },
- {
-  "doc": "ADOBE_2025_10K",
-  "q": "What was Adobe's revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "ADOBE_2025_10K",
-  "q": "What was Adobe's net income in FY2025 compared to FY2024?"
- },
- {
-  "doc": "ADOBE_2025_10K",
-  "q": "Adobe's operating income grew much faster than revenue in FY2025 (about 29% vs about 11%) -- what primarily explains this gap?"
- },
- {
-  "doc": "ADOBE_2025_10K",
-  "q": "What portion of Adobe's FY2025 revenue came from subscription revenue versus product and services revenue?"
- },
- {
-  "doc": "AMERICANEXPRESS_2025_10K",
-  "q": "What was American Express's net income in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANEXPRESS_2025_10K",
-  "q": "What were American Express's total revenues net of interest expense (non-interest revenues + net interest income) in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANEXPRESS_2025_10K",
-  "q": "What was American Express's Card Member rewards expense in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANEXPRESS_2025_10K",
-  "q": "What was American Express's provision for credit losses in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANEXPRESS_2025_10K",
-  "q": "American Express's diluted EPS grew faster than net income in FY2025 (about 9.8% vs about 6.9%) -- what explains the gap?"
- },
- {
-  "doc": "JPMORGAN_2025_10K",
-  "q": "What was JPMorgan Chase's total net revenue in FY2025 compared to FY2024?"
- },
- {
-  "doc": "JPMORGAN_2025_10K",
-  "q": "JPMorgan Chase's net income declined slightly in FY2025 despite revenue growth -- what primarily drove this?"
- },
- {
-  "doc": "JPMORGAN_2025_10K",
-  "q": "What was JPMorgan Chase's provision for credit losses in FY2025 compared to FY2024?"
- },
- {
-  "doc": "JPMORGAN_2025_10K",
-  "q": "JPMorgan Chase's diluted EPS increased in FY2025 even though net income declined -- what explains this?"
- },
- {
-  "doc": "JPMORGAN_2025_10K",
-  "q": "What were JPMorgan Chase's investment banking fees in FY2025 compared to FY2024?"
- },
- {
-  "doc": "NIKE_2025_10K",
-  "q": "What was Nike's revenue in FY2025 compared to FY2024?"
- },
- {
-  "doc": "NIKE_2025_10K",
-  "q": "What was Nike's net income in FY2025 compared to FY2024?"
- },
- {
-  "doc": "NIKE_2025_10K",
-  "q": "What is Nike's FY2025 gross margin (gross profit / revenues)? Round to one decimal place."
- },
- {
-  "doc": "NIKE_2025_10K",
-  "q": "Nike's net income declined much faster than its revenue in FY2025 (about 43.5% vs about 9.8%) -- what does this imply?"
- },
- {
-  "doc": "NIKE_2025_10K",
-  "q": "What was Nike's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "WALMART_2025_10K",
-  "q": "What was Walmart's total revenue growth rate in fiscal year 2025 (ended January 31, 2025) compared to fiscal year 2024?"
- },
- {
-  "doc": "WALMART_2025_10K",
-  "q": "What is Walmart's fiscal 2025 operating margin (operating income / total revenues)? Round to one decimal place."
- },
- {
-  "doc": "WALMART_2025_10K",
-  "q": "What was Walmart's net income attributable to Walmart in fiscal 2025 compared to fiscal 2024?"
- },
- {
-  "doc": "WALMART_2025_10K",
-  "q": "Walmart's net income grew much faster than revenue in fiscal 2025 (about 25% vs about 5%) -- what primarily explains this gap?"
- },
- {
-  "doc": "WALMART_2025_10K",
-  "q": "What dividend per share did Walmart declare in fiscal 2025 compared to fiscal 2024?"
- },
- {
-  "doc": "COSTCO_2025_10K",
-  "q": "What was Costco's total revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "COSTCO_2025_10K",
-  "q": "What was Costco's net income in FY2025 compared to FY2024?"
- },
- {
-  "doc": "COSTCO_2025_10K",
-  "q": "What were Costco's membership fees in FY2025 compared to FY2024?"
- },
- {
-  "doc": "COSTCO_2025_10K",
-  "q": "What is Costco's FY2025 operating margin (operating income / total revenue)? Round to one decimal place."
- },
- {
-  "doc": "COSTCO_2025_10K",
-  "q": "What was Costco's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "PFIZER_2025_10K",
-  "q": "What were Pfizer's total revenues in FY2025 compared to FY2024?"
- },
- {
-  "doc": "PFIZER_2025_10K",
-  "q": "What was Pfizer's net income attributable to Pfizer shareholders in FY2025 compared to FY2024?"
- },
- {
-  "doc": "PFIZER_2025_10K",
-  "q": "What is Pfizer's FY2025 gross margin ((total revenues - cost of sales) / total revenues)? Round to one decimal place."
- },
- {
-  "doc": "PFIZER_2025_10K",
-  "q": "What was Pfizer's acquired in-process R&D charge in FY2025 compared to FY2024?"
- },
- {
-  "doc": "PFIZER_2025_10K",
-  "q": "What were Pfizer's restructuring charges in FY2025 compared to FY2024?"
- },
- {
-  "doc": "CVSHEALTH_2025_10K",
-  "q": "What was CVS Health's total revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "CVSHEALTH_2025_10K",
-  "q": "What was CVS Health's net income attributable to CVS Health in FY2025 compared to FY2024?"
- },
- {
-  "doc": "CVSHEALTH_2025_10K",
-  "q": "CVS Health's net income declined sharply in FY2025 despite revenue growth -- what primarily drove this?"
- },
- {
-  "doc": "CVSHEALTH_2025_10K",
-  "q": "Did CVS Health record a goodwill impairment charge in FY2025?"
- },
- {
-  "doc": "CVSHEALTH_2025_10K",
-  "q": "What was CVS Health's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "COCACOLA_2025_10K",
-  "q": "What was Coca-Cola's net operating revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "COCACOLA_2025_10K",
-  "q": "What was Coca-Cola's net income attributable to shareowners in FY2025 compared to FY2024?"
- },
- {
-  "doc": "COCACOLA_2025_10K",
-  "q": "What is Coca-Cola's FY2025 gross margin (gross profit / net operating revenues)? Round to one decimal place."
- },
- {
-  "doc": "COCACOLA_2025_10K",
-  "q": "Coca-Cola's net income grew much faster than revenue in FY2025 (about 23% vs about 2%) -- what primarily explains this gap?"
- },
- {
-  "doc": "COCACOLA_2025_10K",
-  "q": "What was Coca-Cola's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "VERIZON_2025_10K",
-  "q": "What was Verizon's operating revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "VERIZON_2025_10K",
-  "q": "What was Verizon's net income attributable to Verizon in FY2025 compared to FY2024?"
- },
- {
-  "doc": "VERIZON_2025_10K",
-  "q": "What is Verizon's FY2025 operating margin (operating income / operating revenues)? Round to one decimal place."
- },
- {
-  "doc": "VERIZON_2025_10K",
-  "q": "What were Verizon's service revenues compared to wireless equipment revenues in FY2025?"
- },
- {
-  "doc": "VERIZON_2025_10K",
-  "q": "What was Verizon's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "GENERALMILLS_2025_10K",
-  "q": "What was General Mills' net sales in fiscal year 2025 (ended May 25, 2025) compared to fiscal year 2024?"
- },
- {
-  "doc": "GENERALMILLS_2025_10K",
-  "q": "What was General Mills' net earnings in fiscal year 2025 compared to fiscal year 2024?"
- },
- {
-  "doc": "GENERALMILLS_2025_10K",
-  "q": "What was General Mills' total debt (current portion of long-term debt + long-term debt) in fiscal 2025 compared to fiscal 2024?"
- },
- {
-  "doc": "GENERALMILLS_2025_10K",
-  "q": "What were General Mills' restructuring and impairment costs in fiscal 2025 compared to fiscal 2024?"
- },
- {
-  "doc": "GENERALMILLS_2025_10K",
-  "q": "What dividends per share did General Mills pay in fiscal 2025 compared to fiscal 2024?"
- },
- {
-  "doc": "KRAFTHEINZ_2025_10K",
-  "q": "What was Kraft Heinz's net sales in FY2025 compared to FY2024?"
- },
- {
-  "doc": "KRAFTHEINZ_2025_10K",
-  "q": "Did Kraft Heinz report a profit or a loss in FY2025, and what primarily drove this?"
- },
- {
-  "doc": "KRAFTHEINZ_2025_10K",
-  "q": "What were Kraft Heinz's goodwill impairment losses in FY2025 compared to FY2024?"
- },
- {
-  "doc": "KRAFTHEINZ_2025_10K",
-  "q": "What is Kraft Heinz's FY2025 gross margin (gross profit / net sales)? Round to one decimal place."
- },
- {
-  "doc": "KRAFTHEINZ_2025_10K",
-  "q": "What was Kraft Heinz's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "LOCKHEEDMARTIN_2025_10K",
-  "q": "What was Lockheed Martin's total sales in FY2025 compared to FY2024?"
- },
- {
-  "doc": "LOCKHEEDMARTIN_2025_10K",
-  "q": "What was Lockheed Martin's net earnings in FY2025 compared to FY2024?"
- },
- {
-  "doc": "LOCKHEEDMARTIN_2025_10K",
-  "q": "What was Lockheed Martin's operating profit in FY2025 compared to FY2024?"
- },
- {
-  "doc": "LOCKHEEDMARTIN_2025_10K",
-  "q": "Lockheed Martin's net earnings declined in FY2025 even though sales and operating profit both grew -- what happened below the operating line?"
- },
- {
-  "doc": "LOCKHEEDMARTIN_2025_10K",
-  "q": "What were Lockheed Martin's Products division sales compared to Services division sales in FY2025?"
- },
- {
-  "doc": "MGMRESORTS_2025_10K",
-  "q": "What was MGM Resorts' total revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "MGMRESORTS_2025_10K",
-  "q": "What was MGM Resorts' net income attributable to MGM in FY2025 compared to FY2024?"
- },
- {
-  "doc": "MGMRESORTS_2025_10K",
-  "q": "MGM Resorts' net income declined sharply in FY2025 despite revenue growth -- what primarily drove this?"
- },
- {
-  "doc": "MGMRESORTS_2025_10K",
-  "q": "What were MGM Resorts' Casino revenue and Rooms revenue in FY2025?"
- },
- {
-  "doc": "MGMRESORTS_2025_10K",
-  "q": "What was MGM Resorts' diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "BESTBUY_2025_10K",
-  "q": "What was Best Buy's revenue in fiscal 2025 (ended February 1, 2025) compared to fiscal 2024?"
- },
- {
-  "doc": "BESTBUY_2025_10K",
-  "q": "What was Best Buy's net earnings in fiscal 2025 compared to fiscal 2024?"
- },
- {
-  "doc": "BESTBUY_2025_10K",
-  "q": "Did Best Buy record a goodwill impairment charge in fiscal 2025?"
- },
- {
-  "doc": "BESTBUY_2025_10K",
-  "q": "What is Best Buy's fiscal 2025 gross margin (gross profit / revenue)? Round to one decimal place."
- },
- {
-  "doc": "BESTBUY_2025_10K",
-  "q": "What was Best Buy's diluted EPS in fiscal 2025 compared to fiscal 2024?"
- },
- {
-  "doc": "BLOCK_2025_10K",
-  "q": "What was Block's total net revenue in FY2025 compared to FY2024?"
- },
- {
-  "doc": "BLOCK_2025_10K",
-  "q": "What was Block's operating income in FY2025 compared to FY2024?"
- },
- {
-  "doc": "BLOCK_2025_10K",
-  "q": "Block's operating income nearly doubled in FY2025 while net income fell by more than half -- what does this divergence most likely indicate?"
- },
- {
-  "doc": "BLOCK_2025_10K",
-  "q": "What was Block's Bitcoin Ecosystem segment revenue in FY2025 compared to FY2024?"
- },
- {
-  "doc": "BLOCK_2025_10K",
-  "q": "What was Block's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANWATERWORKS_2025_10K",
-  "q": "What was American Water Works' operating revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANWATERWORKS_2025_10K",
-  "q": "What was American Water Works' net income attributable to common shareholders in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANWATERWORKS_2025_10K",
-  "q": "What is American Water Works' FY2025 operating margin (operating income / operating revenues)? Round to one decimal place."
- },
- {
-  "doc": "AMERICANWATERWORKS_2025_10K",
-  "q": "What was American Water Works' interest expense in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANWATERWORKS_2025_10K",
-  "q": "What were American Water Works' short-term debt and current portion of long-term debt combined in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANWATERWORKS_2025_10K",
-  "q": "What was American Water Works' diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "AMERICANWATERWORKS_2025_10K",
-  "q": "American Water Works' net income grew more slowly than revenue in FY2025 (about 5.7% vs about 9.7%) -- what is a likely contributing factor?"
- },
- {
-  "doc": "FOOTLOCKER_2025_10K",
-  "q": "What was Foot Locker's total revenue in fiscal 2024 (ended February 1, 2025) compared to fiscal 2023?"
- },
- {
-  "doc": "FOOTLOCKER_2025_10K",
-  "q": "Did Foot Locker return to profitability in fiscal 2024, and what primarily drove the turnaround?"
- },
- {
-  "doc": "FOOTLOCKER_2025_10K",
-  "q": "What was Foot Locker's income from operations in fiscal 2024 compared to fiscal 2023?"
- },
- {
-  "doc": "FOOTLOCKER_2025_10K",
-  "q": "What were Foot Locker's impairment and other charges in fiscal 2024 compared to fiscal 2023?"
- },
- {
-  "doc": "FOOTLOCKER_2025_10K",
-  "q": "What was Foot Locker's diluted EPS in fiscal 2024 compared to fiscal 2023?"
- },
- {
-  "doc": "ULTABEAUTY_2025_10K",
-  "q": "What was Ulta Beauty's net sales growth rate in fiscal 2025 (ended January 31, 2026) compared to the prior fiscal year?"
- },
- {
-  "doc": "ULTABEAUTY_2025_10K",
-  "q": "What was Ulta Beauty's operating income in fiscal 2025 compared to the prior fiscal year?"
- },
- {
-  "doc": "ULTABEAUTY_2025_10K",
-  "q": "Ulta Beauty's operating income declined slightly in fiscal 2025 despite strong net sales growth -- what primarily explains this?"
- },
- {
-  "doc": "ULTABEAUTY_2025_10K",
-  "q": "What was Ulta Beauty's net income in fiscal 2025 compared to the prior fiscal year?"
- },
- {
-  "doc": "ULTABEAUTY_2025_10K",
-  "q": "What was Ulta Beauty's diluted EPS in fiscal 2025 compared to the prior fiscal year, and why did it move in the opposite direction of net income?"
- },
- {
-  "doc": "ULTABEAUTY_2025_10K",
-  "q": "What is Ulta Beauty's fiscal 2025 gross margin (gross profit / net sales)? Round to one decimal place."
- },
- {
-  "doc": "NETFLIX_2025_10K",
-  "q": "What was Netflix's revenue growth rate in FY2025 compared to FY2024?"
- },
- {
-  "doc": "NETFLIX_2025_10K",
-  "q": "What was Netflix's net income in FY2025 compared to FY2024?"
- },
- {
-  "doc": "NETFLIX_2025_10K",
-  "q": "What is Netflix's FY2025 operating margin (operating income / revenues)? Round to one decimal place."
- },
- {
-  "doc": "NETFLIX_2025_10K",
-  "q": "Netflix's net income grew faster than its revenue in FY2025 (about 26% vs about 16%) -- what does this imply about operating margin?"
- },
- {
-  "doc": "NETFLIX_2025_10K",
-  "q": "What was Netflix's diluted EPS in FY2025 compared to FY2024?"
- },
- {
-  "doc": "NETFLIX_2025_10K",
-  "q": "What was Netflix's technology and development expense in FY2025 compared to FY2024?"
+  "q": "Did 3M's cash dividends paid decrease in FY2025 compared with FY2024?"
  },
  {
   "doc": "3M_2025_10K",
-  "q": "What was 3M's total assets at the end of FY2025 compared to FY2024?"
+  "q": "What drove 3M's operating margin change as of FY2025?"
  },
  {
-  "doc": "AMAZON_2025_10K",
-  "q": "Did Amazon's cost of sales grow faster or slower than its total net sales in FY2025, and what does that imply?"
+  "doc": "3M_2025_10K",
+  "q": "How many shares of 3M common stock were outstanding as of January 31, 2026?"
  },
  {
   "doc": "ADOBE_2025_10K",
-  "q": "What was Adobe's research and development expense as a percent of revenue in FY2025? Round to one decimal place."
+  "q": "Using Adobe's balance sheet and cash flow statement, what is the fiscal 2025 operating cash flow ratio, defined as cash from operations divided by total current liabilities? Round to two decimal places."
+ },
+ {
+  "doc": "ADOBE_2025_10K",
+  "q": "What is Adobe's quick ratio at the end of fiscal 2025? If the quick ratio is not something a financial analyst would ask about a company like this, state that and explain why. Round your answer to two decimal places."
+ },
+ {
+  "doc": "ADOBE_2025_10K",
+  "q": "Does Adobe have an improving free cash flow conversion as of FY2025? Use net income as the denominator."
+ },
+ {
+  "doc": "ADOBE_2025_10K",
+  "q": "What reportable segments did Adobe have in fiscal 2025?"
+ },
+ {
+  "doc": "AES_2025_10K",
+  "q": "Does AES Corporation need a heavy asset base to operate in FY2025? Answer using capital spending and asset ratios."
+ },
+ {
+  "doc": "AES_2025_10K",
+  "q": "On the cover page of AES Corporation's FY2025 10-K, which notes (if any) are listed as registered on a national exchange in addition to common stock?"
+ },
+ {
+  "doc": "AES_2025_10K",
+  "q": "Where are AES Corporation's principal executive offices located?"
+ },
+ {
+  "doc": "AMAZON_2025_10K",
+  "q": "How much accounts payable did Amazon report on its FY2025 year-end balance sheet? Give the figure in USD millions."
+ },
+ {
+  "doc": "AMAZON_2025_10K",
+  "q": "Calculate Amazon's FY2025 asset turnover from the balance sheet and income statement: revenue divided by the average of FY2024 and FY2025 total assets. Round to two decimal places."
+ },
+ {
+  "doc": "AMAZON_2025_10K",
+  "q": "At the end of FY2025, was Amazon's working capital positive or negative? If working capital is not a meaningful measure for this company, say so and explain why."
+ },
+ {
+  "doc": "AMAZON_2025_10K",
+  "q": "Is Amazon's operating margin higher in FY2025 than in FY2024? If operating margin is not a meaningful measure for a company like Amazon, say so and explain why."
+ },
+ {
+  "doc": "AMAZON_2025_10K",
+  "q": "How many shares of Amazon common stock were outstanding as of January 28, 2026 (the date given on the cover of its FY2025 10-K)?"
+ },
+ {
+  "doc": "AMAZON_2025_10K",
+  "q": "Roughly how many full-time and part-time employees did Amazon have as of December 31, 2025?"
+ },
+ {
+  "doc": "AMCOR_2025_10K",
+  "q": "List the notes Amcor has registered on a securities exchange as of FY2025, other than its common stock; say if there are none."
+ },
+ {
+  "doc": "AMCOR_2025_10K",
+  "q": "What major corporate transaction did Amcor complete in fiscal 2025, and on what terms?"
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "Answer the following question as if you are an equity research analyst and have lost internet connection so you do not have access to financial metric providers. According to the details clearly outlined within the balance sheet, what is AMD's total stockholders' equity at the end of FY2025? Answer in USD millions."
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "What is AMD's FY2025 return on equity (ROE)? ROE is defined as: FY2025 net income / (average total stockholders' equity between FY2024 and FY2025). Round your answer to two decimal places. Base your answer on the balance sheet and the income statement."
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "Over the two years from FY2023 to FY2025, what compound annual growth rate did AMD's total revenue achieve? Use the income statement and give the rate in percent to one decimal place."
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "What is AMD's quick ratio at the end of FY2025? If the quick ratio is not something a financial analyst would ask about a company like this, state that and explain why. Round your answer to two decimal places."
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "Would you classify AMD as a high-growth company on its FY2025 results?"
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "Why did AMD's revenue change in FY2025, and which segments drove the change?"
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "How much remained available under AMD's stock repurchase program at the end of FY2025 (December 27, 2025)?"
+ },
+ {
+  "doc": "AMD_2025_10K",
+  "q": "Where are AMD's principal executive offices located?"
  },
  {
   "doc": "AMERICANEXPRESS_2025_10K",
-  "q": "What was American Express's total interest income in FY2025 compared to FY2024?"
+  "q": "What is American Express's FY2025 return on equity (ROE)? ROE is defined as: FY2025 net income / (average total shareholders' equity between FY2024 and FY2025). Round your answer to two decimal places. Base your answer on the balance sheet and the income statement."
+ },
+ {
+  "doc": "AMERICANEXPRESS_2025_10K",
+  "q": "Did American Express's net income grow in FY2025 compared with FY2024?"
+ },
+ {
+  "doc": "AMERICANEXPRESS_2025_10K",
+  "q": "Where are American Express's principal executive offices located?"
+ },
+ {
+  "doc": "AMERICANWATERWORKS_2025_10K",
+  "q": "What is American Water Works' working capital (total current assets less total current liabilities) at the end of FY2025, and is it positive or negative?"
+ },
+ {
+  "doc": "AMERICANWATERWORKS_2025_10K",
+  "q": "Of American Water Works's three cash flow categories in FY2025 (operating, investing, financing), which contributed the most cash or drained the least?"
+ },
+ {
+  "doc": "BESTBUY_2025_10K",
+  "q": "Compute Best Buy's cash conversion cycle for fiscal 2025 as DIO + DSO - DPO, where DIO = 365 x average inventory (fiscal 2024 and fiscal 2025) / fiscal 2025 COGS; DSO = 365 x average accounts receivable (same two years) / fiscal 2025 revenue; and DPO = 365 x average accounts payable (same two years) / (fiscal 2025 COGS + change in inventory between fiscal 2024 and fiscal 2025). Use the balance sheet and income statement and round to two decimal places."
+ },
+ {
+  "doc": "BESTBUY_2025_10K",
+  "q": "Did Best Buy's revenue decline in fiscal 2025 (ended February 1, 2025) compared with fiscal 2024?"
+ },
+ {
+  "doc": "BESTBUY_2025_10K",
+  "q": "What drove the change in Best Buy's Domestic segment revenue in fiscal 2025?"
+ },
+ {
+  "doc": "BESTBUY_2025_10K",
+  "q": "How many Domestic stores did Best Buy have at the end of fiscal 2025 (ended February 1, 2025)?"
+ },
+ {
+  "doc": "BESTBUY_2025_10K",
+  "q": "How many Best Buy stores did the company have in Canada at the end of fiscal 2025 (ended February 1, 2025)?"
+ },
+ {
+  "doc": "BLOCK_2025_10K",
+  "q": "How much cash did Block (formerly known as Square) generate from operating activities in FY2025? Read it from the cash flow statement and answer in USD millions."
+ },
+ {
+  "doc": "BLOCK_2025_10K",
+  "q": "Did Block's net income decline in FY2025 compared with FY2024?"
+ },
+ {
+  "doc": "BLOCK_2025_10K",
+  "q": "Where are Block's principal executive offices located?"
+ },
+ {
+  "doc": "COCACOLA_2025_10K",
+  "q": "How much cash did Coca-Cola use in (or generate from) financing activities in FY2025? Address the question by using the statement of cash flows and answer in USD millions; if cash was used, say so."
+ },
+ {
+  "doc": "COCACOLA_2025_10K",
+  "q": "Compute Coca-Cola's FY2025 return on assets as net income divided by the average of FY2024 and FY2025 total assets, using the balance sheet and income statement. Round to two decimal places."
+ },
+ {
+  "doc": "COCACOLA_2025_10K",
+  "q": "Using the cash flow statement and income statement, what share of net income attributable to shareholders did Coca-Cola pay out as cash dividends in FY2025 (the dividend payout ratio)? Round to two decimal places."
+ },
+ {
+  "doc": "COCACOLA_2025_10K",
+  "q": "Has Coca-Cola grown the cash dividends it pays steadily over FY2023 to FY2025?"
+ },
+ {
+  "doc": "COCACOLA_2025_10K",
+  "q": "What drove operating income and operating margin change as of FY2025 for Coca-Cola?"
+ },
+ {
+  "doc": "COCACOLA_2025_10K",
+  "q": "Of the estimated beverage servings consumed worldwide every day, how many bear trademarks owned by or licensed to Coca-Cola?"
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "What was Corning's inventory balance at the end of FY2025 according to its balance sheet? Answer in USD millions."
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "What was Corning's return on assets in FY2025, measured as net income divided by the average of FY2024 and FY2025 total assets? Use the balance sheet and income statement and round to two decimal places."
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "By what percentage did Corning's operating income change from FY2024 to FY2025? Use the income statement and round to one decimal place."
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "What was Corning's effective tax rate in FY2024 and in FY2025, and how much did it change?"
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "On FY2025 revenue growth, is Corning a high-growth company?"
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "What drove Corning's net sales growth in FY2025?"
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "What share of Corning's total segment net sales did its Optical Communications segment represent in 2025?"
+ },
+ {
+  "doc": "CORNING_2025_10K",
+  "q": "In how many countries does Corning manufacture products as of FY2025?"
+ },
+ {
+  "doc": "COSTCO_2025_10K",
+  "q": "At the end of fiscal 2025 (August 31, 2025), what were Costco's total assets according to the balance sheet? Answer in USD millions."
+ },
+ {
+  "doc": "COSTCO_2025_10K",
+  "q": "Using the balance sheet and income statement, calculate Costco's fiscal 2025 inventory turnover as COGS divided by the average of fiscal 2024 and fiscal 2025 inventory. Round to two decimal places."
+ },
+ {
+  "doc": "COSTCO_2025_10K",
+  "q": "Averaged over fiscal 2023 through fiscal 2025, what was Costco's net profit margin? Use the income statement and give the average in percent to one decimal place."
+ },
+ {
+  "doc": "COSTCO_2025_10K",
+  "q": "Roughly how many times did Costco's fiscal 2025 operating income cover its interest expense?"
+ },
+ {
+  "doc": "COSTCO_2025_10K",
+  "q": "Looking at recent years, is Costco's gross margin steady (within roughly 2 percentage points year to year)? If the metric is not relevant for a company like Costco, explain why instead."
+ },
+ {
+  "doc": "COSTCO_2025_10K",
+  "q": "How many warehouses did Costco operate worldwide at the end of fiscal 2025 (August 31, 2025)?"
+ },
+ {
+  "doc": "COSTCO_2025_10K",
+  "q": "How many paid members did Costco have at the end of fiscal 2025?"
+ },
+ {
+  "doc": "CVSHEALTH_2025_10K",
+  "q": "From the balance sheet alone, what is CVS Health's FY2025 working capital ratio (total current assets divided by total current liabilities)? Round to two decimal places."
+ },
+ {
+  "doc": "CVSHEALTH_2025_10K",
+  "q": "Is CVS Health's working capital positive on FY2025 data? If the metric is not useful for a business like this, explain why instead."
+ },
+ {
+  "doc": "CVSHEALTH_2025_10K",
+  "q": "Roughly how many retail pharmacies are in CVS Health's national pharmacy network, and how do they split between chain and independent?"
+ },
+ {
+  "doc": "CVSHEALTH_2025_10K",
+  "q": "Where are CVS Health's principal executive offices located?"
+ },
+ {
+  "doc": "FOOTLOCKER_2025_10K",
+  "q": "What was Foot Locker's inventory turnover in fiscal 2024 (ended February 1, 2025), defined as COGS divided by the average of fiscal 2023 and fiscal 2024 inventory? Use the balance sheet and income statement and round to two decimal places."
+ },
+ {
+  "doc": "FOOTLOCKER_2025_10K",
+  "q": "Did Foot Locker distribute cash dividends to its common shareholders during fiscal 2024 (ended February 1, 2025)?"
+ },
+ {
+  "doc": "FOOTLOCKER_2025_10K",
+  "q": "Did Foot Locker return to profitability in fiscal 2024 (ended February 1, 2025)?"
+ },
+ {
+  "doc": "FOOTLOCKER_2025_10K",
+  "q": "How many stores did Foot Locker operate at the end of fiscal 2024 (ended February 1, 2025), and in how many countries?"
+ },
+ {
+  "doc": "JOHNSON_JOHNSON_2025_10K",
+  "q": "Did Johnson & Johnson's long-term debt rise or fall between the end of FY2024 and the end of FY2025?"
+ },
+ {
+  "doc": "JOHNSON_JOHNSON_2025_10K",
+  "q": "What share of Johnson & Johnson's total gross revenues did its three largest wholesalers represent in 2025?"
+ },
+ {
+  "doc": "JOHNSON_JOHNSON_2025_10K",
+  "q": "What acquisitions did Johnson & Johnson complete in FY2025?"
+ },
+ {
+  "doc": "JOHNSON_JOHNSON_2025_10K",
+  "q": "Who is Johnson & Johnson's independent registered public accounting firm for FY2025?"
+ },
+ {
+  "doc": "JPMORGAN_2025_10K",
+  "q": "What were JPMorgan Chase's total assets on its FY2025 year-end balance sheet? Give the answer in USD billions."
+ },
+ {
+  "doc": "JPMORGAN_2025_10K",
+  "q": "Did JPMorgan Chase's net income decline in FY2025 compared with FY2024?"
+ },
+ {
+  "doc": "JPMORGAN_2025_10K",
+  "q": "Would you classify JPMorgan Chase as a high-growth company on its FY2025 results?"
+ },
+ {
+  "doc": "JPMORGAN_2025_10K",
+  "q": "How large was JPMorgan Chase's common share repurchase authorization through June 30, 2025, and when was the program announced?"
+ },
+ {
+  "doc": "JPMORGAN_2025_10K",
+  "q": "How many employees did JPMorgan Chase have at the end of FY2025?"
+ },
+ {
+  "doc": "KRAFTHEINZ_2025_10K",
+  "q": "Using only Kraft Heinz's balance sheet, compute the FY2025 working capital ratio (total current assets divided by total current liabilities), rounded to two decimal places."
+ },
+ {
+  "doc": "KRAFTHEINZ_2025_10K",
+  "q": "If you divide Kraft Heinz's FY2025 operating income by its annual interest expense, what interest coverage ratio results, and what does it tell you?"
+ },
+ {
+  "doc": "KRAFTHEINZ_2025_10K",
+  "q": "Compared with the prior year, did Kraft Heinz's operating margin get better in FY2025? Skip the comparison and explain if the metric is not useful for this type of company."
+ },
+ {
+  "doc": "KRAFTHEINZ_2025_10K",
+  "q": "Did Kraft Heinz report a net loss in FY2025?"
+ },
+ {
+  "doc": "KRAFTHEINZ_2025_10K",
+  "q": "What drove Kraft Heinz's operating loss in FY2025?"
+ },
+ {
+  "doc": "KRAFTHEINZ_2025_10K",
+  "q": "What are Kraft Heinz's reportable segments as of FY2025?"
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "How much total current liabilities did Lockheed Martin carry at the end of FY2025? Read it from the balance sheet and answer in USD millions."
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "Calculate Lockheed Martin's FY2025 days payable outstanding: 365 x average accounts payable (FY2024 and FY2025) / (FY2025 COGS + the change in inventory between FY2024 and FY2025). Use the balance sheet and income statement and round to two decimal places."
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "What was Lockheed Martin's FY2025 free cash flow, defined as cash from operations minus capex? Use the cash flow statement and answer in USD millions."
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "What was Lockheed Martin's average unadjusted operating margin (operating income as a percent of revenue) across FY2023 to FY2025? Use the income statement and give one decimal place."
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "Has Lockheed Martin's operating margin improved as of FY2025? If operating margin is not a meaningful measure for a company like Lockheed Martin, say so and explain why."
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "In FY2025, which part of Lockheed Martin's cash flow statement (operations, investing or financing) was the largest source of cash?"
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "What drove the increase in Lockheed Martin's product sales in FY2025?"
+ },
+ {
+  "doc": "LOCKHEEDMARTIN_2025_10K",
+  "q": "What business segments does Lockheed Martin operate in as of FY2025?"
+ },
+ {
+  "doc": "MGMRESORTS_2025_10K",
+  "q": "Using MGM Resorts' statement of cash flows, find FY2025 free cash flow (cash from operations less capex), in USD millions."
+ },
+ {
+  "doc": "MGMRESORTS_2025_10K",
+  "q": "Using FY2025 balance sheet data, does MGM Resorts have a surplus of current assets over current liabilities? Explain if working capital is not relevant for the company."
+ },
+ {
+  "doc": "MGMRESORTS_2025_10K",
+  "q": "Did MGM Resorts earn less net income attributable to MGM in FY2025 than in FY2024?"
+ },
+ {
+  "doc": "MGMRESORTS_2025_10K",
+  "q": "Using FY2025 figures, is MGM Resorts a capital-intensive company? Show the ratios behind your answer."
+ },
+ {
+  "doc": "MGMRESORTS_2025_10K",
+  "q": "What are MGM Resorts' reportable segments as of December 31, 2025?"
+ },
+ {
+  "doc": "MICROSOFT_2025_10K",
+  "q": "What is Microsoft's fiscal 2025 return on equity (ROE)? ROE is defined as: fiscal 2025 net income / (average total stockholders' equity between fiscal 2024 and fiscal 2025). Round your answer to two decimal places. Base your answer on the balance sheet and the income statement."
+ },
+ {
+  "doc": "MICROSOFT_2025_10K",
+  "q": "What is Microsoft's quick ratio at the end of fiscal 2025? If the quick ratio is not something a financial analyst would ask about a company like this, state that and explain why. Round your answer to two decimal places."
+ },
+ {
+  "doc": "MICROSOFT_2025_10K",
+  "q": "Did Microsoft spend more on capital expenditures than it paid out in cash dividends in fiscal 2025?"
+ },
+ {
+  "doc": "MICROSOFT_2025_10K",
+  "q": "How many shares of Microsoft common stock were outstanding as of July 24, 2025, according to its fiscal 2025 10-K?"
+ },
+ {
+  "doc": "MICROSOFT_2025_10K",
+  "q": "How many people did Microsoft employ on a full-time basis as of June 30, 2025?"
+ },
+ {
+  "doc": "NETFLIX_2025_10K",
+  "q": "Taking into account the information outlined in the balance sheet, how much cash and cash equivalents did Netflix hold at the end of FY2025? Answer in USD millions."
+ },
+ {
+  "doc": "NETFLIX_2025_10K",
+  "q": "Using Netflix's balance sheet and cash flow statement, what is the FY2025 operating cash flow ratio (cash from operations divided by total current liabilities)? Round to two decimal places."
+ },
+ {
+  "doc": "NETFLIX_2025_10K",
+  "q": "What was Netflix's unadjusted EBITDA margin in FY2025, where EBITDA is operating income plus depreciation and amortization taken from the cash flow statement? Use the income statement and cash flow statement and answer in percent to one decimal place."
+ },
+ {
+  "doc": "NETFLIX_2025_10K",
+  "q": "What was Netflix's FY2025 inventory turnover ratio? If inventory turnover is not meaningful for the company, say so and explain why."
+ },
+ {
+  "doc": "NETFLIX_2025_10K",
+  "q": "Using FY2025 figures, is Netflix a capital-intensive company? Show the ratios behind your answer."
+ },
+ {
+  "doc": "NETFLIX_2025_10K",
+  "q": "What drove the change in Netflix's operating margin in FY2025?"
+ },
+ {
+  "doc": "NETFLIX_2025_10K",
+  "q": "Roughly how many full-time employees did Netflix have as of December 31, 2025?"
+ },
+ {
+  "doc": "NIKE_2025_10K",
+  "q": "What is Nike's fiscal 2025 fixed asset turnover ratio? Fixed asset turnover ratio is defined as: fiscal 2025 revenue / (average property, plant and equipment, net between fiscal 2024 and fiscal 2025). Round your answer to two decimal places. Calculate what was asked by utilizing the line items clearly shown in the P&L statement and the balance sheet."
+ },
+ {
+  "doc": "NIKE_2025_10K",
+  "q": "From the income statement and cash flow statement, what percentage of Nike's fiscal 2025 revenue was depreciation and amortization?"
+ },
+ {
+  "doc": "NIKE_2025_10K",
+  "q": "Compare Nike's effective tax rate in fiscal 2025 with fiscal 2024: how large was the change?"
+ },
+ {
+  "doc": "NIKE_2025_10K",
+  "q": "What drove the change in Nike's gross margin in fiscal 2025?"
+ },
+ {
+  "doc": "NIKE_2025_10K",
+  "q": "Why did Nike's revenues decline in fiscal 2025?"
+ },
+ {
+  "doc": "NIKE_2025_10K",
+  "q": "Which wholly-owned subsidiary brand does Nike operate alongside the NIKE Brand, and where is it headquartered?"
+ },
+ {
+  "doc": "NIKE_2025_10K",
+  "q": "How much did Nike return to its shareholders in fiscal 2025, and through what?"
+ },
+ {
+  "doc": "PAYPAL_2025_10K",
+  "q": "What were PayPal's total assets at the end of FY2025 according to the balance sheet? Answer in USD millions."
+ },
+ {
+  "doc": "PAYPAL_2025_10K",
+  "q": "Did PayPal distribute cash dividends to its common shareholders during FY2025?"
+ },
+ {
+  "doc": "PAYPAL_2025_10K",
+  "q": "Which activity - operating, investing or financing - produced the best net cash result for PayPal in FY2025?"
+ },
+ {
+  "doc": "PAYPAL_2025_10K",
+  "q": "Roughly how many people did PayPal employ globally as of December 31, 2025?"
+ },
+ {
+  "doc": "PEPSICO_2025_10K",
+  "q": "How many billions of dollars did PepsiCo pay in cash dividends in FY2025, according to the cash flow statement?"
+ },
+ {
+  "doc": "PEPSICO_2025_10K",
+  "q": "Compute PepsiCo's FY2025 inventory turnover as COGS divided by the average of FY2024 and FY2025 inventory, using the balance sheet and income statement. Round to two decimal places."
+ },
+ {
+  "doc": "PEPSICO_2025_10K",
+  "q": "What was PepsiCo's FY2025 EBITDA minus capital expenditures? Take unadjusted EBITDA as operating income plus depreciation and amortization from the cash flow statement, and answer in USD millions."
+ },
+ {
+  "doc": "PEPSICO_2025_10K",
+  "q": "Using the cash flow statement and income statement, what was PepsiCo's FY2025 earnings retention ratio, i.e. one minus cash dividends paid divided by net income attributable to shareholders? Round to two decimal places."
+ },
+ {
+  "doc": "PEPSICO_2025_10K",
+  "q": "How did PepsiCo's effective tax rate change from FY2024 to FY2025?"
+ },
+ {
+  "doc": "PEPSICO_2025_10K",
+  "q": "What are PepsiCo's reportable segments as of FY2025?"
  },
  {
   "doc": "PFIZER_2025_10K",
-  "q": "What were Pfizer's alliance revenues in FY2025 compared to FY2024?"
+  "q": "What was Pfizer's FY2025 return on assets (net income divided by the average of FY2024 and FY2025 total assets)? Use the balance sheet and income statement and round to two decimal places."
  },
  {
-  "doc": "CORNING_2025_10K",
-  "q": "What was Corning's net sales in FY2025 compared to FY2024?"
+  "doc": "PFIZER_2025_10K",
+  "q": "Did Pfizer's gross margin improve in FY2025 versus the prior year? If the metric does not apply to Pfizer's business, explain why instead."
  },
  {
-  "doc": "CORNING_2025_10K",
-  "q": "What is Corning's FY2025 gross margin (gross profit / net sales)? Round to one decimal place."
+  "doc": "PFIZER_2025_10K",
+  "q": "What drove the change in Pfizer's total revenues in FY2025?"
  },
  {
-  "doc": "CORNING_2025_10K",
-  "q": "Corning's net income attributable to Corning more than tripled in FY2025 (from $506 million to $1,596 million) while net sales grew only about 19% -- what best explains this disproportionate increase?"
+  "doc": "PFIZER_2025_10K",
+  "q": "Which major business development acquisition did Pfizer complete in November 2025?"
  },
  {
-  "doc": "PAYPAL_2025_10K",
-  "q": "What was PayPal's net revenues in FY2025 compared to FY2024?"
+  "doc": "PFIZER_2025_10K",
+  "q": "Who is Pfizer's independent registered public accounting firm for FY2025?"
  },
  {
-  "doc": "PAYPAL_2025_10K",
-  "q": "What was PayPal's net income in FY2025 compared to FY2024?"
+  "doc": "ULTABEAUTY_2025_10K",
+  "q": "Based on the information in the balance sheet, how much total current assets did Ulta Beauty have at the end of fiscal 2025 (ended January 31, 2026)? Answer in USD millions."
  },
  {
-  "doc": "PAYPAL_2025_10K",
-  "q": "PayPal's net income grew significantly faster than its net revenues in FY2025 (about 26% vs about 4%) -- what does this imply about operating margin?"
+  "doc": "ULTABEAUTY_2025_10K",
+  "q": "What was Ulta Beauty's asset turnover in fiscal 2025 (revenue divided by the average of fiscal 2024 and fiscal 2025 total assets)? Use the balance sheet and income statement and round to two decimal places."
+ },
+ {
+  "doc": "ULTABEAUTY_2025_10K",
+  "q": "Has Ulta Beauty kept its gross margin stable, moving by no more than about 2 percentage points a year? If gross margin is not meaningful for Ulta Beauty's business, say so and explain why."
+ },
+ {
+  "doc": "ULTABEAUTY_2025_10K",
+  "q": "Is Ulta Beauty's operating margin trending up in fiscal 2025? If operating margin does not apply to a business like this, state that and explain."
+ },
+ {
+  "doc": "ULTABEAUTY_2025_10K",
+  "q": "Why did Ulta Beauty's SG&A expenses rise as a percentage of net sales in fiscal 2025?"
+ },
+ {
+  "doc": "ULTABEAUTY_2025_10K",
+  "q": "How many stores did Ulta Beauty operate at the end of fiscal 2025 (ended January 31, 2026)?"
+ },
+ {
+  "doc": "ULTABEAUTY_2025_10K",
+  "q": "How many shares of Ulta Beauty common stock were outstanding as of March 23, 2026 (the date given on the cover of its fiscal 2025 10-K)?"
+ },
+ {
+  "doc": "VERIZON_2025_10K",
+  "q": "Using the balance sheet and income statement, what was Verizon's FY2025 asset turnover (revenue divided by the average of FY2024 and FY2025 total assets)? Round to two decimal places."
+ },
+ {
+  "doc": "VERIZON_2025_10K",
+  "q": "Did Verizon's operating income grow faster than its revenue in FY2025?"
+ },
+ {
+  "doc": "VERIZON_2025_10K",
+  "q": "What change did Verizon's Board of Directors make to the quarterly dividend in the third quarter of 2025?"
+ },
+ {
+  "doc": "VERIZON_2025_10K",
+  "q": "Who is Verizon's independent registered public accounting firm for FY2025?"
+ },
+ {
+  "doc": "WALMART_2025_10K",
+  "q": "What was Walmart's net property and equipment at the end of fiscal 2025 (January 31, 2025), according to the balance sheet? Answer in USD millions."
+ },
+ {
+  "doc": "WALMART_2025_10K",
+  "q": "Calculate Walmart's fiscal 2025 DPO: 365 x average accounts payable (fiscal 2024 and fiscal 2025) / (fiscal 2025 COGS + the change in inventory between fiscal 2024 and fiscal 2025). Use the balance sheet and income statement and round to two decimal places."
+ },
+ {
+  "doc": "WALMART_2025_10K",
+  "q": "Averaged over fiscal 2023 to fiscal 2025, capex was what percent of Walmart's revenue? Use the cash flow statement and income statement and give one decimal place."
+ },
+ {
+  "doc": "WALMART_2025_10K",
+  "q": "What was Walmart's cost of sales as a percentage of revenue in fiscal 2025? Use the income statement."
+ },
+ {
+  "doc": "WALMART_2025_10K",
+  "q": "By how many percentage points did Walmart's operating margin change from fiscal 2024 to fiscal 2025? Use the income statement and answer in percent to one decimal place."
+ },
+ {
+  "doc": "WALMART_2025_10K",
+  "q": "Does Walmart have a reasonably healthy liquidity profile based on its quick ratio for fiscal 2025 (ended January 31, 2025)? If the quick ratio is not relevant to measure liquidity, please state that and explain why."
+ },
+ {
+  "doc": "WALMART_2025_10K",
+  "q": "Besides its common stock, how many series of notes does Walmart have registered on the New York Stock Exchange according to its fiscal 2025 10-K, and what range of maturities do they cover?"
  }
 ]

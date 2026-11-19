@@ -7,7 +7,7 @@
  {
   "id": "train-2",
   "label": "C",
-  "rule": 9
+  "rule": null
  },
  {
   "id": "train-3",
@@ -227,7 +227,7 @@
  {
   "id": "train-46",
   "label": "C",
-  "rule": 22
+  "rule": null
  },
  {
   "id": "train-47",
@@ -301,8 +301,8 @@
  },
  {
   "id": "train-61",
-  "label": "P",
-  "rule": 15
+  "label": "C",
+  "rule": null
  },
  {
   "id": "train-62",
@@ -332,7 +332,7 @@
  {
   "id": "train-67",
   "label": "C",
-  "rule": 22
+  "rule": null
  },
  {
   "id": "train-68",
@@ -442,7 +442,7 @@
  {
   "id": "train-89",
   "label": "C",
-  "rule": null
+  "rule": 20
  },
  {
   "id": "train-90",
@@ -476,8 +476,8 @@
  },
  {
   "id": "train-96",
-  "label": "P",
-  "rule": 20
+  "label": "C",
+  "rule": null
  },
  {
   "id": "train-97",
@@ -541,8 +541,8 @@
  },
  {
   "id": "train-109",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": "9.4-6"
  },
  {
   "id": "train-110",
@@ -701,8 +701,8 @@
  },
  {
   "id": "train-141",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": 13
  },
  {
   "id": "train-142",
@@ -781,13 +781,13 @@
  },
  {
   "id": "out-7",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": 6
  },
  {
   "id": "out-8",
   "label": "C",
-  "rule": 10
+  "rule": null
  },
  {
   "id": "out-9",
@@ -796,8 +796,8 @@
  },
  {
   "id": "out-10",
-  "label": "S",
-  "rule": 1
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-11",
@@ -806,8 +806,8 @@
  },
  {
   "id": "out-12",
-  "label": "W",
-  "rule": 6
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-13",
@@ -862,12 +862,12 @@
  {
   "id": "out-23",
   "label": "C",
-  "rule": 8
+  "rule": null
  },
  {
   "id": "out-24",
-  "label": "S",
-  "rule": 1
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-25",
@@ -911,13 +911,13 @@
  },
  {
   "id": "out-33",
-  "label": "P",
-  "rule": 18
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-34",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": 6
  },
  {
   "id": "out-35",
@@ -961,8 +961,8 @@
  },
  {
   "id": "out-43",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": 6
  },
  {
   "id": "out-44",
@@ -971,8 +971,8 @@
  },
  {
   "id": "out-45",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": "9.4-4"
  },
  {
   "id": "out-46",
@@ -996,8 +996,8 @@
  },
  {
   "id": "out-50",
-  "label": "W",
-  "rule": 6
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-51",
@@ -1046,8 +1046,8 @@
  },
  {
   "id": "out-60",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": "9.4-4"
  },
  {
   "id": "out-61",
@@ -1151,8 +1151,8 @@
  },
  {
   "id": "out-81",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": 6
  },
  {
   "id": "out-82",
@@ -1181,18 +1181,18 @@
  },
  {
   "id": "out-87",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": 6
  },
  {
   "id": "out-88",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": 6
  },
  {
   "id": "out-89",
-  "label": "P",
-  "rule": 6
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-90",
@@ -1206,8 +1206,8 @@
  },
  {
   "id": "out-92",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": "9.4-1"
  },
  {
   "id": "out-93",
@@ -1231,8 +1231,8 @@
  },
  {
   "id": "out-97",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": 15
  },
  {
   "id": "out-98",
@@ -1252,7 +1252,7 @@
  {
   "id": "out-101",
   "label": "C",
-  "rule": 8
+  "rule": null
  },
  {
   "id": "out-102",
@@ -1266,8 +1266,8 @@
  },
  {
   "id": "out-104",
-  "label": "P",
-  "rule": 6
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-105",
@@ -1276,8 +1276,8 @@
  },
  {
   "id": "out-106",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": 6
  },
  {
   "id": "out-107",
@@ -1321,8 +1321,8 @@
  },
  {
   "id": "out-115",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": 18
  },
  {
   "id": "out-116",
@@ -1331,8 +1331,8 @@
  },
  {
   "id": "out-117",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": "9.4-1"
  },
  {
   "id": "out-118",
@@ -1366,8 +1366,8 @@
  },
  {
   "id": "out-124",
-  "label": "P",
-  "rule": 18
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-125",
@@ -1391,8 +1391,8 @@
  },
  {
   "id": "out-129",
-  "label": "C",
-  "rule": null
+  "label": "W",
+  "rule": 14
  },
  {
   "id": "out-130",
@@ -1416,8 +1416,8 @@
  },
  {
   "id": "out-134",
-  "label": "C",
-  "rule": 8
+  "label": "W",
+  "rule": 6
  },
  {
   "id": "out-135",
@@ -1476,8 +1476,8 @@
  },
  {
   "id": "out-146",
-  "label": "C",
-  "rule": null
+  "label": "S",
+  "rule": 1
  },
  {
   "id": "out-147",
@@ -1486,13 +1486,13 @@
  },
  {
   "id": "out-148",
-  "label": "C",
-  "rule": null
+  "label": "S",
+  "rule": 1
  },
  {
   "id": "out-149",
-  "label": "C",
-  "rule": null
+  "label": "P",
+  "rule": "9.4-4"
  },
  {
   "id": "out-150",
