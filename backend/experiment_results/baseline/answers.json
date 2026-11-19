@@ -3425,14 +3425,14 @@
   "doc_name": "LOCKHEEDMARTIN_2025_10K",
   "question_type": "metrics-generated",
   "question": "What was Lockheed Martin's FY2025 free cash flow, defined as cash from operations minus capex? Use the cash flow statement and answer in USD millions.",
-  "gold": "$7,615 million",
+  "gold": "$6,908 million (cash from operations of $8,557 million less capital expenditures of $1,649 million).",
   "answer": "Lockheed Martin's FY2025 free cash flow (cash from operations minus capex) was **$6,908 million**. This equals net cash provided by operating activities of $8,557 million minus capital expenditures of $1,649 million. The company defines the metric as \"Free cash flow is cash from operations less capital expenditures.\"",
   "error": null,
   "elapsed": 23.3,
-  "label": "W",
-  "rule": 6,
+  "label": "C",
+  "rule": null,
   "form": "B",
-  "note": "標準答案 7,615;答案 6,908(營業現金流 8,557 減財報現金流量表的資本支出 1,649)。查財報答案與公司自己的定義一致,標準答案與財報不符,待使用者確認"
+  "note": "標準答案原為 $7,615M,查財報現金流量表資本支出是 (1,649)、公司定義的自由現金流是 6,908,2026-11-19 更正標準答案為 $6,908M;答案 6,908 與更正後的標準答案一致"
  },
  {
   "id": "out-89",
@@ -3562,14 +3562,14 @@
   "doc_name": "MGMRESORTS_2025_10K",
   "question_type": "domain-relevant",
   "question": "Using FY2025 figures, is MGM Resorts a capital-intensive company? Show the ratios behind your answer.",
-  "gold": "Yes. It takes about $4.22 of assets to generate $1 of revenue (total assets $41,374 million / revenue $9,810 million), and capital expenditures were $1,069 million, about 11% of revenue.",
+  "gold": "Yes. It takes about $2.36 of assets to generate $1 of revenue (total assets $41,374 million / net revenues $17,538 million), and capital expenditures were $1,069 million, about 6.1% of revenue.",
   "answer": "Yes. MGM Resorts shows capital-intensive metrics in FY2025: the provided capital‑intensity ratio is 1.3649 (Total assets 23,532,287 / Net revenues 17,240,545) and return on assets (ROA) is about 1.26% (Net income 520,872 / Total assets 41,373,786), well below the ~10% threshold that would indicate low capital intensity. Supporting indicators are CapEx-to-revenue ~6.2% (Capital expenditures 1,068,927 ÷ Revenue 17,240,545) and the filing notes capital spending in 2025 (“capital expenditures of $1.1 billion”). These ratios and the company’s stated reinvestment confirm MGM Resorts is capital‑intensive in FY2025.",
   "error": null,
   "elapsed": 56.5,
   "label": "P",
   "rule": 15,
   "form": "D",
-  "note": "結論 Yes 對,但營收與總資產取了不同年度與表格,比率不一致;標準答案的營收 9,810 與財報(17,538)不符,待使用者確認"
+  "note": "標準答案原為資產對營收 4.22(營收 $9,810M,財報沒有這個數字),更正為 2.36(營收 $17,538M)與資本支出占營收 6.1%;答案結論 Yes 對、資本支出 $1,069M 對,但資產對營收算成 1.36(營收取 FY2024、資產取錯),判 P(決策表 15)"
  },
  {
   "id": "out-98",
