@@ -1,0 +1,506 @@
+{
+ "3M_2018_10K": {
+  "doc_id": "pi-7c056b96e0974c15855a544079a59622",
+  "seconds": 221.3,
+  "calls": 157,
+  "tokens": 247787
+ },
+ "ADOBE_2015_10K": {
+  "doc_id": "pi-09a0f4eb985449f0b9011b6f99d512df",
+  "seconds": 67.6,
+  "calls": 124,
+  "tokens": 187209
+ },
+ "AES_2022_10K": {
+  "doc_id": "pi-c6e481d80a324976b34fb667df84d4ba",
+  "seconds": 262.8,
+  "calls": 239,
+  "tokens": 407189
+ },
+ "AMCOR_2022_8K_dated-2022-07-01": {
+  "doc_id": "pi-11779fdbc3604803bb0c55f4949808e8",
+  "seconds": 21.3,
+  "calls": 11,
+  "tokens": 13301
+ },
+ "AMD_2015_10K": {
+  "doc_id": "pi-cc41753d661c4d0fa2a6b317bb73d126",
+  "seconds": 227.8,
+  "calls": 198,
+  "tokens": 377335
+ },
+ "AMERICANWATERWORKS_2021_10K": {
+  "doc_id": "pi-3cb0b4d1060a4bcd979c28053ae1d533",
+  "seconds": 112.7,
+  "calls": 171,
+  "tokens": 279759
+ },
+ "BESTBUY_2023_10K": {
+  "doc_id": "pi-73cf5c0f40b44244a47e163dfd64bd20",
+  "seconds": 70.9,
+  "calls": 74,
+  "tokens": 118238
+ },
+ "BOEING_2018_10K": {
+  "doc_id": "pi-1085a9af02ac472a82c8d444fa932e9b",
+  "seconds": 45.4,
+  "calls": 144,
+  "tokens": 186370
+ },
+ "COCACOLA_2022_10K": {
+  "doc_id": "pi-ddd15639aedf4042896a571c0c5ed9de",
+  "seconds": 338.9,
+  "calls": 144,
+  "tokens": 267073
+ },
+ "COSTCO_2021_10K": {
+  "doc_id": "pi-1a66b62fb9204a6f9aebf59344ce98c2",
+  "seconds": 37.6,
+  "calls": 77,
+  "tokens": 99645
+ },
+ "FOOTLOCKER_2022_8K_dated-2022-05-20": {
+  "doc_id": "pi-269d2e707bf9498898a69bf61d45f608",
+  "seconds": 8.9,
+  "calls": 3,
+  "tokens": 3498
+ },
+ "JOHNSON_JOHNSON_2022_10K": {
+  "doc_id": "pi-7a0ee9c631c8444fb17567503fcd68c7",
+  "seconds": 143.0,
+  "calls": 127,
+  "tokens": 226906
+ },
+ "JPMORGAN_2021Q1_10Q": {
+  "doc_id": "pi-c5b85d8d52784727969854b045a297a4",
+  "seconds": 58.7,
+  "calls": 183,
+  "tokens": 292713
+ },
+ "KRAFTHEINZ_2019_10K": {
+  "doc_id": "pi-67a7c6c699374b609f90d5105a7d0ccb",
+  "seconds": 154.1,
+  "calls": 146,
+  "tokens": 240045
+ },
+ "MGMRESORTS_2018_10K": {
+  "doc_id": "pi-85f38bbb895140ffb49c167e49fdac94",
+  "seconds": 96.7,
+  "calls": 127,
+  "tokens": 244253
+ },
+ "MGMRESORTS_2023Q2_10Q": {
+  "doc_id": "pi-06a422239cef4561b025c72c6999c56f",
+  "seconds": 82.8,
+  "calls": 54,
+  "tokens": 87411
+ },
+ "NETFLIX_2017_10K": {
+  "doc_id": "pi-5921e3156ce244c28c7c59b148ad5333",
+  "seconds": 44.9,
+  "calls": 73,
+  "tokens": 97213
+ },
+ "NIKE_2023_10K": {
+  "doc_id": "pi-b2571543141146d7b66dc730a09d034a",
+  "seconds": 38.6,
+  "calls": 123,
+  "tokens": 167136
+ },
+ "PEPSICO_2023_8K_dated-2023-05-05": {
+  "doc_id": "pi-7776ed71c671486f9a66df43c1e63920",
+  "seconds": 10.5,
+  "calls": 1,
+  "tokens": 608
+ },
+ "Pfizer_2023Q2_10Q": {
+  "doc_id": "pi-0168558ca2af405f99095fc98f6f1ead",
+  "seconds": 61.2,
+  "calls": 50,
+  "tokens": 96136
+ },
+ "VERIZON_2022_10K": {
+  "doc_id": "pi-3f3cc7bb579d4839b4b1d0bc3f74f976",
+  "seconds": 51.4,
+  "calls": 138,
+  "tokens": 211683
+ },
+ "3M_2022_10K": {
+  "doc_id": "pi-06e1831c0a9646b78554c382d425f101",
+  "seconds": 327.5,
+  "calls": 174,
+  "tokens": 369787
+ },
+ "ADOBE_2016_10K": {
+  "doc_id": "pi-b42ae07403584cab88e362b52dbf59b7",
+  "seconds": 124.8,
+  "calls": 119,
+  "tokens": 181105
+ },
+ "AMAZON_2017_10K": {
+  "doc_id": "pi-8d45df3040644f288b4fbbf1cad681c4",
+  "seconds": 36.6,
+  "calls": 82,
+  "tokens": 121831
+ },
+ "AMCOR_2023_10K": {
+  "doc_id": "pi-f8bc8bcdfc01444ab769195613d3694a",
+  "seconds": 71.3,
+  "calls": 128,
+  "tokens": 203189
+ },
+ "AMD_2022_10K": {
+  "doc_id": "pi-fee4beb0b85645b88809226102bf30ef",
+  "seconds": 97.1,
+  "calls": 117,
+  "tokens": 164112
+ },
+ "AMERICANWATERWORKS_2022_10K": {
+  "doc_id": "pi-36225d47c2ec4648ab4b9611e48ebe93",
+  "seconds": 212.0,
+  "calls": 232,
+  "tokens": 432037
+ },
+ "BESTBUY_2024Q2_10Q": {
+  "doc_id": "pi-4622ee12acb84e0ca217f7c9e29cf595",
+  "seconds": 32.7,
+  "calls": 26,
+  "tokens": 39181
+ },
+ "BOEING_2022_10K": {
+  "doc_id": "pi-3d727b0b66aa4466a722da7be3e93356",
+  "seconds": 116.5,
+  "calls": 172,
+  "tokens": 225382
+ },
+ "CORNING_2020_10K": {
+  "doc_id": "pi-48989c89c6314e84b28a3f88bc5d4134",
+  "seconds": 90.4,
+  "calls": 108,
+  "tokens": 172978
+ },
+ "CVSHEALTH_2018_10K": {
+  "doc_id": "pi-a64893df03a849368c2d968f36a8b86c",
+  "seconds": 139.3,
+  "calls": 332,
+  "tokens": 667915
+ },
+ "GENERALMILLS_2019_10K": {
+  "doc_id": "pi-8350efe7a8d54d4b83c8394a333457b0",
+  "seconds": 54.4,
+  "calls": 140,
+  "tokens": 203335
+ },
+ "JOHNSON_JOHNSON_2022Q4_EARNINGS": {
+  "doc_id": "pi-caca86f030df4007a0f473e856661ddb",
+  "seconds": 84.9,
+  "calls": 22,
+  "tokens": 47136
+ },
+ "JPMORGAN_2022_10K": {
+  "doc_id": "pi-4ac3ea2a33044f978dc6b7955d9ebe06",
+  "seconds": 151.0,
+  "calls": 402,
+  "tokens": 715696
+ },
+ "LOCKHEEDMARTIN_2020_10K": {
+  "doc_id": "pi-fa55d13bff474d7f932189dc474f0d32",
+  "seconds": 99.5,
+  "calls": 128,
+  "tokens": 218361
+ },
+ "MGMRESORTS_2020_10K": {
+  "doc_id": "pi-a281244499264541828fbf3b26018c0f",
+  "seconds": 100.5,
+  "calls": 125,
+  "tokens": 210751
+ },
+ "MICROSOFT_2016_10K": {
+  "doc_id": "pi-d509c069d8c742eb97e03a71c1725c83",
+  "seconds": 253.6,
+  "calls": 138,
+  "tokens": 193940
+ },
+ "NIKE_2018_10K": {
+  "doc_id": "pi-52ab45d6a3c446929922e4027c2e0389",
+  "seconds": 156.5,
+  "calls": 95,
+  "tokens": 164093
+ },
+ "PAYPAL_2022_10K": {
+  "doc_id": "pi-27e2a5cc0433459fb74bf70348fd93e7",
+  "seconds": 221.4,
+  "calls": 132,
+  "tokens": 191633
+ },
+ "PEPSICO_2023_8K_dated-2023-05-30": {
+  "doc_id": "pi-3ff4611c6d684078b692b4a144f3c0c5",
+  "seconds": 131.7,
+  "calls": 113,
+  "tokens": 263870
+ },
+ "ULTABEAUTY_2023_10K": {
+  "doc_id": "pi-e9b88b7b2d3d498aa78f5d5d3eb0d636",
+  "seconds": 110.0,
+  "calls": 101,
+  "tokens": 134810
+ },
+ "WALMART_2018_10K": {
+  "doc_id": "pi-e008e6143c11471bb48a6cacd89a5d4c",
+  "seconds": 253.4,
+  "calls": 246,
+  "tokens": 448249
+ },
+ "3M_2023Q2_10Q": {
+  "doc_id": "pi-4740ee7c93544889830c12a7d8446b1b",
+  "seconds": 116.3,
+  "calls": 91,
+  "tokens": 142433
+ },
+ "ADOBE_2017_10K": {
+  "doc_id": "pi-09ff5ef594b34b039640fe09c33d2734",
+  "seconds": 67.3,
+  "calls": 107,
+  "tokens": 166113
+ },
+ "AMAZON_2019_10K": {
+  "doc_id": "pi-3cf43950ca3a4539b573b2d87411f0ea",
+  "seconds": 31.3,
+  "calls": 80,
+  "tokens": 119851
+ },
+ "AMCOR_2023Q2_10Q": {
+  "doc_id": "pi-4fa44d912c8c443792c9a61e318314a7",
+  "seconds": 37.9,
+  "calls": 48,
+  "tokens": 62511
+ },
+ "AMERICANEXPRESS_2022_10K": {
+  "doc_id": "pi-02cde36e781c4b178c4c10afb0ffb798",
+  "seconds": 198.8,
+  "calls": 212,
+  "tokens": 321706
+ },
+ "BESTBUY_2017_10K": {
+  "doc_id": "pi-aaa44ac03e9949789a05588d63bb5ee0",
+  "seconds": 53.4,
+  "calls": 106,
+  "tokens": 172719
+ },
+ "BLOCK_2016_10K": {
+  "doc_id": "pi-c6316419388a499aa7517c978bf53d2b",
+  "seconds": 38.6,
+  "calls": 125,
+  "tokens": 169168
+ },
+ "COCACOLA_2017_10K": {
+  "doc_id": "pi-341fa8309dd3438da94ba22743abb7fe",
+  "seconds": 166.7,
+  "calls": 159,
+  "tokens": 278388
+ },
+ "CORNING_2021_10K": {
+  "doc_id": "pi-6a7d858ae6064706bd7ba8c4d063a593",
+  "seconds": 76.5,
+  "calls": 129,
+  "tokens": 193170
+ },
+ "CVSHEALTH_2022_10K": {
+  "doc_id": "pi-977d9cd1212b43069f7ff12a2ab47eaa",
+  "seconds": 234.8,
+  "calls": 233,
+  "tokens": 383465
+ },
+ "GENERALMILLS_2020_10K": {
+  "doc_id": "pi-318d85b3ffe24f5f86c1ebbf87b792f3",
+  "seconds": 100.5,
+  "calls": 122,
+  "tokens": 188418
+ },
+ "JOHNSON_JOHNSON_2023_8K_dated-2023-08-30": {
+  "doc_id": "pi-85a9c1cc67c942e3864ada013c85dc03",
+  "seconds": 56.7,
+  "calls": 28,
+  "tokens": 49461
+ },
+ "JPMORGAN_2022Q2_10Q": {
+  "doc_id": "pi-077ee69072cd4857ace87c480b342587",
+  "seconds": 84.1,
+  "calls": 204,
+  "tokens": 336377
+ },
+ "LOCKHEEDMARTIN_2021_10K": {
+  "doc_id": "pi-9c24ea20350c4224a9885db9d97492f7",
+  "seconds": 122.1,
+  "calls": 139,
+  "tokens": 216003
+ },
+ "MGMRESORTS_2022_10K": {
+  "doc_id": "pi-85681ff9a0294abdaf743eeb71b07af1",
+  "seconds": 98.6,
+  "calls": 177,
+  "tokens": 287465
+ },
+ "MICROSOFT_2023_10K": {
+  "doc_id": "pi-68fff5e7ce6b4b68ab74f103f8e829bb",
+  "seconds": 87.6,
+  "calls": 102,
+  "tokens": 138180
+ },
+ "NIKE_2019_10K": {
+  "doc_id": "pi-74a53e3a0da44346a3415ce8d590e6a4",
+  "seconds": 40.9,
+  "calls": 97,
+  "tokens": 149705
+ },
+ "PEPSICO_2021_10K": {
+  "doc_id": "pi-381e8af8395540f794c3fc23dfb41135",
+  "seconds": 315.5,
+  "calls": 341,
+  "tokens": 672633
+ },
+ "PEPSICO_2023Q1_EARNINGS": {
+  "doc_id": "pi-6b5a6f31d4284185be8a39ba8620c2f0",
+  "seconds": 15.7,
+  "calls": 14,
+  "tokens": 22299
+ },
+ "ULTABEAUTY_2023Q4_EARNINGS": {
+  "doc_id": "pi-b67406502d7c427d8bdc08f23aaa903e",
+  "seconds": 21.0,
+  "calls": 10,
+  "tokens": 11840
+ },
+ "WALMART_2019_10K": {
+  "doc_id": "pi-c88cacca3df545b0b37a0bd69d6ae949",
+  "seconds": 137.8,
+  "calls": 129,
+  "tokens": 236699
+ },
+ "ACTIVISIONBLIZZARD_2019_10K": {
+  "doc_id": "pi-0dcd175be0c947879841a01ad88d6b36",
+  "seconds": 169.0,
+  "calls": 163,
+  "tokens": 276442
+ },
+ "ADOBE_2022_10K": {
+  "doc_id": "pi-2e0122033a944068b6caa9133b9ba19b",
+  "seconds": 102.2,
+  "calls": 107,
+  "tokens": 170598
+ },
+ "AMCOR_2020_10K": {
+  "doc_id": "pi-2cca7d03ae5b41b2a862d3ab5565e6de",
+  "seconds": 138.6,
+  "calls": 140,
+  "tokens": 250898
+ },
+ "AMCOR_2023Q4_EARNINGS": {
+  "doc_id": "pi-1699981327fb48a38a6ef9663dcb9e17",
+  "seconds": 13.2,
+  "calls": 9,
+  "tokens": 18126
+ },
+ "AMERICANWATERWORKS_2020_10K": {
+  "doc_id": "pi-1a10cf693247436290b467988c0ef907",
+  "seconds": 138.3,
+  "calls": 166,
+  "tokens": 239437
+ },
+ "BESTBUY_2019_10K": {
+  "doc_id": "pi-1801f8d4ea3141b69ad13de7a8b2f0ad",
+  "seconds": 27.1,
+  "calls": 110,
+  "tokens": 165881
+ },
+ "BLOCK_2020_10K": {
+  "doc_id": "pi-c47bcbb3fc3948be9098948b07aaf344",
+  "seconds": 42.2,
+  "calls": 151,
+  "tokens": 215913
+ },
+ "COCACOLA_2021_10K": {
+  "doc_id": "pi-eb16c4842dd94cbc8ea3683587c24302",
+  "seconds": 163.3,
+  "calls": 163,
+  "tokens": 279288
+ },
+ "CORNING_2022_10K": {
+  "doc_id": "pi-3456d9f8c61f482aba884c8680473eb6",
+  "seconds": 93.0,
+  "calls": 130,
+  "tokens": 192057
+ },
+ "FOOTLOCKER_2022_8K_dated_2022-08-19": {
+  "doc_id": "pi-3568a905db5f4f9b995054d003d65079",
+  "seconds": 104.1,
+  "calls": 15,
+  "tokens": 39403
+ },
+ "GENERALMILLS_2022_10K": {
+  "doc_id": "pi-06749df607204c8481dfc37c3a3b0a90",
+  "seconds": 72.0,
+  "calls": 127,
+  "tokens": 198688
+ },
+ "JOHNSON_JOHNSON_2023Q2_EARNINGS": {
+  "doc_id": "pi-2f1e6918fbf448d7a72ad3e46409d10d",
+  "seconds": 11.6,
+  "calls": 7,
+  "tokens": 20895
+ },
+ "JPMORGAN_2023Q2_10Q": {
+  "doc_id": "pi-732ccc8cff3a4fcea65dc069cbe8ee75",
+  "seconds": 120.0,
+  "calls": 213,
+  "tokens": 363726
+ },
+ "LOCKHEEDMARTIN_2022_10K": {
+  "doc_id": "pi-02234f18bba44cfa85c2967b7a7def7e",
+  "seconds": 60.0,
+  "calls": 128,
+  "tokens": 226996
+ },
+ "MGMRESORTS_2022Q4_EARNINGS": {
+  "doc_id": "pi-b2874de7cc854ecd8df1584d07d570ff",
+  "seconds": 16.7,
+  "calls": 8,
+  "tokens": 15314
+ },
+ "NETFLIX_2015_10K": {
+  "doc_id": "pi-b5057f9322884910997d10b71718fa0d",
+  "seconds": 74.2,
+  "calls": 68,
+  "tokens": 95640
+ },
+ "NIKE_2021_10K": {
+  "doc_id": "pi-bf98c5b437104d07a9da0d886ca56304",
+  "seconds": 40.8,
+  "calls": 101,
+  "tokens": 157210
+ },
+ "PEPSICO_2022_10K": {
+  "doc_id": "pi-f0b1fd3101d947248aaaca7b2a4c4262",
+  "seconds": 242.2,
+  "calls": 314,
+  "tokens": 614572
+ },
+ "PFIZER_2021_10K": {
+  "doc_id": "pi-69f74af2cdff4b42bd39164a8dbe1de3",
+  "seconds": 121.8,
+  "calls": 140,
+  "tokens": 294048
+ },
+ "VERIZON_2021_10K": {
+  "doc_id": "pi-cb5da3e3e77e471c94531f6f67451967",
+  "seconds": 317.6,
+  "calls": 143,
+  "tokens": 214975
+ },
+ "WALMART_2020_10K": {
+  "doc_id": "pi-3cec4aec750f442dad37147264e5d7b8",
+  "seconds": 410.8,
+  "calls": 147,
+  "tokens": 247217
+ }
+}

@@ -1,0 +1,9 @@
+{
+ "questions": 148,
+ "filings_indexed": 84,
+ "filings_failed": [],
+ "tokens_in_results_and_index": 36725545,
+ "tokens_in_ledger": 38853466,
+ "ledger_calls": 11574,
+ "ledger_minus_records": 2127921
+}
