@@ -1186,8 +1186,8 @@
  },
  {
   "id": "out-88",
-  "label": "W",
-  "rule": 6
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-89",

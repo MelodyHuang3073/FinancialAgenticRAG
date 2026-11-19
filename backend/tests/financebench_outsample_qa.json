@@ -524,7 +524,7 @@
  {
   "doc_name": "LOCKHEEDMARTIN_2025_10K",
   "question": "What was Lockheed Martin's FY2025 free cash flow, defined as cash from operations minus capex? Use the cash flow statement and answer in USD millions.",
-  "answer": "$7,615 million",
+  "answer": "$6,908 million (cash from operations of $8,557 million less capital expenditures of $1,649 million).",
   "question_type": "metrics-generated"
  },
  {
@@ -578,7 +578,7 @@
  {
   "doc_name": "MGMRESORTS_2025_10K",
   "question": "Using FY2025 figures, is MGM Resorts a capital-intensive company? Show the ratios behind your answer.",
-  "answer": "Yes. It takes about $4.22 of assets to generate $1 of revenue (total assets $41,374 million / revenue $9,810 million), and capital expenditures were $1,069 million, about 11% of revenue.",
+  "answer": "Yes. It takes about $2.36 of assets to generate $1 of revenue (total assets $41,374 million / net revenues $17,538 million), and capital expenditures were $1,069 million, about 6.1% of revenue.",
   "question_type": "domain-relevant"
  },
  {
