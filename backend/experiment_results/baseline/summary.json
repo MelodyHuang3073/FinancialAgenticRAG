@@ -1,58 +1,97 @@
 {
  "all": {
   "n": 300,
-  "C": 287,
+  "C": 277,
   "S": 2,
-  "P": 8,
-  "W": 3
+  "P": 11,
+  "W": 10
  },
  "train": {
   "n": 150,
   "C": 145,
   "S": 0,
-  "P": 4,
-  "W": 1
+  "P": 2,
+  "W": 3
  },
- "out": {
+ "test": {
   "n": 150,
-  "C": 142,
+  "C": 132,
   "S": 2,
-  "P": 4,
-  "W": 2
+  "P": 9,
+  "W": 7
  },
  "by_type": {
   "domain-relevant": {
-   "n": 71,
-   "C": 65,
+   "n": 100,
+   "C": 91,
    "S": 0,
-   "P": 5,
-   "W": 1
+   "P": 7,
+   "W": 2
   },
   "metrics-generated": {
-   "n": 150,
-   "C": 148,
-   "S": 1,
-   "P": 0,
-   "W": 1
+   "n": 100,
+   "C": 92,
+   "S": 2,
+   "P": 1,
+   "W": 5
   },
   "novel-generated": {
-   "n": 79,
-   "C": 74,
-   "S": 1,
+   "n": 100,
+   "C": 94,
+   "S": 0,
    "P": 3,
-   "W": 1
+   "W": 3
+  }
+ },
+ "by_type_and_set": {
+  "train/domain-relevant": {
+   "n": 50,
+   "C": 48,
+   "S": 0,
+   "P": 2,
+   "W": 0
+  },
+  "train/metrics-generated": {
+   "n": 50,
+   "C": 50,
+   "S": 0,
+   "P": 0,
+   "W": 0
+  },
+  "train/novel-generated": {
+   "n": 50,
+   "C": 47,
+   "S": 0,
+   "P": 0,
+   "W": 3
+  },
+  "test/domain-relevant": {
+   "n": 50,
+   "C": 43,
+   "S": 0,
+   "P": 5,
+   "W": 2
+  },
+  "test/metrics-generated": {
+   "n": 50,
+   "C": 42,
+   "S": 2,
+   "P": 1,
+   "W": 5
+  },
+  "test/novel-generated": {
+   "n": 50,
+   "C": 47,
+   "S": 0,
+   "P": 3,
+   "W": 0
   }
  },
  "not_correct": [
   {
-   "id": "train-61",
-   "label": "P",
-   "rule": 15
-  },
-  {
-   "id": "train-96",
-   "label": "P",
-   "rule": 20
+   "id": "train-109",
+   "label": "W",
+   "rule": "9.4-6"
   },
   {
    "id": "train-119",
@@ -70,65 +109,169 @@
    "rule": 6
   },
   {
-   "id": "out-10",
-   "label": "S",
-   "rule": 1
+   "id": "train-141",
+   "label": "W",
+   "rule": 13
   },
   {
-   "id": "out-12",
+   "id": "out-7",
    "label": "W",
    "rule": 6
   },
   {
-   "id": "out-24",
-   "label": "S",
-   "rule": 1
-  },
-  {
-   "id": "out-33",
+   "id": "out-34",
    "label": "P",
-   "rule": 18
+   "rule": 6
   },
   {
-   "id": "out-50",
+   "id": "out-43",
    "label": "W",
    "rule": 6
   },
   {
-   "id": "out-89",
+   "id": "out-45",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "out-60",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "out-81",
    "label": "P",
    "rule": 6
   },
   {
-   "id": "out-104",
-   "label": "P",
+   "id": "out-87",
+   "label": "W",
    "rule": 6
   },
   {
-   "id": "out-124",
+   "id": "out-88",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-92",
+   "label": "P",
+   "rule": "9.4-1"
+  },
+  {
+   "id": "out-97",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "out-106",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-115",
    "label": "P",
    "rule": 18
+  },
+  {
+   "id": "out-117",
+   "label": "P",
+   "rule": "9.4-1"
+  },
+  {
+   "id": "out-129",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "out-134",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-146",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-148",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-149",
+   "label": "P",
+   "rule": "9.4-4"
   }
  ],
  "errors": 0,
- "seconds_per_question": {
-  "mean": 20.2,
-  "median": 18.8,
-  "max": 76.5
+ "per_set": {
+  "train": {
+   "questions": 150,
+   "wall_seconds": 1278.0,
+   "seconds_per_question": {
+    "mean": 31.7,
+    "median": 28.8,
+    "max": 99.1
+   },
+   "usage": {
+    "prompt_tokens": 2197209,
+    "completion_tokens": 254838,
+    "reasoning_tokens": 224192,
+    "total_tokens": 2452047,
+    "calls": 273
+   },
+   "usage_by_caller": {
+    "decomposer": {
+     "prompt_tokens": 38291,
+     "completion_tokens": 89481,
+     "reasoning_tokens": 78208,
+     "total_tokens": 127772,
+     "calls": 123
+    },
+    "answer": {
+     "prompt_tokens": 2158918,
+     "completion_tokens": 165357,
+     "reasoning_tokens": 145984,
+     "total_tokens": 2324275,
+     "calls": 150
+    }
+   },
+   "tokens_per_question": 16347
+  },
+  "test": {
+   "questions": 150,
+   "wall_seconds": 1062.4,
+   "seconds_per_question": {
+    "mean": 27.6,
+    "median": 25.9,
+    "max": 65.7
+   },
+   "usage": {
+    "prompt_tokens": 2309024,
+    "completion_tokens": 251828,
+    "reasoning_tokens": 223040,
+    "total_tokens": 2560852,
+    "calls": 285
+   },
+   "usage_by_caller": {
+    "answer": {
+     "prompt_tokens": 2271392,
+     "completion_tokens": 156315,
+     "reasoning_tokens": 138496,
+     "total_tokens": 2427707,
+     "calls": 150
+    },
+    "decomposer": {
+     "prompt_tokens": 37632,
+     "completion_tokens": 95513,
+     "reasoning_tokens": 84544,
+     "total_tokens": 133145,
+     "calls": 135
+    }
+   },
+   "tokens_per_question": 17072
+  }
  },
- "usage": {
-  "decomposer": {
-   "calls": 234,
-   "prompt_tokens": 95915,
-   "completion_tokens": 205217,
-   "total_tokens": 301132
-  },
-  "answer": {
-   "calls": 300,
-   "prompt_tokens": 4320059,
-   "completion_tokens": 315591,
-   "total_tokens": 4635650
-  },
-  "total_tokens": 4936782
- }
+ "total_tokens": 5012899
 }

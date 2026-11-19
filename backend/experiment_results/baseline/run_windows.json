@@ -1,0 +1,28 @@
+{
+ "train": {
+  "start": "2026-11-19 14:53:02",
+  "ledger_before": 4177491,
+  "end": "2026-11-19 15:14:20",
+  "exit_codes": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "ledger_after": 6629538,
+  "wall_seconds": 1278.0
+ },
+ "test": {
+  "start": "2026-11-19 15:14:20",
+  "ledger_before": 6629538,
+  "end": "2026-11-19 15:32:02",
+  "exit_codes": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "ledger_after": 9190390,
+  "wall_seconds": 1062.4
+ }
+}
