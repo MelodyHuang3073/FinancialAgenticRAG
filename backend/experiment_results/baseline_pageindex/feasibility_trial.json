@@ -1,0 +1,51 @@
+{
+ "model": "gpt-5-mini",
+ "index": [
+  {
+   "doc": "3M_2018_10K",
+   "doc_id": "pi-e108cc3fd03746d38f5cb0828c6bf8c2",
+   "seconds": 143.3,
+   "calls": 157,
+   "tokens_total_so_far": 249800
+  },
+  {
+   "doc": "3M_2022_10K",
+   "doc_id": "pi-31db84519da54529bc2c87750a4d80ab",
+   "seconds": 204.2,
+   "calls": 204,
+   "tokens_total_so_far": 640977
+  }
+ ],
+ "questions": [
+  {
+   "id": "train-1",
+   "question": "What is the FY2018 capital expenditure amount (in USD millions) for 3M? Give a response to the question by relying on the details shown in the cash flow statement.",
+   "gold": "$1577.00",
+   "answer": "FY2018 capital expenditures (Purchases of property, plant and equipment) — $1,577 million, per the Consolidated Statement of Cash Flows in 3M_2018_10K.pdf (amounts in millions).",
+   "error": null,
+   "seconds": 20.7,
+   "calls": 6,
+   "tokens": 177515
+  },
+  {
+   "id": "train-3",
+   "question": "Is 3M a capital-intensive business based on FY2022 data?",
+   "gold": "No, the company is managing its CAPEX and Fixed Assets pretty efficiently, which is evident from below key metrics:\nCAPEX/Revenue Ratio: 5.1%\nFixed assets/Total Assets: 20%\nReturn on Assets= 12.4%",
+   "answer": "Short answer: Yes. 3M is a capital‑intensive manufacturing company in FY2022 — material recurring capital spending and a large property, plant & equipment base relative to sales and assets.\n\nKey FY2022 facts from the 3M 2022 Form 10‑K (3M_2022_10K.pdf)\n- Net sales: $34,229 million (Consolidated Statement of Income, p.48).  \n- Purchases of property, plant and equipment (capex): $1,749 million (Consolidated Statement of Cash Flows, p.52).  \n  - Capex / Sales ≈ 1,749 / 34,229 ≈ 5.1%.\n- Property, plant & equipment — net: $9,178 million (Consolidated Balance Sheet, p.50).  \n  - PP&E / Sales ≈ 9,178 / 34,229 ≈ 26.8%.  \n  - PP&E / Total assets ≈ 9,178 / 46,455 ≈ 19.8%.\n- Depreciation & amortization: $1,831 million (Cash flows / income statement items) → D&A / Sales ≈ 5.3%.\n- Free cash flow (operating cash flow minus PP&E purchases): $3,842 million in 2022 (MD&A / cash flow tables, p.41/52); capex represented ~45% of that free cash flow.\n- Ongoing capital plans and footprint: 3M expects 2023 capex ~$1.5–$1.8 billion and operates many manufacturing facilities (61 U.S., 83 international), showing ongoing capital needs (MD&A, various pages).\n\nInterpretation\n- The company has significant invested tangible assets (PP&E ~9.2B) and steady annual capex (≈$1.7–1.8B), which it needs to maintain and grow manufacturing capacity — hallmarks of a capital‑intensive business.  \n- Capex as a share of sales (~5%) and PP&E representing ~27% of sales indicate meaningful capital deployment but are typical for diversified industrial / manufacturing firms (i.e., not as extreme as utilities/railroads, but materially higher than asset‑light software or services companies).  \n- 3M’s large depreciation and capex levels, plus ongoing investments for manufacturing, productivity and environmental compliance, support the conclusion that 3M is capital‑intensive.\n\nIf you’d like, I can:\n- compute additional ratios (capex/EBITDA, PP&E per employee, capex trend 2020–2022) from the 10‑K, or\n- pull the exact page citations for each figure used.",
+   "error": null,
+   "seconds": 36.5,
+   "calls": 6,
+   "tokens": 159181
+  },
+  {
+   "id": "train-4",
+   "question": "What drove operating margin change as of FY2022 for 3M? If operating margin is not a useful metric for a company like this, then please state that and explain why.",
+   "gold": "Operating Margin for 3M in FY2022 has decreased by 1.7% primarily due to: \n-Decrease in gross Margin\n-mostly one-off charges including Combat Arms Earplugs litigation, impairment related to exiting PFAS manufacturing, costs related to exiting Russia and divestiture-related restructuring\ncharges",
+   "answer": "Short answer\n- Reported operating margin fell from 20.8% in 2021 to 19.1% in 2022 (down 1.7 percentage points).  \n- Much of that decline was driven by large, discrete special items (litigation, PFAS exit and Russia‑exit charges) and by inflationary cost pressure.  \n- For 3M in FY2022, an “adjusted” operating margin that excludes special items is more useful for assessing underlying operating performance because the GAAP margin was materially distorted by those one‑time/transaction items and a change in segment reporting.\n\nWhat moved the operating margin in FY2022 (summary, with magnitudes where shown in the 10‑K)\n1. Large special items (main driver of the gap between reported and underlying margin)\n   - Net costs for significant litigation (Combat Arms earplug / respirator/asbestos and PFAS‑related matters). 3M reported roughly $2.3 billion of pre‑tax litigation costs in 2022 (including ~$1.2B Q2 charge tied to steps toward resolving Combat Arms claims). These were recorded as special items and materially reduced reported operating income.  \n   - PFAS manufacturing exit impairment/charges related to 3M’s December 2022 commitment to exit PFAS manufacturing (about $0.8 billion pre‑tax impairment recorded).  \n   - Russia exit charge (recorded in 2022, smaller — ~ $100M order of magnitude).  \n   - Offsetting the above: a large pre‑tax gain from the Food Safety split‑off/combination with Neogen (~$2.7 billion pre‑tax) improved GAAP results but is a divestiture gain (a special item).  \n   Net effect: special items moved reported operating margin by roughly -1.7 percentage points in 2022 (see MD&A reconciliation).\n\n2. Cost inflation and supply/manufacturing headwinds (principal underlying operating driver)\n   - Raw material, logistics and outsourced manufacturing inflation: shown in MD&A as a roughly −2.4 percentage‑point headwind to operating margin in 2022.  \n   - Manufacturing/productivity headwinds (including the Belgium/Zwijndrecht interruptions) also depressed margin and reduced the benefit from volume leverage.\n\n3. Offsetting operational actions\n   - Price increases, spending discipline, and restructuring/productivity actions provided offsetting benefit (management quantified the combined organic growth/productivity benefit at about +1.0 percentage point to margin).  \n   - These actions limited but did not fully offset the raw‑material inflation headwind.\n\n4. Other items\n   - Foreign‑exchange translation and transaction effects reduced operating income (MD&A cites about $271M operating income impact in 2022, shown as roughly −0.4 percentage point effect on margin).  \n   - Decline in disposable respirator demand (an identified product‑specific drag), pension/postretirement non‑service cost changes and segment/divestiture effects (Aearo deconsolidation, stranded costs) also influenced margins.\n\nHow to interpret operating margin for 3M going forward (usefulness and caveats)\n- Useful: Operating margin is a meaningful metric for 3M because it measures the core ability of a diversified industrial/manufacturing company to convert sales into operating profit (captures pricing, input costs, productivity and manufacturing leverage). It’s valuable for cross‑period and peer comparisons when you compare comparable measures (same segment scope, before/after large one‑offs).\n- Caveat — FY2022 in particular: GAAP reported operating margin is materially distorted by large, one‑time or transaction items (litigation charges, impairments, divestiture gain, Russia exit items) and by a Q1‑2022 change in the CODM’s segment performance measure and special‑item treatment. Because those items are non‑recurring or restructuring/divestiture related, the reported margin overstates or understates underlying operating performance depending on whether the special items are net gains or net charges.\n- Recommendation: use (a) adjusted operating margin excluding the explicitly identified special items in MD&A for an assessment of ongoing operating performance; (b) look at segment operating margins (post‑Q1‑2022 segment measure change) to see where margin pressure is concentrated; and (c) complement margin analysis with cash‑flow metrics (operating cash flow, free cash flow) and the MD&A disclosures/notes (Note 15, Note 16, Note 3 and the MD&A reconciliation tables) to understand the size and nature of the special items.\n\nIf you want, I can:\n- Pull the MD&A reconciliation table and the specific lines (numbers for each special item and the adjusted vs reported margins) into a short table for easy reference; or\n- Extract the specific Note(s) (Note 15, Note 16, Note 3) that explain the PFAS, litigation and Food Safety divestiture amounts. Which would you prefer?",
+   "error": null,
+   "seconds": 39.0,
+   "calls": 8,
+   "tokens": 285814
+  }
+ ]
+}
