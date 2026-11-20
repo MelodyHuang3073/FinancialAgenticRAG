@@ -1,0 +1,2 @@
+Run windows (Taiwan time, 2026-11-20): train 21:52:56 - 22:37:44 (complete, 150/150). out phase 1: 22:37:44 - 22:54:07 (killed by hand after the daily Gemini quota ran out; 90 of 150 records kept, 2 fallback-shaped records dropped). out phase 2 = resume after the quota reset.
+Usage per set = ledger lines inside these windows (out = phase 1 + phase 2).
