@@ -1,0 +1,89 @@
+{
+ "all": {
+  "n": 300,
+  "C": 148,
+  "S": 1,
+  "P": 30,
+  "W": 121
+ },
+ "train": {
+  "n": 150,
+  "C": 65,
+  "S": 1,
+  "P": 16,
+  "W": 68
+ },
+ "test": {
+  "n": 150,
+  "C": 83,
+  "S": 0,
+  "P": 14,
+  "W": 53
+ },
+ "by_type": {
+  "domain-relevant": {
+   "n": 100,
+   "C": 49,
+   "S": 0,
+   "P": 21,
+   "W": 30
+  },
+  "metrics-generated": {
+   "n": 100,
+   "C": 21,
+   "S": 1,
+   "P": 4,
+   "W": 74
+  },
+  "novel-generated": {
+   "n": 100,
+   "C": 78,
+   "S": 0,
+   "P": 5,
+   "W": 17
+  }
+ },
+ "w_breakdown": {
+  "train": {
+   "W": 68,
+   "lack_or_ask_back": 51,
+   "gave_wrong_answer": 17
+  },
+  "test": {
+   "W": 53,
+   "lack_or_ask_back": 47,
+   "gave_wrong_answer": 6
+  }
+ },
+ "per_set": {
+  "train": {
+   "calls": 150,
+   "errors": 0,
+   "prompt_tokens": 550514,
+   "completion_tokens": 126731,
+   "total_tokens": 677245,
+   "tokens_per_question": 4514,
+   "wall_seconds": 421.3,
+   "seconds_per_question": {
+    "mean": 9.3,
+    "median": 8.5,
+    "max": 30.7
+   }
+  },
+  "test": {
+   "calls": 150,
+   "errors": 0,
+   "prompt_tokens": 540291,
+   "completion_tokens": 103581,
+   "total_tokens": 643872,
+   "tokens_per_question": 4292,
+   "wall_seconds": 335.6,
+   "seconds_per_question": {
+    "mean": 7.8,
+    "median": 6.3,
+    "max": 31.5
+   }
+  }
+ },
+ "total_tokens": 1321117
+}
