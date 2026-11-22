@@ -1,0 +1,4 @@
+{"ts": "2026-11-22 20:41:52", "date": "2026-11-22", "pid": 18056, "model": "gpt-5-mini", "caller": "decomposer", "prompt_tokens": 159, "completion_tokens": 552, "reasoning_tokens": 512, "total_tokens": 711, "prompt_chars": 681}
+{"ts": "2026-11-22 20:42:19", "date": "2026-11-22", "pid": 18056, "model": "gpt-5-mini", "caller": "answer", "prompt_tokens": 7506, "completion_tokens": 2230, "reasoning_tokens": 2048, "total_tokens": 9736, "prompt_chars": 27814}
+{"ts": "2026-11-22 20:42:29", "date": "2026-11-22", "pid": 18056, "model": "gpt-5-mini", "caller": "answer", "prompt_tokens": 7612, "completion_tokens": 1002, "reasoning_tokens": 896, "total_tokens": 8614, "prompt_chars": 27713}
+{"ts": "2026-11-22 20:42:47", "date": "2026-11-22", "pid": 18056, "model": "gpt-5-mini", "caller": "answer", "prompt_tokens": 7934, "completion_tokens": 1411, "reasoning_tokens": 1216, "total_tokens": 9345, "prompt_chars": 28407}
