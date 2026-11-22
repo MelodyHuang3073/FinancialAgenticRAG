@@ -1151,8 +1151,8 @@
  },
  {
   "id": "out-81",
-  "label": "P",
-  "rule": 6
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-82",
@@ -1416,7 +1416,7 @@
  },
  {
   "id": "out-134",
-  "label": "W",
+  "label": "P",
   "rule": 6
  },
  {
@@ -1486,8 +1486,8 @@
  },
  {
   "id": "out-148",
-  "label": "S",
-  "rule": 1
+  "label": "C",
+  "rule": null
  },
  {
   "id": "out-149",

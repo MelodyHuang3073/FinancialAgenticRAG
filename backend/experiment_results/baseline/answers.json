@@ -3318,14 +3318,13 @@
   "doc_name": "KRAFTHEINZ_2025_10K",
   "question_type": "domain-relevant",
   "question": "If you divide Kraft Heinz's FY2025 operating income by its annual interest expense, what interest coverage ratio results, and what does it tell you?",
-  "gold": "Operating income was negative (-$4,669 million) against interest expense of $947 million, so the coverage ratio is negative (about -4.93x); operating income did not cover interest.",
+  "gold": "Operating income was negative (-$4,669 million) against interest expense of $947 million, so the coverage ratio is zero (negative operating income is reported as 0, the same convention as the training set); operating income did not cover interest.",
   "answer": "Dividing The Kraft Heinz Company’s FY2025 reported operating income by its annual interest expense gives an interest coverage ratio of 0.0, which indicates reported operating income does not cover interest expense. This uses reported operating income of $(4,669) million and interest expense of $947 million. The filing shows “Operating income/(loss) | (4,669)” and “Interest expense | 947.” By contrast, the company’s Adjusted Operating Income was $4,745 million, which on the same basis would imply an adjusted coverage of about 5.0 (4,745 ÷ 947), illustrating the difference between reported and adjusted measures.",
   "error": null,
   "elapsed": 16.4,
-  "label": "P",
-  "rule": 6,
-  "form": "C",
-  "note": "標準答案是負值約 -4.93 倍;答案把負值記成 0.0,但說明營業利益不足以支付利息"
+  "label": "C",
+  "rule": null,
+  "form": "C"
  },
  {
   "id": "out-82",
@@ -4121,15 +4120,15 @@
   "n": 134,
   "doc_name": "ULTABEAUTY_2025_10K",
   "question_type": "metrics-generated",
-  "question": "What was Ulta Beauty's asset turnover in fiscal 2025 (revenue divided by the average of fiscal 2024 and fiscal 2025 total assets)? Use the balance sheet and income statement and round to two decimal places.",
+  "question": "What was Ulta Beauty's asset turnover in fiscal 2025 (ended January 31, 2026), defined as revenue divided by the average of fiscal 2024 and fiscal 2025 total assets? Use the balance sheet and income statement and round to two decimal places.",
   "gold": "1.91",
-  "answer": "Ulta Beauty’s asset turnover in fiscal 2025 was 1.93. This is based on \"Net sales\" of $11,295,654 and \"Total assets\" of $5,707,011 and $6,001,693 (average $5,854,352), giving 11,295,654 / 5,854,352 = 1.9294, rounded to **1.93**.",
+  "answer": "Ulta Beauty’s asset turnover for fiscal 2025 (period ended January 31, 2026) was **1.95**.  \n\nThis is calculated as fiscal‑2025 net sales of $12,392,820 divided by the average of fiscal‑2024 and fiscal‑2025 total assets [($5,707,011 + $6,999,294)/2 = $6,353,152.5], yielding 12,392,820 / 6,353,152.5 = 1.9507 → **1.95** (rounded). I used the filing lines \"Net sales . . . $12,392,820\" and \"Total assets . . . $6,999,294\" as the sources.",
   "error": null,
-  "elapsed": 32.8,
-  "label": "W",
+  "elapsed": 24.417476654052734,
+  "label": "P",
   "rule": 6,
   "form": "B",
-  "note": "標準答案 1.91;答案營收與總資產都取錯一年(營收 11,295,654 是 FY2024),算出 1.93"
+  "note": "標準答案 1.91;答案營收 12,392,820 對,但平均總資產取成 FY2023 與 FY2025(5,707,011 與 6,999,294),應是 FY2024 與 FY2025(6,001,693 與 6,999,294),算出 1.95;方法對、結果差 2.1%,依第 6 列判 P(2026-11-22 題目補上結束日後重跑)"
  },
  {
   "id": "out-135",
@@ -4137,11 +4136,11 @@
   "n": 135,
   "doc_name": "ULTABEAUTY_2025_10K",
   "question_type": "domain-relevant",
-  "question": "Has Ulta Beauty kept its gross margin stable, moving by no more than about 2 percentage points a year? If gross margin is not meaningful for Ulta Beauty's business, say so and explain why.",
+  "question": "Has Ulta Beauty kept its gross margin stable through fiscal 2025 (ended January 31, 2026), moving by no more than about 2 percentage points a year? If gross margin is not meaningful for Ulta Beauty's business, say so and explain why.",
   "gold": "Yes, the margins have been consistent. Gross margin was 39.1% in fiscal 2025 versus 38.8% in fiscal 2024, a change of +0.3 percentage points.",
-  "answer": "Yes. Ulta Beauty’s consolidated gross profit margin was 39.1% in fiscal 2026, 38.8% in fiscal 2025 and 39.1% in fiscal 2024, so the year‑to‑year moves were at most 0.3 percentage points and well within a 2 percentage‑point band. The filing’s financial table shows \"Gross profit . . . 39.1% | 38.8% | 39.1%.\" Gross margin is a meaningful metric for Ulta given it is a retailer and the filing reports cost of sales (merchandise, distribution and store costs) that drive gross profit.",
+  "answer": "Yes. Ulta Beauty’s consolidated gross margin was stable through fiscal 2025 (year ended Jan 31, 2026): it was **39.1%** in fiscal 2025, **38.8%** in fiscal 2024 and **39.1%** in fiscal 2023, moving by only about 0.3 percentage points year‑over‑year. These year‑to‑year changes (≈+0.3 ppt and ≈−0.3 ppt) are well within the “about 2 percentage points” threshold. The filing itself shows this in the income statement table: \"Gross profit ... 39.1% | 38.8% | 39.1%,\" so gross margin is a meaningful metric for Ulta.",
   "error": null,
-  "elapsed": 16.6,
+  "elapsed": 17.84488034248352,
   "label": "C",
   "rule": null,
   "form": "D"
@@ -4152,11 +4151,11 @@
   "n": 136,
   "doc_name": "ULTABEAUTY_2025_10K",
   "question_type": "domain-relevant",
-  "question": "Is Ulta Beauty's operating margin trending up in fiscal 2025? If operating margin does not apply to a business like this, state that and explain.",
+  "question": "Is Ulta Beauty's operating margin trending up in fiscal 2025 (ended January 31, 2026)? If operating margin does not apply to a business like this, state that and explain.",
   "gold": "No. Operating margin declined from 13.9% in fiscal 2024 to 12.4% in fiscal 2025 (a change of -1.5 percentage points).",
-  "answer": "No. Ulta Beauty’s operating margin in fiscal 2025 was 12.4%, down from 13.9% in fiscal 2024 (a decrease of 1.5 percentage points), so it is not trending up. The consolidated financial table in the filing shows \"Operating income . . . 12.4% | 13.9% | 15.0%,\" which confirms the decline. Note: in the filing, fiscal 2025 is reported in the column headed 2026.",
+  "answer": "No — Ulta Beauty’s operating margin in fiscal 2025 (fiscal year ended January 31, 2026) declined to about **12.37%** from **13.85%** in the prior year, a decrease of roughly **1.48 percentage points**. The company’s consolidated statements show operating income of $1,532,992 on $12,392,820 of sales (fiscal 2025) versus $1,564,972 on $11,295,654 of sales (prior year), consistent with the printed percentages. The filing itself lists “Operating income . . . 12.4% | 13.9% | 15.0%,” confirming the downward trend rather than an increase.",
   "error": null,
-  "elapsed": 29.6,
+  "elapsed": 15.465130805969238,
   "label": "C",
   "rule": null,
   "form": "D"
@@ -4338,10 +4337,9 @@
   "answer": "Walmart's operating margin increased by **0.2 percentage points** from fiscal 2024 to fiscal 2025 (from **4.2%** to **4.4%**). The company's income statement shows \"Operating income as a percentage of net sales\" of 4.4% for 2025 and 4.2% for 2024.",
   "error": null,
   "elapsed": 14.4,
-  "label": "S",
-  "rule": 1,
-  "form": "B",
-  "note": "標準答案 0.1;答案用財報印的淨銷售額為分母的 4.2% 到 4.4%,差 0.2,差最後一位(決策表第 7 列的邊界)"
+  "label": "C",
+  "rule": null,
+  "form": "B"
  },
  {
   "id": "out-149",

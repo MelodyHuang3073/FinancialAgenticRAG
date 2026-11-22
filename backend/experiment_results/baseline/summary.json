@@ -1,10 +1,10 @@
 {
  "all": {
   "n": 300,
-  "C": 278,
-  "S": 2,
+  "C": 280,
+  "S": 1,
   "P": 11,
-  "W": 9
+  "W": 8
  },
  "train": {
   "n": 150,
@@ -15,25 +15,25 @@
  },
  "test": {
   "n": 150,
-  "C": 133,
-  "S": 2,
+  "C": 135,
+  "S": 1,
   "P": 9,
-  "W": 6
+  "W": 5
  },
  "by_type": {
   "domain-relevant": {
    "n": 100,
-   "C": 91,
+   "C": 92,
    "S": 0,
-   "P": 7,
+   "P": 6,
    "W": 2
   },
   "metrics-generated": {
    "n": 100,
-   "C": 93,
-   "S": 2,
-   "P": 1,
-   "W": 4
+   "C": 94,
+   "S": 1,
+   "P": 2,
+   "W": 3
   },
   "novel-generated": {
    "n": 100,
@@ -67,17 +67,17 @@
   },
   "test/domain-relevant": {
    "n": 50,
-   "C": 43,
+   "C": 44,
    "S": 0,
-   "P": 5,
+   "P": 4,
    "W": 2
   },
   "test/metrics-generated": {
    "n": 50,
-   "C": 43,
-   "S": 2,
-   "P": 1,
-   "W": 4
+   "C": 44,
+   "S": 1,
+   "P": 2,
+   "W": 3
   },
   "test/novel-generated": {
    "n": 50,
@@ -139,11 +139,6 @@
    "rule": "9.4-4"
   },
   {
-   "id": "out-81",
-   "label": "P",
-   "rule": 6
-  },
-  {
    "id": "out-87",
    "label": "W",
    "rule": 6
@@ -180,16 +175,11 @@
   },
   {
    "id": "out-134",
-   "label": "W",
+   "label": "P",
    "rule": 6
   },
   {
    "id": "out-146",
-   "label": "S",
-   "rule": 1
-  },
-  {
-   "id": "out-148",
    "label": "S",
    "rule": 1
   },
@@ -238,8 +228,8 @@
    "questions": 150,
    "wall_seconds": 1062.4,
    "seconds_per_question": {
-    "mean": 27.6,
-    "median": 25.9,
+    "mean": 27.5,
+    "median": 25.5,
     "max": 65.7
    },
    "usage": {
