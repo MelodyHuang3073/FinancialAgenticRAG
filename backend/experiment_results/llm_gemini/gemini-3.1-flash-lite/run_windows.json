@@ -1,0 +1,25 @@
+{
+ "train": {
+  "windows": [
+   {
+    "start": "2026-11-20 21:52:56",
+    "end": "2026-11-20 22:37:44"
+   }
+  ],
+  "wall_seconds": 2688.0
+ },
+ "test": {
+  "windows": [
+   {
+    "start": "2026-11-20 22:37:44",
+    "end": "2026-11-20 22:54:07"
+   },
+   {
+    "start": "2026-11-21 19:23:33",
+    "end": "2026-11-21 19:53:45"
+   }
+  ],
+  "wall_seconds": 2795.0,
+  "note": "phase 1 stopped by hand when the daily Gemini quota ran out; phase 2 resumed on 2026-11-21 (the idle time in between is not counted)"
+ }
+}
