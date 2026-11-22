@@ -799,19 +799,19 @@
  },
  {
   "doc_name": "ULTABEAUTY_2025_10K",
-  "question": "What was Ulta Beauty's asset turnover in fiscal 2025 (revenue divided by the average of fiscal 2024 and fiscal 2025 total assets)? Use the balance sheet and income statement and round to two decimal places.",
+  "question": "What was Ulta Beauty's asset turnover in fiscal 2025 (ended January 31, 2026), defined as revenue divided by the average of fiscal 2024 and fiscal 2025 total assets? Use the balance sheet and income statement and round to two decimal places.",
   "answer": "1.91",
   "question_type": "metrics-generated"
  },
  {
   "doc_name": "ULTABEAUTY_2025_10K",
-  "question": "Has Ulta Beauty kept its gross margin stable, moving by no more than about 2 percentage points a year? If gross margin is not meaningful for Ulta Beauty's business, say so and explain why.",
+  "question": "Has Ulta Beauty kept its gross margin stable through fiscal 2025 (ended January 31, 2026), moving by no more than about 2 percentage points a year? If gross margin is not meaningful for Ulta Beauty's business, say so and explain why.",
   "answer": "Yes, the margins have been consistent. Gross margin was 39.1% in fiscal 2025 versus 38.8% in fiscal 2024, a change of +0.3 percentage points.",
   "question_type": "domain-relevant"
  },
  {
   "doc_name": "ULTABEAUTY_2025_10K",
-  "question": "Is Ulta Beauty's operating margin trending up in fiscal 2025? If operating margin does not apply to a business like this, state that and explain.",
+  "question": "Is Ulta Beauty's operating margin trending up in fiscal 2025 (ended January 31, 2026)? If operating margin does not apply to a business like this, state that and explain.",
   "answer": "No. Operating margin declined from 13.9% in fiscal 2024 to 12.4% in fiscal 2025 (a change of -1.5 percentage points).",
   "question_type": "domain-relevant"
  },
