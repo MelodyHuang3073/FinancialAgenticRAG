@@ -482,7 +482,7 @@
  {
   "doc_name": "KRAFTHEINZ_2025_10K",
   "question": "If you divide Kraft Heinz's FY2025 operating income by its annual interest expense, what interest coverage ratio results, and what does it tell you?",
-  "answer": "Operating income was negative (-$4,669 million) against interest expense of $947 million, so the coverage ratio is negative (about -4.93x); operating income did not cover interest.",
+  "answer": "Operating income was negative (-$4,669 million) against interest expense of $947 million, so the coverage ratio is zero (negative operating income is reported as 0, the same convention as the training set); operating income did not cover interest.",
   "question_type": "domain-relevant"
  },
  {
