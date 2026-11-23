@@ -1,0 +1,307 @@
+{
+ "all": {
+  "n": 300,
+  "C": 262,
+  "S": 4,
+  "P": 17,
+  "W": 17
+ },
+ "train": {
+  "n": 150,
+  "C": 130,
+  "S": 1,
+  "P": 8,
+  "W": 11
+ },
+ "out": {
+  "n": 150,
+  "C": 132,
+  "S": 3,
+  "P": 9,
+  "W": 6
+ },
+ "by_type": {
+  "domain-relevant": {
+   "n": 100,
+   "C": 82,
+   "S": 0,
+   "P": 11,
+   "W": 7
+  },
+  "metrics-generated": {
+   "n": 100,
+   "C": 90,
+   "S": 4,
+   "P": 2,
+   "W": 4
+  },
+  "novel-generated": {
+   "n": 100,
+   "C": 90,
+   "S": 0,
+   "P": 4,
+   "W": 6
+  }
+ },
+ "not_correct": [
+  {
+   "id": "train-3",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-6",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-32",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-40",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-55",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-56",
+   "label": "W",
+   "rule": "9.4-6"
+  },
+  {
+   "id": "train-69",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "train-74",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-77",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-89",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-95",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-108",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-119",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-121",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-123",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-130",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-133",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-134",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-136",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-145",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "out-20",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "out-24",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "out-29",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-57",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-60",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "out-64",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "out-67",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-81",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-87",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-100",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "out-104",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-106",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-123",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-134",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "out-135",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-136",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "out-146",
+   "label": "S",
+   "rule": 1
+  },
+  {
+   "id": "out-149",
+   "label": "W",
+   "rule": 14
+  }
+ ],
+ "errors": 0,
+ "seconds_per_question": {
+  "mean": 16.2,
+  "median": 14.9,
+  "max": 41.28920030593872
+ },
+ "usage": {
+  "decomposer": {
+   "calls": 174,
+   "prompt_tokens": 21725,
+   "completion_tokens": 114017,
+   "total_tokens": 135742
+  },
+  "answer": {
+   "calls": 300,
+   "prompt_tokens": 4013404,
+   "completion_tokens": 176596,
+   "total_tokens": 4190000
+  },
+  "total_tokens": 4325742
+ },
+ "usage_by_set": {
+  "train": {
+   "decomposer": {
+    "calls": 82,
+    "prompt_tokens": 10297,
+    "completion_tokens": 55270,
+    "total_tokens": 65567
+   },
+   "answer": {
+    "calls": 150,
+    "prompt_tokens": 1975513,
+    "completion_tokens": 96752,
+    "total_tokens": 2072265
+   },
+   "calls": 232,
+   "prompt_tokens": 1985810,
+   "completion_tokens": 152022,
+   "total_tokens": 2137832,
+   "seconds_per_question": {
+    "mean": 16.8,
+    "median": 15.9,
+    "max": 40.2
+   }
+  },
+  "out": {
+   "decomposer": {
+    "calls": 92,
+    "prompt_tokens": 11428,
+    "completion_tokens": 58747,
+    "total_tokens": 70175
+   },
+   "answer": {
+    "calls": 150,
+    "prompt_tokens": 2037891,
+    "completion_tokens": 79844,
+    "total_tokens": 2117735
+   },
+   "calls": 242,
+   "prompt_tokens": 2049319,
+   "completion_tokens": 138591,
+   "total_tokens": 2187910,
+   "seconds_per_question": {
+    "mean": 15.6,
+    "median": 14.6,
+    "max": 41.3
+   }
+  }
+ }
+}
