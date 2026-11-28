@@ -1,0 +1,577 @@
+{
+ "train": {
+  "n": 150,
+  "C": 63,
+  "S": 1,
+  "P": 20,
+  "W": 66
+ },
+ "by_type": {
+  "domain-relevant": {
+   "n": 50,
+   "C": 21,
+   "S": 0,
+   "P": 15,
+   "W": 14
+  },
+  "metrics-generated": {
+   "n": 50,
+   "C": 27,
+   "S": 1,
+   "P": 1,
+   "W": 21
+  },
+  "novel-generated": {
+   "n": 50,
+   "C": 15,
+   "S": 0,
+   "P": 4,
+   "W": 31
+  }
+ },
+ "rules_not_correct": {
+  "S": {
+   "1": 1
+  },
+  "P": {
+   "9.4-4": 4,
+   "19": 4,
+   "5": 1,
+   "6": 3,
+   "9.4-3": 1,
+   "15": 2,
+   "18": 3,
+   "11": 1,
+   "16": 1
+  },
+  "W": {
+   "6": 13,
+   "14": 4,
+   "13": 47,
+   "19": 1,
+   "18": 1
+  }
+ },
+ "not_correct": [
+  {
+   "id": "train-1",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-3",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-5",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-6",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-7",
+   "label": "W",
+   "rule": 19
+  },
+  {
+   "id": "train-8",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "train-9",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-13",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-14",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-15",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-17",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-19",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-23",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-24",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-25",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-30",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-31",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-33",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-34",
+   "label": "W",
+   "rule": 18
+  },
+  {
+   "id": "train-37",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-40",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-44",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-45",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-47",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-49",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-50",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-51",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "train-52",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-54",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-55",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-56",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-58",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-61",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "train-62",
+   "label": "P",
+   "rule": "9.4-4"
+  },
+  {
+   "id": "train-64",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-66",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-68",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-71",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-73",
+   "label": "P",
+   "rule": 5
+  },
+  {
+   "id": "train-74",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-76",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-77",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-78",
+   "label": "P",
+   "rule": "9.4-3"
+  },
+  {
+   "id": "train-79",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-80",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-82",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-85",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-86",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "train-87",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "train-88",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-89",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-90",
+   "label": "P",
+   "rule": 11
+  },
+  {
+   "id": "train-92",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-93",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-94",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-95",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-96",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-98",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-100",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-105",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-108",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-111",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-113",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-119",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-121",
+   "label": "P",
+   "rule": 19
+  },
+  {
+   "id": "train-122",
+   "label": "P",
+   "rule": 16
+  },
+  {
+   "id": "train-124",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-125",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-126",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-127",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-128",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-130",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-133",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-134",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-135",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-136",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-139",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "train-140",
+   "label": "P",
+   "rule": 18
+  },
+  {
+   "id": "train-141",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-142",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-144",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-145",
+   "label": "W",
+   "rule": 13
+  },
+  {
+   "id": "train-146",
+   "label": "P",
+   "rule": 15
+  },
+  {
+   "id": "train-147",
+   "label": "W",
+   "rule": 14
+  },
+  {
+   "id": "train-148",
+   "label": "P",
+   "rule": 6
+  },
+  {
+   "id": "train-149",
+   "label": "W",
+   "rule": 6
+  },
+  {
+   "id": "train-150",
+   "label": "S",
+   "rule": 1
+  }
+ ],
+ "voting": {
+  "distinct_answer_strings_among_5_runs": {
+   "1": 2,
+   "2": 7,
+   "3": 12,
+   "4": 13,
+   "5": 116
+  },
+  "questions_with_5_different_strings": 116,
+  "questions_whose_answer_equals_run_1": 136,
+  "p_or_w_numeric_questions_where_a_run_printed_the_gold_number": [
+   "train-1",
+   "train-31",
+   "train-47",
+   "train-50",
+   "train-76",
+   "train-100",
+   "train-149"
+  ]
+ },
+ "records": {
+  "calls": 4462,
+  "calls_per_question": 29.7,
+  "input_tokens": 17799952,
+  "output_tokens": 5061086,
+  "tokens": 22861038,
+  "tokens_per_question": {
+   "mean": 152406.9,
+   "median": 159577.0,
+   "max": 237703
+  },
+  "seconds_per_question": {
+   "mean": 385.3,
+   "median": 369.1,
+   "max": 1016.4
+  },
+  "seconds_sum": 57799,
+  "forced_answer_calls": 638,
+  "questions_with_a_forced_answer_call": 145,
+  "empty_replies": 0
+ },
+ "usage_ledger": {
+  "train": {
+   "calls": 4566,
+   "prompt_tokens": 18201849,
+   "completion_tokens": 5190400,
+   "total_tokens": 23392249,
+   "by_utc_day": {
+    "2026-11-26": {
+     "calls": 1752,
+     "prompt_tokens": 6977064,
+     "completion_tokens": 1987528,
+     "total_tokens": 8964592
+    },
+    "2026-11-27": {
+     "calls": 1870,
+     "prompt_tokens": 7429641,
+     "completion_tokens": 2099426,
+     "total_tokens": 9529067
+    },
+    "2026-11-28": {
+     "calls": 944,
+     "prompt_tokens": 3795144,
+     "completion_tokens": 1103446,
+     "total_tokens": 4898590
+    }
+   }
+  },
+  "trials": {
+   "calls": 107,
+   "prompt_tokens": 425297,
+   "completion_tokens": 151093,
+   "total_tokens": 576390,
+   "by_utc_day": {
+    "2026-11-26": {
+     "calls": 107,
+     "prompt_tokens": 425297,
+     "completion_tokens": 151093,
+     "total_tokens": 576390
+    }
+   }
+  }
+ },
+ "ledger_minus_records_tokens": 531211,
+ "ledger_minus_records_calls": 104
+}
